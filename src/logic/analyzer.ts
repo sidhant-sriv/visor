@@ -1,4 +1,4 @@
-import { Project } from 'ts-morph';
+import { Project, ScriptTarget } from 'ts-morph';
 import { FlowchartGenerator } from './FlowchartGenerator';
 
 /**
@@ -10,6 +10,7 @@ export function analyzeTypeScriptCode(code: string, position: number): string {
         const project = new Project({
             useInMemoryFileSystem: true,
             compilerOptions: {
+                target: ScriptTarget.ESNext,
                 allowJs: true,
             },
         });
