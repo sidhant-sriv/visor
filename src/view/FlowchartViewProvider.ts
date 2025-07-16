@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { analyzeTypeScriptCode } from "../logic/analyzer";
+import { LocationMapEntry } from "../logic/FlowchartGenerator";
 
 const MERMAID_VERSION = "10.9.1";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
@@ -49,6 +50,13 @@ function getWebviewContent(flowchartSyntax: string, nonce: string): string {
                 width: 100%;
                 height: 100%;
             }
+            .highlighted > rect,
+            .highlighted > polygon,
+            .highlighted > circle,
+            .highlighted > path {
+                stroke: #007ACC !important;
+                stroke-width: 4px !important;
+            }
         </style>
     </head>
     <body>
@@ -58,15 +66,47 @@ ${flowchartSyntax}
             </div>
         </div>
         <script nonce="${nonce}">
+            const vscode = acquireVsCodeApi();
+
+            function onNodeClick(start, end) {
+                vscode.postMessage({
+                    command: 'highlightCode',
+                    payload: { start, end }
+                });
+            }
+
+            let highlightedNodeId = null;
+
+            window.addEventListener('message', event => {
+                const message = event.data;
+                switch (message.command) {
+                    case 'highlightNode':
+                        if (highlightedNodeId) {
+                            const oldElem = document.getElementById(highlightedNodeId);
+                            if (oldElem) oldElem.classList.remove('highlighted');
+                        }
+
+                        const newId = message.payload.nodeId;
+                        if (newId) {
+                            const newElem = document.getElementById(newId);
+                            if (newElem) newElem.classList.add('highlighted');
+                        }
+                        highlightedNodeId = newId;
+                        break;
+                }
+            });
+
             mermaid.initialize({ 
                 startOnLoad: true, 
                 theme: '${theme}',
+                securityLevel: 'loose',
                 flowchart: {
                     useMaxWidth: false,
                     htmlLabels: true,
                     curve: 'basis'
                 }
             });
+
             window.addEventListener('load', () => {
                 const svgElement = document.querySelector('.mermaid svg');
                 if (svgElement) {
@@ -87,6 +127,8 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "sidvis.flowchartView";
   private _view?: vscode.WebviewView;
   private _disposables: vscode.Disposable[] = [];
+  private _locationMap: LocationMapEntry[] = [];
+  private _currentFunctionRange: vscode.Range | undefined;
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -113,8 +155,44 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
 
     vscode.window.onDidChangeTextEditorSelection(
       (event) => {
-        if (event.textEditor === vscode.window.activeTextEditor) {
-          this.updateView(event.textEditor);
+        if (event.textEditor === vscode.window.activeTextEditor && this._view) {
+          const selection = event.selections[0];
+          if (
+            this._currentFunctionRange &&
+            this._currentFunctionRange.contains(selection)
+          ) {
+            const offset = event.textEditor.document.offsetAt(selection.active);
+            const entry = this._locationMap.find(
+              (e) => offset >= e.start && offset <= e.end
+            );
+            this._view.webview.postMessage({
+              command: "highlightNode",
+              payload: { nodeId: entry ? entry.nodeId : null },
+            });
+          } else {
+            this.updateView(event.textEditor);
+          }
+        }
+      },
+      null,
+      this._disposables
+    );
+
+    webviewView.webview.onDidReceiveMessage(
+      (message) => {
+        switch (message.command) {
+          case "highlightCode":
+            const { start, end } = message.payload;
+            const editor = vscode.window.activeTextEditor;
+            if (editor) {
+              const startPos = editor.document.positionAt(start);
+              const endPos = editor.document.positionAt(end);
+              const range = new vscode.Range(startPos, endPos);
+
+              editor.selection = new vscode.Selection(range.start, range.end);
+              editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+            }
+            break;
         }
       },
       null,
@@ -138,12 +216,34 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
 
     const position = editor.document.offsetAt(editor.selection.active);
     const document = editor.document;
-    const flowchartSyntax = analyzeTypeScriptCode(document.getText(), position);
-
-    this._view.webview.html = getWebviewContent(
-      flowchartSyntax,
-      this.getNonce()
+    const { flowchart, locationMap, functionRange } = analyzeTypeScriptCode(
+      document.getText(),
+      position
     );
+
+    this._locationMap = locationMap;
+    if (functionRange) {
+      this._currentFunctionRange = new vscode.Range(
+        document.positionAt(functionRange.start),
+        document.positionAt(functionRange.end)
+      );
+    } else {
+      this._currentFunctionRange = undefined;
+    }
+
+    this._view.webview.html = getWebviewContent(flowchart, this.getNonce());
+
+    // After updating the view, immediately highlight the node for the current cursor
+    const offset = editor.document.offsetAt(editor.selection.active);
+    const entry = this._locationMap.find(
+      (e) => offset >= e.start && offset <= e.end
+    );
+    if (this._view) {
+      this._view.webview.postMessage({
+        command: "highlightNode",
+        payload: { nodeId: entry ? entry.nodeId : null },
+      });
+    }
   }
 
   private getLoadingHtml(message: string): string {
