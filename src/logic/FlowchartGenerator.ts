@@ -24,6 +24,7 @@ import {
   BreakStatement,
   ContinueStatement,
   AwaitExpression,
+  Expression,
 } from "ts-morph";
 
 /**
@@ -555,6 +556,11 @@ export class FlowchartGenerator {
 
     if (Node.isPropertyAccessExpression(expression)) {
       const methodName = expression.getName();
+      const promiseMethods = ["then", "catch", "finally"];
+      if (promiseMethods.includes(methodName)) {
+        return this.processPromiseCallExpression(callExpr, exitId);
+      }
+
       const commonHOFs = [
         "map",
         "filter",
@@ -583,23 +589,7 @@ export class FlowchartGenerator {
           const conditionText = `For each item in ${collectionName}`;
           graph += `    ${loopId}{"${conditionText}"}\n`;
 
-          const body = callback.getBody();
-          let bodyResult: ProcessResult;
-
-          if (Node.isBlock(body)) {
-            bodyResult = this.processBlock(body, exitId);
-          } else {
-            // Concise arrow function with an expression body
-            const nodeId = this.generateNodeId("expr_stmt");
-            const text = this.escapeString(body.getText());
-            const bodyGraph = `    ${nodeId}["${text}"]\n`;
-            bodyResult = {
-              graph: bodyGraph,
-              entryNodeId: nodeId,
-              exitPoints: [{ id: nodeId }],
-              nodesConnectedToExit: new Set(),
-            };
-          }
+          const bodyResult = this.processCallback(callback, exitId);
 
           graph += bodyResult.graph;
 
@@ -639,6 +629,132 @@ export class FlowchartGenerator {
       exitPoints: [{ id: nodeId }],
       nodesConnectedToExit: new Set(),
     };
+  }
+
+  private processPromiseCallExpression(
+    callExpr: CallExpression,
+    exitId: string
+  ): ProcessResult {
+    const expression = callExpr.getExpression() as PropertyAccessExpression;
+    const methodName = expression.getName();
+    const promiseSourceExpr = expression.getExpression();
+
+    // Recursively process the promise chain
+    let sourceResult: ProcessResult;
+    if (Node.isCallExpression(promiseSourceExpr)) {
+      sourceResult = this.processCallExpression(promiseSourceExpr, exitId);
+    } else {
+      const nodeId = this.generateNodeId("expr");
+      const nodeText = this.escapeString(promiseSourceExpr.getText());
+      let graph = `    ${nodeId}["${nodeText}"]\n`;
+      const start = promiseSourceExpr.getStart();
+      const end = promiseSourceExpr.getEnd();
+      this.locationMap.push({ start, end, nodeId });
+      graph += `    click ${nodeId} call onNodeClick(${start}, ${end})\n`;
+      sourceResult = {
+        graph,
+        entryNodeId: nodeId,
+        exitPoints: [{ id: nodeId }],
+        nodesConnectedToExit: new Set(),
+      };
+    }
+
+    let graph = sourceResult.graph;
+    const nodesConnectedToExit = new Set(sourceResult.nodesConnectedToExit);
+    const newExitPoints = [];
+
+    const callback = callExpr.getArguments()[0];
+    if (
+      callback &&
+      (Node.isArrowFunction(callback) || Node.isFunctionExpression(callback))
+    ) {
+      const callbackResult = this.processCallback(callback, exitId);
+      graph += callbackResult.graph;
+      callbackResult.nodesConnectedToExit.forEach((n) =>
+        nodesConnectedToExit.add(n)
+      );
+
+      if (callbackResult.entryNodeId) {
+        const edgeLabel = methodName === "catch" ? "rejected" : methodName;
+        sourceResult.exitPoints.forEach((ep) => {
+          if (!sourceResult.nodesConnectedToExit.has(ep.id)) {
+            graph += `    ${ep.id} -- "${edgeLabel}" --> ${callbackResult.entryNodeId}\n`;
+          }
+        });
+      }
+      newExitPoints.push(...callbackResult.exitPoints);
+    } else {
+      // No callback, so just pass through
+      newExitPoints.push(...sourceResult.exitPoints);
+    }
+
+    // For `then` and `finally`, the original fulfilled/rejected path might continue
+    // if the handler is not there or completes successfully.
+    // This is a simplification that assumes the happy path if a handler exists.
+    if (methodName === "then") {
+      // Unhandled rejections from `sourceResult` pass through.
+      // We assume `sourceResult.exitPoints` represents the fulfilled path if we connect it.
+      // And we lose the rejection path. This is a simplification.
+    }
+
+    // if there's a second argument to .then (onRejected)
+    const onRejected = methodName === "then" && callExpr.getArguments()[1];
+    if (
+      onRejected &&
+      (Node.isArrowFunction(onRejected) || Node.isFunctionExpression(onRejected))
+    ) {
+      const onRejectedResult = this.processCallback(onRejected, exitId);
+      graph += onRejectedResult.graph;
+      onRejectedResult.nodesConnectedToExit.forEach((n) =>
+        nodesConnectedToExit.add(n)
+      );
+
+      if (onRejectedResult.entryNodeId) {
+        sourceResult.exitPoints.forEach((ep) => {
+          if (!sourceResult.nodesConnectedToExit.has(ep.id)) {
+            graph += `    ${ep.id} -- "rejected" --> ${onRejectedResult.entryNodeId}\n`;
+          }
+        });
+      }
+      newExitPoints.push(...onRejectedResult.exitPoints);
+    }
+
+    return {
+      graph,
+      entryNodeId: sourceResult.entryNodeId,
+      exitPoints: newExitPoints,
+      nodesConnectedToExit,
+    };
+  }
+
+  private processCallback(
+    callback: ArrowFunction | FunctionExpression,
+    exitId: string,
+    loopContext?: LoopContext
+  ): ProcessResult {
+    const body = callback.getBody();
+    if (Node.isBlock(body)) {
+      return this.processBlock(body, exitId, loopContext);
+    } else {
+      // Concise arrow function with an expression body.
+      // We process it as a single statement.
+      const expr = body as Expression;
+      const nodeId = this.generateNodeId("expr_stmt");
+      const text = this.escapeString(expr.getText());
+      let graph = `    ${nodeId}["${text}"]\n`;
+
+      const start = expr.getStart();
+      const end = expr.getEnd();
+      this.locationMap.push({ start, end, nodeId });
+      graph += `    click ${nodeId} call onNodeClick(${start}, ${end})\n`;
+
+      return {
+        graph,
+        entryNodeId: nodeId,
+        exitPoints: [{ id: nodeId }],
+        nodesConnectedToExit: new Set(),
+      };
+    }
   }
 
   private createTernaryGraph(
