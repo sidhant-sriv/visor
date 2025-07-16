@@ -31,10 +31,10 @@ import {
  * This allows for a robust recursive analysis of the code's control flow.
  */
 export interface ProcessResult {
-  graph: string; 
-  entryNodeId: string | null; 
-  exitPoints: { id: string; label?: string }[]; 
-  nodesConnectedToExit: Set<string>; 
+  graph: string;
+  entryNodeId: string | null;
+  exitPoints: { id: string; label?: string }[];
+  nodesConnectedToExit: Set<string>;
 }
 
 interface LoopContext {
@@ -300,7 +300,10 @@ export class FlowchartGenerator {
     };
   }
 
-  private processReturnStatement(returnStmt: import("ts-morph").ReturnStatement, exitId: string): ProcessResult {
+  private processReturnStatement(
+    returnStmt: import("ts-morph").ReturnStatement,
+    exitId: string
+  ): ProcessResult {
     const nodeId = this.generateNodeId("ret");
     const text = this.escapeString(returnStmt.getText());
     let graph = `    ${nodeId}[/"${text}"/]\n`;
@@ -314,7 +317,10 @@ export class FlowchartGenerator {
     };
   }
 
-  private processBreakStatement(breakStmt: BreakStatement, loopContext: LoopContext): ProcessResult {
+  private processBreakStatement(
+    breakStmt: BreakStatement,
+    loopContext: LoopContext
+  ): ProcessResult {
     const nodeId = this.generateNodeId("break");
     const graph = `    ${nodeId}[/break/]\n    ${nodeId} --> ${loopContext.breakTargetId}\n`;
     return {
@@ -325,7 +331,10 @@ export class FlowchartGenerator {
     };
   }
 
-  private processContinueStatement(continueStmt: ContinueStatement, loopContext: LoopContext): ProcessResult {
+  private processContinueStatement(
+    continueStmt: ContinueStatement,
+    loopContext: LoopContext
+  ): ProcessResult {
     const nodeId = this.generateNodeId("continue");
     const graph = `    ${nodeId}[/continue/]\n    ${nodeId} --> ${loopContext.continueTargetId}\n`;
     return {

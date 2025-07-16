@@ -1,17 +1,20 @@
-import * as vscode from 'vscode';
-import { analyzeTypeScriptCode } from '../logic/analyzer';
+import * as vscode from "vscode";
+import { analyzeTypeScriptCode } from "../logic/analyzer";
 
-const MERMAID_VERSION = '10.9.1';
-const SVG_PAN_ZOOM_VERSION = '3.6.1';
+const MERMAID_VERSION = "10.9.1";
+const SVG_PAN_ZOOM_VERSION = "3.6.1";
 
 /**
  * Generates the complete HTML content for the webview panel.
  * This includes the Mermaid.js library and the generated flowchart syntax.
  */
 function getWebviewContent(flowchartSyntax: string, nonce: string): string {
-    const theme = vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark ? 'dark' : 'default';
-    
-    return `<!DOCTYPE html>
+  const theme =
+    vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+      ? "dark"
+      : "default";
+
+  return `<!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
@@ -81,57 +84,70 @@ ${flowchartSyntax}
 }
 
 export class FlowchartViewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'sidvis.flowchartView';
-    private _view?: vscode.WebviewView;
-    private _disposables: vscode.Disposable[] = [];
+  public static readonly viewType = "sidvis.flowchartView";
+  private _view?: vscode.WebviewView;
+  private _disposables: vscode.Disposable[] = [];
 
-    constructor(private readonly _extensionUri: vscode.Uri) {}
+  constructor(private readonly _extensionUri: vscode.Uri) {}
 
-    public resolveWebviewView(
-        webviewView: vscode.WebviewView,
-        context: vscode.WebviewViewResolveContext,
-        _token: vscode.CancellationToken,
-    ) {
-        this._view = webviewView;
-        webviewView.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [this._extensionUri]
-        };
+  public resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ) {
+    this._view = webviewView;
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this._extensionUri],
+    };
 
-        this.updateView(vscode.window.activeTextEditor);
+    this.updateView(vscode.window.activeTextEditor);
 
-        vscode.window.onDidChangeActiveTextEditor(editor => {
-            this.updateView(editor);
-        }, null, this._disposables);
+    vscode.window.onDidChangeActiveTextEditor(
+      (editor) => {
+        this.updateView(editor);
+      },
+      null,
+      this._disposables
+    );
 
-        vscode.window.onDidChangeTextEditorSelection(event => {
-            if (event.textEditor === vscode.window.activeTextEditor) {
-                this.updateView(event.textEditor);
-            }
-        }, null, this._disposables);
+    vscode.window.onDidChangeTextEditorSelection(
+      (event) => {
+        if (event.textEditor === vscode.window.activeTextEditor) {
+          this.updateView(event.textEditor);
+        }
+      },
+      null,
+      this._disposables
+    );
+  }
+
+  private updateView(editor: vscode.TextEditor | undefined) {
+    if (!this._view) {
+      return;
     }
 
-    private updateView(editor: vscode.TextEditor | undefined) {
-        if (!this._view) {
-            return;
-        }
-
-        if (!editor) {
-            this._view.webview.html = this.getLoadingHtml("Please open a file to see the flowchart.");
-            return;
-        }
-        
-        this._view.webview.html = this.getLoadingHtml("Generating flowchart...");
-
-        const position = editor.document.offsetAt(editor.selection.active);
-        const document = editor.document;
-        const flowchartSyntax = analyzeTypeScriptCode(document.getText(), position);
-
-        this._view.webview.html = getWebviewContent(flowchartSyntax, this.getNonce());
+    if (!editor) {
+      this._view.webview.html = this.getLoadingHtml(
+        "Please open a file to see the flowchart."
+      );
+      return;
     }
-    
-    private getLoadingHtml(message: string): string {
-        return `<!DOCTYPE html>
+
+    this._view.webview.html = this.getLoadingHtml("Generating flowchart...");
+
+    const position = editor.document.offsetAt(editor.selection.active);
+    const document = editor.document;
+    const flowchartSyntax = analyzeTypeScriptCode(document.getText(), position);
+
+    this._view.webview.html = getWebviewContent(
+      flowchartSyntax,
+      this.getNonce()
+    );
+  }
+
+  private getLoadingHtml(message: string): string {
+    return `<!DOCTYPE html>
         <html lang="en">
         <head>
             <meta charset="UTF-8">
@@ -155,23 +171,24 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
             <p>${message}</p>
         </body>
         </html>`;
-    }
+  }
 
-    private getNonce() {
-        let text = '';
-        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        for (let i = 0; i < 32; i++) {
-            text += possible.charAt(Math.floor(Math.random() * possible.length));
-        }
-        return text;
+  private getNonce() {
+    let text = "";
+    const possible =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    for (let i = 0; i < 32; i++) {
+      text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
+    return text;
+  }
 
-    public dispose() {
-        while (this._disposables.length) {
-            const x = this._disposables.pop();
-            if (x) {
-                x.dispose();
-            }
-        }
+  public dispose() {
+    while (this._disposables.length) {
+      const x = this._disposables.pop();
+      if (x) {
+        x.dispose();
+      }
     }
-} 
+  }
+}
