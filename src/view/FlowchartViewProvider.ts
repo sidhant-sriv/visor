@@ -216,10 +216,13 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
 
     const position = editor.document.offsetAt(editor.selection.active);
     const document = editor.document;
+
+    console.time("analyzeTypeScriptCode");
     const { flowchart, locationMap, functionRange } = analyzeTypeScriptCode(
       document.getText(),
       position
     );
+    console.timeEnd("analyzeTypeScriptCode");
 
     this._locationMap = locationMap;
     if (functionRange) {
