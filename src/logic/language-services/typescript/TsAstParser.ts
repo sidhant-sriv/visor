@@ -23,7 +23,7 @@ import {
   ContinueStatement,
   Expression,
 } from "ts-morph";
-import { FlowchartIR, FlowchartNode, FlowchartEdge, LocationMapEntry } from '../ir/ir';
+import { FlowchartIR, FlowchartNode, FlowchartEdge, LocationMapEntry } from '../../../ir/ir';
 
 
 /**
