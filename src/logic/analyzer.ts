@@ -1,5 +1,7 @@
 import { Project, ScriptTarget } from "ts-morph";
-import { FlowchartGenerator, LocationMapEntry } from "./FlowchartGenerator";
+import { TsAstParser } from "./TsAstParser";
+import { MermaidGenerator } from "./MermaidGenerator";
+import { FlowchartIR, LocationMapEntry } from "../ir/ir";
 
 /**
  * Orchestrates the analysis of a TypeScript code string.
@@ -23,8 +25,13 @@ export function analyzeTypeScriptCode(
     });
 
     const sourceFile = project.createSourceFile("temp.ts", code);
-    const generator = new FlowchartGenerator();
-    return generator.generateFlowchart(sourceFile, position);
+    const parser = new TsAstParser();
+    const ir = parser.generateFlowchart(sourceFile, position);
+
+    const mermaidGenerator = new MermaidGenerator();
+    const flowchart = mermaidGenerator.generate(ir);
+
+    return { flowchart, locationMap: ir.locationMap, functionRange: ir.functionRange };
   } catch (error: any) {
     console.error("Error analyzing TypeScript code:", error);
     const errorMessage = `graph TD\n    A[Error: Unable to parse code]\n    A --> B["${

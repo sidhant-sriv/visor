@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { analyzeTypeScriptCode } from "../logic/analyzer";
-import { LocationMapEntry } from "../logic/FlowchartGenerator";
+import { LocationMapEntry } from "../ir/ir";
 
 const MERMAID_VERSION = "10.9.1";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
