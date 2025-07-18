@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
-import { analyzeTypeScriptCode } from "../logic/analyzer";
-import { LocationMapEntry } from "../logic/FlowchartGenerator";
+import { analyzeCode } from "../logic/analyzer";
+import { LocationMapEntry } from "../ir/ir";
 
 const MERMAID_VERSION = "10.9.1";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
@@ -217,12 +217,13 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
     const position = editor.document.offsetAt(editor.selection.active);
     const document = editor.document;
 
-    console.time("analyzeTypeScriptCode");
-    const { flowchart, locationMap, functionRange } = analyzeTypeScriptCode(
+    console.time("analyzeCode");
+    const { flowchart, locationMap, functionRange } = analyzeCode(
       document.getText(),
-      position
+      position,
+      document.languageId
     );
-    console.timeEnd("analyzeTypeScriptCode");
+    console.timeEnd("analyzeCode");
 
     this._locationMap = locationMap;
     if (functionRange) {

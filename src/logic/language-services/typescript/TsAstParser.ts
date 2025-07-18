@@ -14,8 +14,6 @@ import {
   VariableDeclaration,
   TryStatement,
   ConditionalExpression,
-  VariableStatement,
-  ExpressionStatement,
   CallExpression,
   PropertyAccessExpression,
   ForOfStatement,
@@ -23,26 +21,19 @@ import {
   SwitchStatement,
   BreakStatement,
   ContinueStatement,
-  AwaitExpression,
   Expression,
 } from "ts-morph";
+import { FlowchartIR, FlowchartNode, FlowchartEdge, LocationMapEntry } from '../../../ir/ir';
 
-/**
- * Defines the structure for a location map entry, linking a node ID to a specific range in the source code.
- */
-export interface LocationMapEntry {
-  start: number;
-  end: number;
-  nodeId: string;
-}
 
 /**
  * Defines the structure for the result of processing any AST node (statement or block).
  * This allows for a robust recursive analysis of the code's control flow.
  */
 export interface ProcessResult {
-  graph: string;
-  entryNodeId: string | null;
+  nodes: FlowchartNode[];
+  edges: FlowchartEdge[];
+  entryNodeId: string;
   exitPoints: { id: string; label?: string }[];
   nodesConnectedToExit: Set<string>;
 }
@@ -55,9 +46,16 @@ interface LoopContext {
 /**
  * The core class responsible for analyzing the AST and generating the flowchart.
  */
-export class FlowchartGenerator {
+export class TsAstParser {
   private nodeIdCounter = 0;
   private locationMap: LocationMapEntry[] = [];
+  private readonly nodeStyles = {
+      terminator: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;',
+      decision: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;',
+      process: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;',
+      special: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000',
+      break: 'fill:#eee,stroke:#000,stroke-width:2px,color:#000',
+  };
 
   private generateNodeId(prefix: string): string {
     return `${prefix}_${this.nodeIdCounter++}`;
@@ -78,18 +76,15 @@ export class FlowchartGenerator {
   public generateFlowchart(
     sourceFile: SourceFile,
     position: number
-  ): {
-    flowchart: string;
-    locationMap: LocationMapEntry[];
-    functionRange?: { start: number; end: number };
-  } {
+  ): FlowchartIR {
     this.nodeIdCounter = 0;
     this.locationMap = [];
 
     const descendant = sourceFile.getDescendantAtPos(position);
     if (!descendant) {
       return {
-        flowchart: 'graph TD\n    A["No code found at cursor position."];',
+        nodes: [{ id: 'A', label: 'No code found at cursor position.', shape: 'rect' }],
+        edges: [],
         locationMap: [],
       };
     }
@@ -112,8 +107,8 @@ export class FlowchartGenerator {
 
     if (!functionToAnalyze) {
       return {
-        flowchart:
-          'graph TD\n    A["Place cursor inside a function or method to generate a flowchart."];',
+        nodes: [{ id: 'A', label: 'Place cursor inside a function or method to generate a flowchart.', shape: 'rect' }],
+        edges: [],
         locationMap: [],
       };
     }
@@ -132,47 +127,50 @@ export class FlowchartGenerator {
       }
     }
     const finalFunctionName = functionName || "[anonymous]";
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
 
-    let flowchart = "graph TD\n";
+
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
-    flowchart += `    ${entryId}(("start: ${finalFunctionName}"))\n`;
-    flowchart += `    ${exitId}(("end"))\n`;
-    flowchart += `    style ${entryId} fill:#d4edda,stroke:#155724,stroke-width:2px,color:#155724\n`;
-    flowchart += `    style ${exitId} fill:#f8d7da,stroke:#721c24,stroke-width:2px,color:#721c24\n`;
+    nodes.push({ id: entryId, label: `start: ${finalFunctionName}`, shape: 'round', style: this.nodeStyles.terminator });
+    nodes.push({ id: exitId, label: 'end', shape: 'round', style: this.nodeStyles.terminator });
 
     const body = functionToAnalyze.getBody();
 
     if (body && Node.isBlock(body)) {
       const bodyResult = this.processBlock(body, exitId);
-      flowchart += bodyResult.graph;
+      nodes.push(...bodyResult.nodes);
+      edges.push(...bodyResult.edges);
+
 
       if (bodyResult.entryNodeId) {
-        flowchart += `    ${entryId} --> ${bodyResult.entryNodeId}\n`;
+        edges.push({ from: entryId, to: bodyResult.entryNodeId });
       } else {
-        flowchart += `    ${entryId} --> ${exitId}\n`;
+        edges.push({ from: entryId, to: exitId });
       }
 
       bodyResult.exitPoints.forEach((exitPoint) => {
         if (!bodyResult.nodesConnectedToExit.has(exitPoint.id)) {
-          const label = exitPoint.label
-            ? ` -- "${exitPoint.label}" --> `
-            : ` --> `;
-          flowchart += `    ${exitPoint.id}${label}${exitId}\n`;
+            edges.push({ from: exitPoint.id, to: exitId, label: exitPoint.label });
         }
       });
     } else {
-      flowchart += `    ${entryId} --> ${exitId}\n`;
+      edges.push({ from: entryId, to: exitId });
     }
 
     return {
-      flowchart,
+      nodes,
+      edges,
       locationMap: this.locationMap,
       functionRange: {
         start: functionToAnalyze.getStart(),
         end: functionToAnalyze.getEnd(),
       },
+      title: `Flowchart for ${finalFunctionName}`,
+      entryNodeId: entryId,
+      exitNodeId: exitId,
     };
   }
 
@@ -185,8 +183,9 @@ export class FlowchartGenerator {
     exitId: string,
     loopContext?: LoopContext
   ): ProcessResult {
-    let graph = "";
-    let entryNodeId: string | null = null;
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    let entryNodeId: string = "";
     const nodesConnectedToExit = new Set<string>();
     let lastExitPoints: { id: string; label?: string }[] = [];
 
@@ -194,8 +193,9 @@ export class FlowchartGenerator {
 
     if (statements.length === 0) {
       return {
-        graph: "",
-        entryNodeId: null,
+        nodes: [],
+        edges: [],
+        entryNodeId: "",
         exitPoints: [],
         nodesConnectedToExit,
       };
@@ -203,21 +203,19 @@ export class FlowchartGenerator {
 
     for (const statement of statements) {
       const result = this.processStatement(statement, exitId, loopContext);
-      graph += result.graph;
+      nodes.push(...result.nodes);
+      edges.push(...result.edges);
 
       if (lastExitPoints.length > 0) {
         // Connect the exits of the previous statement to the entry of the current one.
         lastExitPoints.forEach((exitPoint) => {
           if (result.entryNodeId) {
-            const label = exitPoint.label
-              ? ` -- "${exitPoint.label}" --> `
-              : ` --> `;
-            graph += `    ${exitPoint.id}${label}${result.entryNodeId}\n`;
+            edges.push({ from: exitPoint.id, to: result.entryNodeId, label: exitPoint.label });
           }
         });
       } else {
         // This is the first statement in the block, so it's the entry point.
-        entryNodeId = result.entryNodeId;
+        entryNodeId = result.entryNodeId || "";
       }
 
       lastExitPoints = result.exitPoints;
@@ -225,7 +223,8 @@ export class FlowchartGenerator {
     }
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId,
       exitPoints: lastExitPoints,
       nodesConnectedToExit,
@@ -322,16 +321,15 @@ export class FlowchartGenerator {
   private processAwaitExpression(statement: Statement): ProcessResult {
     const nodeId = this.generateNodeId("await_stmt");
     const nodeText = this.escapeString(statement.getText());
-    let graph = `    ${nodeId}[/"${nodeText}"/]\n`;
-    graph += `    style ${nodeId} stroke:#004085,stroke-width:2px\n`;
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: nodeText, shape: 'stadium', style: this.nodeStyles.special }];
 
     const start = statement.getStart();
     const end = statement.getEnd();
     this.locationMap.push({ start, end, nodeId });
-    graph += `    click ${nodeId} call onNodeClick(${start}, ${end})\n`;
 
     return {
-      graph,
+      nodes,
+      edges: [],
       entryNodeId: nodeId,
       exitPoints: [{ id: nodeId }],
       nodesConnectedToExit: new Set<string>(),
@@ -344,18 +342,16 @@ export class FlowchartGenerator {
   ): ProcessResult {
     const nodeId = this.generateNodeId("return_stmt");
     const nodeText = this.escapeString(returnStmt.getText());
-    let graph = `    ${nodeId}{{"${nodeText}"}}\n`;
-    graph += `    style ${nodeId} fill:#fff3cd,stroke:#856404,stroke-width:2px\n`;
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: nodeText, shape: 'stadium', style: this.nodeStyles.special }];
+    const edges: FlowchartEdge[] = [{ from: nodeId, to: exitId }];
 
     const start = returnStmt.getStart();
     const end = returnStmt.getEnd();
     this.locationMap.push({ start, end, nodeId });
-    graph += `    click ${nodeId} call onNodeClick(${start}, ${end})\n`;
-
-    graph += `    ${nodeId} --> ${exitId}\n`;
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: nodeId,
       exitPoints: [],
       nodesConnectedToExit: new Set<string>().add(nodeId),
@@ -367,17 +363,16 @@ export class FlowchartGenerator {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("break_stmt");
-    let graph = `    ${nodeId}[("break")]\n`;
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: 'break', shape: 'stadium', style: this.nodeStyles.break }];
+    const edges: FlowchartEdge[] = [{ from: nodeId, to: loopContext.breakTargetId }];
 
     const start = breakStmt.getStart();
     const end = breakStmt.getEnd();
     this.locationMap.push({ start, end, nodeId });
-    graph += `    click ${nodeId} call onNodeClick(${start}, ${end})\n`;
-
-    graph += `    ${nodeId} --> ${loopContext.breakTargetId}\n`;
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: nodeId,
       exitPoints: [],
       nodesConnectedToExit: new Set<string>().add(nodeId),
@@ -389,17 +384,16 @@ export class FlowchartGenerator {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("continue_stmt");
-    let graph = `    ${nodeId}[("continue")]\n`;
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: 'continue', shape: 'stadium', style: this.nodeStyles.break }];
+    const edges: FlowchartEdge[] = [{ from: nodeId, to: loopContext.continueTargetId }];
 
     const start = continueStmt.getStart();
     const end = continueStmt.getEnd();
     this.locationMap.push({ start, end, nodeId });
-    graph += `    click ${nodeId} call onNodeClick(${start}, ${end})\n`;
-
-    graph += `    ${nodeId} --> ${loopContext.continueTargetId}\n`;
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: nodeId,
       exitPoints: [],
       nodesConnectedToExit: new Set<string>().add(nodeId),
@@ -409,15 +403,15 @@ export class FlowchartGenerator {
   private processDefaultStatement(statement: Statement): ProcessResult {
     const nodeId = this.generateNodeId("stmt");
     const nodeText = this.escapeString(statement.getText());
-    let graph = `    ${nodeId}["${nodeText}"]\n`;
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: nodeText, shape: 'rect' }];
 
     const start = statement.getStart();
     const end = statement.getEnd();
     this.locationMap.push({ start, end, nodeId });
-    graph += `    click ${nodeId} call onNodeClick(${start}, ${end})\n`;
 
     return {
-      graph,
+      nodes,
+      edges: [],
       entryNodeId: nodeId,
       exitPoints: [{ id: nodeId }],
       nodesConnectedToExit: new Set<string>(),
@@ -429,89 +423,75 @@ export class FlowchartGenerator {
     exitId: string,
     loopContext?: LoopContext
   ): ProcessResult {
-    let graph = "";
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
     const nodesConnectedToExit = new Set<string>();
     const switchExitPoints: { id: string; label?: string }[] = [];
 
     const exprText = this.escapeString(switchStmt.getExpression().getText());
     const switchEntryId = this.generateNodeId("switch");
-    graph += `    ${switchEntryId}{"switch (${exprText})"}\n`;
+    nodes.push({ id: switchEntryId, label: `switch (${exprText})`, shape: 'diamond', style: this.nodeStyles.decision });
 
-    let lastCaseExitPoints: { id: string; label?: string }[] | null = null;
-    let lastCaseEntryId: string | null = null;
-    let defaultClause: import("ts-morph").DefaultClause | undefined;
-
+    let lastCaseExitPoints: { id:string; label?: string }[] | null = null;
+    
     const caseClauses = switchStmt.getCaseBlock().getClauses();
+    const defaultClause = caseClauses.find(Node.isDefaultClause);
 
-    for (const clause of caseClauses) {
-      if (Node.isDefaultClause(clause)) {
-        defaultClause = clause;
-        continue; // Handle default case at the end.
+    for (const caseClause of caseClauses) {
+      if (Node.isDefaultClause(caseClause)) {
+        continue;
       }
 
-      if (Node.isCaseClause(clause)) {
+      if (Node.isCaseClause(caseClause)) {
         const caseExprText = this.escapeString(
-          clause.getExpression().getText()
+          caseClause.getExpression()?.getText() || ""
         );
         const caseEntryId = this.generateNodeId("case");
-        graph += `    ${caseEntryId}["case ${caseExprText}"]\n`;
+        nodes.push({ id: caseEntryId, label: `case ${caseExprText}`, shape: 'rect' });
 
         if (lastCaseExitPoints) {
-          // Handle fall-through from previous case
           lastCaseExitPoints.forEach((ep) => {
-            graph += `    ${ep.id} --> ${caseEntryId}\n`;
+            edges.push({ from: ep.id, to: caseEntryId });
           });
         } else {
-          // First case, connect from switch entry
-          graph += `    ${switchEntryId} --> ${caseEntryId}\n`;
+          edges.push({ from: switchEntryId, to: caseEntryId });
         }
 
-        const statements = clause.getStatements();
-        const statementsWithoutBreak = statements.filter(
-          (s) => !Node.isBreakStatement(s)
-        );
-        const hasBreak = statements.length !== statementsWithoutBreak.length;
-
-        if (statementsWithoutBreak.length > 0) {
-          const block = clause.getChildSyntaxListOrThrow();
+        const statements = caseClause.getStatements();
+        if (statements.length > 0) {
+          const block = caseClause.getChildSyntaxListOrThrow();
           const blockResult = this.processBlock(
             block as unknown as Block,
             exitId,
             loopContext
           );
-          graph += blockResult.graph;
+          nodes.push(...blockResult.nodes);
+          edges.push(...blockResult.edges);
           blockResult.nodesConnectedToExit.forEach((n) =>
             nodesConnectedToExit.add(n)
           );
 
           if (blockResult.entryNodeId) {
-            graph += `    ${caseEntryId} --> ${blockResult.entryNodeId}\n`;
+            edges.push({ from: caseEntryId, to: blockResult.entryNodeId });
           }
           lastCaseExitPoints = blockResult.exitPoints;
         } else {
           lastCaseExitPoints = [{ id: caseEntryId }];
         }
-
-        if (hasBreak) {
-          lastCaseExitPoints.forEach((ep) => switchExitPoints.push(ep));
-          lastCaseExitPoints = null; // Reset for next case, no fall-through
-        }
       }
     }
 
-    // Handle default case
     if (defaultClause) {
       const defaultEntryId = this.generateNodeId("default");
-      graph += `    ${defaultEntryId}["default"]\n`;
+      nodes.push({ id: defaultEntryId, label: 'default', shape: 'rect' });
 
       if (lastCaseExitPoints) {
-        // Fall-through from last case
         lastCaseExitPoints.forEach((ep) => {
-          graph += `    ${ep.id} --> ${defaultEntryId}\n`;
+          edges.push({ from: ep.id, to: defaultEntryId });
         });
       }
-      // Connect from switch entry if no cases fell through
-      graph += `    ${switchEntryId} -- "default" --> ${defaultEntryId}\n`;
+      
+      edges.push({ from: switchEntryId, to: defaultEntryId, label: 'default' });
 
       const statements = defaultClause.getStatements();
       if (statements.length > 0) {
@@ -521,27 +501,32 @@ export class FlowchartGenerator {
           exitId,
           loopContext
         );
-        graph += blockResult.graph;
+        nodes.push(...blockResult.nodes);
+        edges.push(...blockResult.edges);
         blockResult.nodesConnectedToExit.forEach((n) =>
           nodesConnectedToExit.add(n)
         );
         if (blockResult.entryNodeId) {
-          graph += `    ${defaultEntryId} --> ${blockResult.entryNodeId}\n`;
+          edges.push({ from: defaultEntryId, to: blockResult.entryNodeId });
         }
         switchExitPoints.push(...blockResult.exitPoints);
       } else {
-        switchExitPoints.push({ id: defaultEntryId });
+         switchExitPoints.push({ id: defaultEntryId });
       }
-    } else if (lastCaseExitPoints) {
-      // Last case does not have a break and there is no default
-      switchExitPoints.push(...lastCaseExitPoints);
     }
 
-    // If no cases matched and no default, flow continues from switch
-    switchExitPoints.push({ id: switchEntryId, label: " " });
+
+    if (!defaultClause) {
+      if (lastCaseExitPoints) {
+         switchExitPoints.push(...lastCaseExitPoints);
+      }
+      switchExitPoints.push({ id: switchEntryId, label: " " });
+    }
+
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: switchEntryId,
       exitPoints: switchExitPoints,
       nodesConnectedToExit,
@@ -581,27 +566,29 @@ export class FlowchartGenerator {
           (Node.isArrowFunction(callback) ||
             Node.isFunctionExpression(callback))
         ) {
-          let graph = "";
+          let nodes: FlowchartNode[] = [];
+          let edges: FlowchartEdge[] = [];
           const loopId = this.generateNodeId(`hof_${methodName}`);
           const collectionName = this.escapeString(
             expression.getExpression().getText()
           );
           const conditionText = `For each item in ${collectionName}`;
-          graph += `    ${loopId}{"${conditionText}"}\n`;
+          nodes.push({ id: loopId, label: conditionText, shape: 'diamond', style: this.nodeStyles.decision });
 
           const bodyResult = this.processCallback(callback, exitId);
 
-          graph += bodyResult.graph;
+          nodes.push(...bodyResult.nodes);
+          edges.push(...bodyResult.edges);
 
           if (bodyResult.entryNodeId) {
-            graph += `    ${loopId} -- "Loop Body" --> ${bodyResult.entryNodeId}\n`;
+            edges.push({ from: loopId, to: bodyResult.entryNodeId, label: 'Loop Body' });
             bodyResult.exitPoints.forEach((ep) => {
               if (!bodyResult.nodesConnectedToExit.has(ep.id)) {
-                graph += `    ${ep.id} --> ${loopId}\n`;
+                edges.push({ from: ep.id, to: loopId });
               }
             });
           } else {
-            graph += `    ${loopId} -- "Loop Body" --> ${loopId}\n`;
+            edges.push({ from: loopId, to: loopId, label: 'Loop Body' });
           }
 
           const nodesConnectedToExit = new Set<string>();
@@ -610,7 +597,8 @@ export class FlowchartGenerator {
           );
 
           return {
-            graph,
+            nodes,
+            edges,
             entryNodeId: loopId,
             exitPoints: [{ id: loopId, label: "End Loop" }],
             nodesConnectedToExit,
@@ -622,9 +610,10 @@ export class FlowchartGenerator {
     // Default behavior for all other calls
     const nodeId = this.generateNodeId("stmt");
     const text = this.escapeString(callExpr.getText());
-    const graph = `    ${nodeId}["${text}"]\n`;
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: text, shape: 'rect' }];
     return {
-      graph,
+      nodes,
+      edges: [],
       entryNodeId: nodeId,
       exitPoints: [{ id: nodeId }],
       nodesConnectedToExit: new Set(),
@@ -646,20 +635,23 @@ export class FlowchartGenerator {
     } else {
       const nodeId = this.generateNodeId("expr");
       const nodeText = this.escapeString(promiseSourceExpr.getText());
-      let graph = `    ${nodeId}["${nodeText}"]\n`;
+      const nodes: FlowchartNode[] = [{ id: nodeId, label: nodeText, shape: 'rect' }];
+      const edges: FlowchartEdge[] = [{ from: nodeId, to: nodeId }];
       const start = promiseSourceExpr.getStart();
       const end = promiseSourceExpr.getEnd();
       this.locationMap.push({ start, end, nodeId });
-      graph += `    click ${nodeId} call onNodeClick(${start}, ${end})\n`;
-      sourceResult = {
-        graph,
+
+      return {
+        nodes,
+        edges: [],
         entryNodeId: nodeId,
         exitPoints: [{ id: nodeId }],
         nodesConnectedToExit: new Set(),
       };
     }
 
-    let graph = sourceResult.graph;
+    let nodes: FlowchartNode[] = [];
+    let edges: FlowchartEdge[] = [];
     const nodesConnectedToExit = new Set(sourceResult.nodesConnectedToExit);
     const newExitPoints = [];
 
@@ -669,7 +661,8 @@ export class FlowchartGenerator {
       (Node.isArrowFunction(callback) || Node.isFunctionExpression(callback))
     ) {
       const callbackResult = this.processCallback(callback, exitId);
-      graph += callbackResult.graph;
+      nodes.push(...callbackResult.nodes);
+      edges.push(...callbackResult.edges);
       callbackResult.nodesConnectedToExit.forEach((n) =>
         nodesConnectedToExit.add(n)
       );
@@ -678,7 +671,7 @@ export class FlowchartGenerator {
         const edgeLabel = methodName === "catch" ? "rejected" : methodName;
         sourceResult.exitPoints.forEach((ep) => {
           if (!sourceResult.nodesConnectedToExit.has(ep.id)) {
-            graph += `    ${ep.id} -- "${edgeLabel}" --> ${callbackResult.entryNodeId}\n`;
+            edges.push({ from: ep.id, to: callbackResult.entryNodeId, label: edgeLabel });
           }
         });
       }
@@ -704,7 +697,8 @@ export class FlowchartGenerator {
       (Node.isArrowFunction(onRejected) || Node.isFunctionExpression(onRejected))
     ) {
       const onRejectedResult = this.processCallback(onRejected, exitId);
-      graph += onRejectedResult.graph;
+      nodes.push(...onRejectedResult.nodes);
+      edges.push(...onRejectedResult.edges);
       onRejectedResult.nodesConnectedToExit.forEach((n) =>
         nodesConnectedToExit.add(n)
       );
@@ -712,7 +706,7 @@ export class FlowchartGenerator {
       if (onRejectedResult.entryNodeId) {
         sourceResult.exitPoints.forEach((ep) => {
           if (!sourceResult.nodesConnectedToExit.has(ep.id)) {
-            graph += `    ${ep.id} -- "rejected" --> ${onRejectedResult.entryNodeId}\n`;
+            edges.push({ from: ep.id, to: onRejectedResult.entryNodeId, label: 'rejected' });
           }
         });
       }
@@ -720,7 +714,8 @@ export class FlowchartGenerator {
     }
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: sourceResult.entryNodeId,
       exitPoints: newExitPoints,
       nodesConnectedToExit,
@@ -741,15 +736,16 @@ export class FlowchartGenerator {
       const expr = body as Expression;
       const nodeId = this.generateNodeId("expr_stmt");
       const text = this.escapeString(expr.getText());
-      let graph = `    ${nodeId}["${text}"]\n`;
+      const nodes: FlowchartNode[] = [{ id: nodeId, label: text, shape: 'rect' }];
+      const edges: FlowchartEdge[] = [{ from: nodeId, to: nodeId }];
 
       const start = expr.getStart();
       const end = expr.getEnd();
       this.locationMap.push({ start, end, nodeId });
-      graph += `    click ${nodeId} call onNodeClick(${start}, ${end})\n`;
 
       return {
-        graph,
+        nodes,
+        edges: [],
         entryNodeId: nodeId,
         exitPoints: [{ id: nodeId }],
         nodesConnectedToExit: new Set(),
@@ -764,24 +760,27 @@ export class FlowchartGenerator {
   ): ProcessResult {
     const conditionId = this.generateNodeId("ternary_cond");
     const conditionText = this.escapeString(condExpr.getCondition().getText());
-    let graph = `    ${conditionId}{"${conditionText}"}\n`;
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    nodes.push({ id: conditionId, label: conditionText, shape: 'diamond', style: this.nodeStyles.decision });
+
 
     const start = condExpr.getStart();
     const end = condExpr.getEnd();
     this.locationMap.push({ start, end, nodeId: conditionId });
-    graph += `    click ${conditionId} call onNodeClick(${start}, ${end})\n`;
 
     const thenNodeId = this.generateNodeId("ternary_then");
-    graph += `    ${thenNodeId}["${this.escapeString(thenText)}"]\n`;
-    graph += `    ${conditionId} -- "Yes" --> ${thenNodeId}\n`;
+    nodes.push({ id: thenNodeId, label: this.escapeString(thenText), shape: 'rect' });
+    edges.push({ from: conditionId, to: thenNodeId, label: 'Yes' });
 
     const elseNodeId = this.generateNodeId("ternary_else");
-    graph += `    ${elseNodeId}["${this.escapeString(elseText)}"]\n`;
-    graph += `    ${conditionId} -- "No" --> ${elseNodeId}\n`;
+    nodes.push({ id: elseNodeId, label: this.escapeString(elseText), shape: 'rect' });
+    edges.push({ from: conditionId, to: elseNodeId, label: 'No' });
 
     const exitPoints = [{ id: thenNodeId }, { id: elseNodeId }];
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: conditionId,
       exitPoints,
       nodesConnectedToExit: new Set(),
@@ -798,12 +797,13 @@ export class FlowchartGenerator {
   ): ProcessResult {
     const condition = this.escapeString(ifStmt.getExpression().getText());
     const conditionId = this.generateNodeId("if_cond");
-    let graph = `    ${conditionId}{"${condition}"}\n`;
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    nodes.push({ id: conditionId, label: condition, shape: 'diamond', style: this.nodeStyles.decision });
 
     const start = ifStmt.getStart();
     const end = ifStmt.getEnd();
     this.locationMap.push({ start, end, nodeId: conditionId });
-    graph += `    click ${conditionId} call onNodeClick(${start}, ${end})\n`;
 
     let current = ifStmt;
     const exitPoints: { id: string; label?: string }[] = [];
@@ -815,9 +815,10 @@ export class FlowchartGenerator {
       exitId,
       loopContext
     );
-    graph += thenResult.graph;
+    nodes.push(...thenResult.nodes);
+    edges.push(...thenResult.edges);
     if (thenResult.entryNodeId) {
-      graph += `    ${conditionId} -- "Yes" --> ${thenResult.entryNodeId}\n`;
+      edges.push({ from: conditionId, to: thenResult.entryNodeId, label: 'Yes' });
     }
     exitPoints.push(...thenResult.exitPoints);
     thenResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
@@ -830,9 +831,10 @@ export class FlowchartGenerator {
         exitId,
         loopContext
       );
-      graph += elseResult.graph;
+      nodes.push(...elseResult.nodes);
+      edges.push(...elseResult.edges);
       if (elseResult.entryNodeId) {
-        graph += `    ${conditionId} -- "No" --> ${elseResult.entryNodeId}\n`;
+        edges.push({ from: conditionId, to: elseResult.entryNodeId, label: 'No' });
       }
       exitPoints.push(...elseResult.exitPoints);
       elseResult.nodesConnectedToExit.forEach((n) =>
@@ -844,7 +846,8 @@ export class FlowchartGenerator {
     }
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: conditionId,
       exitPoints,
       nodesConnectedToExit,
@@ -859,90 +862,75 @@ export class FlowchartGenerator {
     exitId: string,
     loopContext?: LoopContext
   ): ProcessResult {
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+
     const tryBlock = tryStmt.getTryBlock();
     const catchClause = tryStmt.getCatchClause();
     const finallyBlock = tryStmt.getFinallyBlock();
 
     const entryNodeId = this.generateNodeId("try_entry");
-    let graph = `    ${entryNodeId}[("Try")]\n`;
+    nodes.push({ id: entryNodeId, label: "Try", shape: "stadium", style: this.nodeStyles.special });
 
     const start = tryStmt.getStart();
     const end = tryStmt.getEnd();
     this.locationMap.push({ start, end, nodeId: entryNodeId });
-    graph += `    click ${entryNodeId} call onNodeClick(${start}, ${end})\n`;
 
-    const exitPoints: { id: string; label?: string }[] = [];
-    const nodesConnectedToExit = new Set<string>();
+    let lastExitPoints: { id: string; label?: string }[] = [];
 
     const tryResult = this.processBlock(tryBlock, exitId, loopContext);
-    graph += tryResult.graph;
+    nodes.push(...tryResult.nodes);
+    edges.push(...tryResult.edges);
     tryResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+    if (tryResult.entryNodeId) {
+      edges.push({ from: entryNodeId, to: tryResult.entryNodeId });
+    }
+    lastExitPoints.push(...tryResult.exitPoints);
+    
+    const catchResult = catchClause
+      ? this.processBlock(catchClause.getBlock(), exitId, loopContext)
+      : null;
 
-    if (catchClause) {
-      const catchBlock = catchClause.getBlock();
-      const catchResult = this.processBlock(catchBlock, exitId, loopContext);
-      graph += catchResult.graph;
+    if (catchResult) {
+      nodes.push(...catchResult.nodes);
+      edges.push(...catchResult.edges);
       catchResult.nodesConnectedToExit.forEach((n) =>
         nodesConnectedToExit.add(n)
       );
 
-      if (tryResult.entryNodeId && catchResult.entryNodeId) {
-        // This is a simplification. Realistically, any node in `try` can throw.
-        // For the flowchart, we'll draw a single "error" path from the start of the try block.
-        graph += `    ${tryResult.entryNodeId} -- "error" --> ${catchResult.entryNodeId}\n`;
+      if (catchResult.entryNodeId) {
+        edges.push({ from: entryNodeId, to: catchResult.entryNodeId, label: "error" });
       }
+      lastExitPoints.push(...catchResult.exitPoints);
+    }
+    
+    const finallyResult = finallyBlock
+      ? this.processBlock(finallyBlock, exitId, loopContext)
+      : null;
 
-      if (finallyBlock) {
-        const finallyResult = this.processBlock(
-          finallyBlock,
-          exitId,
-          loopContext
-        );
-        graph += finallyResult.graph;
-        finallyResult.nodesConnectedToExit.forEach((n) =>
-          nodesConnectedToExit.add(n)
-        );
-
-        tryResult.exitPoints.forEach((ep) => {
-          if (finallyResult.entryNodeId) {
-            graph += `    ${ep.id} --> ${finallyResult.entryNodeId}\n`;
-          }
-        });
-        catchResult.exitPoints.forEach((ep) => {
-          if (finallyResult.entryNodeId) {
-            graph += `    ${ep.id} --> ${finallyResult.entryNodeId}\n`;
-          }
-        });
-        exitPoints.push(...finallyResult.exitPoints);
-      } else {
-        exitPoints.push(...tryResult.exitPoints, ...catchResult.exitPoints);
-      }
-    } else if (finallyBlock) {
-      const finallyResult = this.processBlock(
-        finallyBlock,
-        exitId,
-        loopContext
-      );
-      graph += finallyResult.graph;
+    if (finallyResult) {
+      nodes.push(...finallyResult.nodes);
+      edges.push(...finallyResult.edges);
       finallyResult.nodesConnectedToExit.forEach((n) =>
         nodesConnectedToExit.add(n)
       );
 
-      tryResult.exitPoints.forEach((ep) => {
-        if (finallyResult.entryNodeId) {
-          graph += `    ${ep.id} --> ${finallyResult.entryNodeId}\n`;
-        }
-      });
-      exitPoints.push(...finallyResult.exitPoints);
-    } else {
-      // A `try` block without a `catch` or `finally` is not valid, but we handle it.
-      exitPoints.push(...tryResult.exitPoints);
+      if (finallyResult.entryNodeId) {
+        lastExitPoints.forEach((ep) => {
+          if(!nodesConnectedToExit.has(ep.id)) {
+            edges.push({ from: ep.id, to: finallyResult.entryNodeId });
+          }
+        });
+      }
+      lastExitPoints = finallyResult.exitPoints;
     }
 
     return {
-      graph,
-      entryNodeId: tryResult.entryNodeId,
-      exitPoints,
+      nodes,
+      edges,
+      entryNodeId: entryNodeId,
+      exitPoints: lastExitPoints,
       nodesConnectedToExit,
     };
   }
@@ -954,67 +942,62 @@ export class FlowchartGenerator {
     forStmt: ForStatement,
     exitId: string
   ): ProcessResult {
-    const initializer = forStmt.getInitializer();
-    const condition = forStmt.getCondition();
-    const incrementor = forStmt.getIncrementor();
-    const body = forStmt.getStatement();
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
 
-    const initText = initializer
-      ? this.escapeString(initializer.getText())
-      : "";
+    const initializer = forStmt.getInitializer();
+    const initText = initializer ? this.escapeString(initializer.getText()) : "";
     const initId = this.generateNodeId("for_init");
-    let graph = `    ${initId}["${initText}"]\n`;
+    nodes.push({ id: initId, label: initText, shape: 'rect' });
 
     const start = forStmt.getStart();
     const end = forStmt.getEnd();
     this.locationMap.push({ start, end, nodeId: initId });
-    graph += `    click ${initId} call onNodeClick(${start}, ${end})\n`;
 
-    const condText = condition
-      ? this.escapeString(condition.getText())
-      : "true";
+    const condition = forStmt.getCondition();
+    const condText = condition ? this.escapeString(condition.getText()) : "true";
     const condId = this.generateNodeId("for_cond");
-    graph += `    ${condId}{"${condText}"}\n`;
-    graph += `    ${initId} --> ${condId}\n`;
+    nodes.push({ id: condId, label: condText, shape: 'diamond', style: this.nodeStyles.decision });
+    edges.push({ from: initId, to: condId });
 
     const incText = this.escapeString(
       forStmt.getIncrementor()?.getText() || ""
     );
     const incId = this.generateNodeId("for_inc");
-    graph += `    ${incId}["${incText || "increment"}"]\n`;
+    nodes.push({ id: incId, label: incText || "increment", shape: 'rect' });
 
     const loopExitId = this.generateNodeId("for_exit");
-    graph += `    ${loopExitId}(( ))\n`; // Dummy node for break
+    nodes.push({ id: loopExitId, label: '', shape: 'stadium' }); // Dummy node for break
     const loopContext: LoopContext = {
       breakTargetId: loopExitId,
       continueTargetId: incId,
     };
-
-    const nodesConnectedToExit = new Set<string>();
 
     const bodyResult = this.processStatement(
       forStmt.getStatement(),
       exitId,
       loopContext
     );
-    graph += bodyResult.graph;
+    nodes.push(...bodyResult.nodes);
+    edges.push(...bodyResult.edges);
     if (bodyResult.entryNodeId) {
-      graph += `    ${condId} -- "Yes" --> ${bodyResult.entryNodeId}\n`;
+      edges.push({ from: condId, to: bodyResult.entryNodeId, label: 'Yes' });
     }
     bodyResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
 
     bodyResult.exitPoints.forEach((exitPoint) => {
-      const label = exitPoint.label ? ` -- "${exitPoint.label}" --> ` : ` --> `;
-      graph += `    ${exitPoint.id}${label}${incId}\n`;
+      const label = exitPoint.label ? exitPoint.label : undefined;
+      edges.push({ from: exitPoint.id, to: incId, label: label });
     });
 
-    graph += `    ${incId} --> ${condId}\n`; // Loop back to condition.
+    edges.push({ from: incId, to: condId }); // Loop back to condition.
 
-    const exitPoints = [{ id: condId, label: "No" }];
-    graph += `    ${condId} -- "No" --> ${loopExitId}\n`;
+    edges.push({ from: condId, to: loopExitId, label: 'No' });
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: initId,
       exitPoints: [{ id: loopExitId }],
       nodesConnectedToExit,
@@ -1025,47 +1008,48 @@ export class FlowchartGenerator {
     forOfStmt: ForOfStatement,
     exitId: string
   ): ProcessResult {
-    const initializer = forOfStmt.getInitializer().getText();
-    const expression = forOfStmt.getExpression().getText();
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+    const initializer = this.escapeString(forOfStmt.getInitializer().getText());
+    const expression = this.escapeString(forOfStmt.getExpression().getText());
     const body = forOfStmt.getStatement();
 
     const loopHeaderId = this.generateNodeId("for_of_header");
     const loopHeaderText = this.escapeString(
       `for (${initializer} of ${expression})`
     );
-    let graph = `    ${loopHeaderId}{"${loopHeaderText}"}\n`;
+    nodes.push({ id: loopHeaderId, label: loopHeaderText, shape: 'diamond', style: this.nodeStyles.decision });
 
     const start = forOfStmt.getStart();
     const end = forOfStmt.getEnd();
     this.locationMap.push({ start, end, nodeId: loopHeaderId });
-    graph += `    click ${loopHeaderId} call onNodeClick(${start}, ${end})\n`;
 
     const exitLoopId = this.generateNodeId("for_of_exit");
-    graph += `    ${exitLoopId}[("end loop")]\n`;
+    nodes.push({ id: exitLoopId, label: "end loop", shape: 'stadium' });
     const loopContext: LoopContext = {
       breakTargetId: exitLoopId,
-      continueTargetId: loopHeaderId,
+      continueTargetId: loopHeaderId, // For..of continues to the next iteration directly.
     };
 
-    const nodesConnectedToExit = new Set<string>();
-
     const bodyResult = this.processBlock(body as Block, exitId, loopContext);
-    graph += bodyResult.graph;
+    nodes.push(...bodyResult.nodes);
+    edges.push(...bodyResult.edges);
     if (bodyResult.entryNodeId) {
-      graph += `    ${loopHeaderId} -- "Loop" --> ${bodyResult.entryNodeId}\n`;
+      edges.push({ from: loopHeaderId, to: bodyResult.entryNodeId, label: 'Loop' });
     }
     bodyResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
 
     bodyResult.exitPoints.forEach((exitPoint) => {
-      const label = exitPoint.label ? ` -- "${exitPoint.label}" --> ` : ` --> `;
-      graph += `    ${exitPoint.id}${label}${loopHeaderId}\n`;
+      const label = exitPoint.label ? exitPoint.label : undefined;
+      edges.push({ from: exitPoint.id, to: loopHeaderId, label: label });
     });
 
-    const exitPoints = [{ id: loopHeaderId, label: "End" }];
-    graph += `    ${loopHeaderId} -- "End For Each" --> ${exitLoopId}\n`;
+    edges.push({ from: loopHeaderId, to: exitLoopId, label: 'End For Each' });
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: loopHeaderId,
       exitPoints: [{ id: exitLoopId }],
       nodesConnectedToExit,
@@ -1076,47 +1060,47 @@ export class FlowchartGenerator {
     forInStmt: ForInStatement,
     exitId: string
   ): ProcessResult {
-    const initializer = forInStmt.getInitializer().getText();
-    const expression = forInStmt.getExpression().getText();
-    const body = forInStmt.getStatement();
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+    const initializer = this.escapeString(forInStmt.getInitializer().getText());
+    const expression = this.escapeString(forInStmt.getExpression().getText());
 
     const loopHeaderId = this.generateNodeId("for_in_header");
     const loopHeaderText = this.escapeString(
       `for (${initializer} in ${expression})`
     );
-    let graph = `    ${loopHeaderId}{"${loopHeaderText}"}\n`;
+    nodes.push({ id: loopHeaderId, label: loopHeaderText, shape: 'diamond', style: this.nodeStyles.decision });
 
     const start = forInStmt.getStart();
     const end = forInStmt.getEnd();
     this.locationMap.push({ start, end, nodeId: loopHeaderId });
-    graph += `    click ${loopHeaderId} call onNodeClick(${start}, ${end})\n`;
 
     const exitLoopId = this.generateNodeId("for_in_exit");
-    graph += `    ${exitLoopId}[("end loop")]\n`;
+    nodes.push({ id: exitLoopId, label: "end loop", shape: 'stadium' });
     const loopContext: LoopContext = {
       breakTargetId: exitLoopId,
-      continueTargetId: loopHeaderId,
+      continueTargetId: loopHeaderId, // For..in continues to the next iteration directly.
     };
 
-    const nodesConnectedToExit = new Set<string>();
-
-    const bodyResult = this.processBlock(body as Block, exitId, loopContext);
-    graph += bodyResult.graph;
+    const bodyResult = this.processBlock(forInStmt.getStatement() as Block, exitId, loopContext);
+    nodes.push(...bodyResult.nodes);
+    edges.push(...bodyResult.edges);
     if (bodyResult.entryNodeId) {
-      graph += `    ${loopHeaderId} -- "Loop" --> ${bodyResult.entryNodeId}\n`;
+      edges.push({ from: loopHeaderId, to: bodyResult.entryNodeId, label: 'Loop' });
     }
     bodyResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
 
     bodyResult.exitPoints.forEach((exitPoint) => {
-      const label = exitPoint.label ? ` -- "${exitPoint.label}" --> ` : ` --> `;
-      graph += `    ${exitPoint.id}${label}${loopHeaderId}\n`;
+      const label = exitPoint.label ? exitPoint.label : undefined;
+      edges.push({ from: exitPoint.id, to: loopHeaderId, label: label });
     });
 
-    const exitPoints = [{ id: loopHeaderId, label: "End" }];
-    graph += `    ${loopHeaderId} -- "End For In" --> ${exitLoopId}\n`;
+    edges.push({ from: loopHeaderId, to: exitLoopId, label: 'End For In' });
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: loopHeaderId,
       exitPoints: [{ id: exitLoopId }],
       nodesConnectedToExit,
@@ -1130,43 +1114,43 @@ export class FlowchartGenerator {
     whileStmt: WhileStatement,
     exitId: string
   ): ProcessResult {
-    const condition = this.escapeString(whileStmt.getExpression().getText());
-    const body = whileStmt.getStatement();
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
 
+    const condition = this.escapeString(whileStmt.getExpression().getText());
     const conditionId = this.generateNodeId("while_cond");
-    let graph = `    ${conditionId}{"${condition}"}\n`;
+    nodes.push({ id: conditionId, label: condition, shape: 'diamond', style: this.nodeStyles.decision });
 
     const start = whileStmt.getStart();
     const end = whileStmt.getEnd();
     this.locationMap.push({ start, end, nodeId: conditionId });
-    graph += `    click ${conditionId} call onNodeClick(${start}, ${end})\n`;
 
     const exitLoopId = this.generateNodeId("while_exit");
-    graph += `    ${exitLoopId}[("end loop")]\n`;
+    nodes.push({ id: exitLoopId, label: "end loop", shape: 'stadium' });
     const loopContext: LoopContext = {
       breakTargetId: exitLoopId,
       continueTargetId: conditionId,
     };
 
-    const nodesConnectedToExit = new Set<string>();
-
-    const bodyResult = this.processBlock(body as Block, exitId, loopContext);
-    graph += bodyResult.graph;
+    const bodyResult = this.processStatement(whileStmt.getStatement(), exitId, loopContext);
+    nodes.push(...bodyResult.nodes);
+    edges.push(...bodyResult.edges);
     if (bodyResult.entryNodeId) {
-      graph += `    ${conditionId} -- "Yes" --> ${bodyResult.entryNodeId}\n`;
+      edges.push({ from: conditionId, to: bodyResult.entryNodeId, label: 'Yes' });
     }
     bodyResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
 
     bodyResult.exitPoints.forEach((exitPoint) => {
       const label = exitPoint.label ? ` -- "${exitPoint.label}" --> ` : ` --> `;
-      graph += `    ${exitPoint.id}${label}${conditionId}\n`;
+      edges.push({ from: exitPoint.id, to: conditionId, label: label });
     });
 
-    const exitPoints = [{ id: conditionId, label: "No" }];
-    graph += `    ${conditionId} -- "No" --> ${exitLoopId}\n`;
+    edges.push({ from: conditionId, to: exitLoopId, label: 'No' });
 
     return {
-      graph,
+      nodes,
+      edges,
       entryNodeId: conditionId,
       exitPoints: [{ id: exitLoopId }],
       nodesConnectedToExit,
@@ -1180,54 +1164,53 @@ export class FlowchartGenerator {
     doStmt: DoStatement,
     exitId: string
   ): ProcessResult {
-    const condition = this.escapeString(doStmt.getExpression().getText());
-    const body = doStmt.getStatement();
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
 
     const bodyEntryId = this.generateNodeId("do_while_body");
-    let graph = `    ${bodyEntryId}[("do")]\n`;
+    nodes.push({ id: bodyEntryId, label: 'do', shape: 'stadium' });
 
     const start = doStmt.getStart();
     const end = doStmt.getEnd();
     this.locationMap.push({ start, end, nodeId: bodyEntryId });
-    graph += `    click ${bodyEntryId} call onNodeClick(${start}, ${end})\n`;
 
+    const condition = this.escapeString(doStmt.getExpression().getText());
     const conditionId = this.generateNodeId("do_while_cond");
-    graph += `    ${conditionId}{"${condition}"}\n`;
+    nodes.push({ id: conditionId, label: condition, shape: 'diamond', style: this.nodeStyles.decision });
 
     const exitLoopId = this.generateNodeId("do_while_exit");
-    graph += `    ${exitLoopId}[("end loop")]\n`;
+    nodes.push({ id: exitLoopId, label: "end loop", shape: 'stadium' });
     const loopContext: LoopContext = {
       breakTargetId: exitLoopId,
-      continueTargetId: conditionId,
+      continueTargetId: conditionId, // 'continue' in do-while goes to the condition check.
     };
-
-    const nodesConnectedToExit = new Set<string>();
-
-    const bodyResult = this.processStatement(
-      doStmt.getStatement(),
-      exitId,
-      loopContext
-    );
-    graph += bodyResult.graph;
+    
+    const body = doStmt.getStatement();
+    const bodyResult = this.processStatement(body, exitId, loopContext);
+    nodes.push(...bodyResult.nodes);
+    edges.push(...bodyResult.edges);
     bodyResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
 
     if (bodyResult.entryNodeId) {
-      graph += `    ${bodyEntryId} --> ${bodyResult.entryNodeId}\n`;
+      edges.push({ from: bodyEntryId, to: bodyResult.entryNodeId });
       bodyResult.exitPoints.forEach((exitPoint) => {
         const label = exitPoint.label
-          ? ` -- "${exitPoint.label}" --> `
-          : ` --> `;
-        graph += `    ${exitPoint.id}${label}${conditionId}\n`;
+          ? exitPoint.label
+          : undefined;
+        edges.push({ from: exitPoint.id, to: conditionId, label: label });
       });
-      graph += `    ${conditionId} -- "Yes" --> ${bodyResult.entryNodeId}\n`; // Loop back.
+      edges.push({ from: conditionId, to: bodyEntryId, label: 'Yes' }); // Loop back.
+    } else {
+        edges.push({ from: bodyEntryId, to: conditionId});
     }
 
-    const exitPoints = [{ id: conditionId, label: "No" }];
-    graph += `    ${conditionId} -- "No" --> ${exitLoopId}\n`;
+    edges.push({ from: conditionId, to: exitLoopId, label: 'No' });
 
     return {
-      graph,
-      entryNodeId: bodyResult.entryNodeId,
+      nodes,
+      edges,
+      entryNodeId: bodyEntryId,
       exitPoints: [{ id: exitLoopId }],
       nodesConnectedToExit,
     };
