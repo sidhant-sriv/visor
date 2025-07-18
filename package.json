@@ -6,7 +6,7 @@
   "engines": {
     "vscode": "^1.102.0"
   },
-   "icon": "media/icon2.png",
+   "icon": "media/icon.png",
   "categories": [
     "Other"
   ],
@@ -18,7 +18,7 @@
         {
           "id": "sidvis-container",
           "title": "Sid Vis",
-          "icon": "media/icon2.png"
+          "icon": "media/icon.png"
         }
       ]
     },
