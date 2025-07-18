@@ -33,7 +33,7 @@ import { FlowchartIR, FlowchartNode, FlowchartEdge, LocationMapEntry } from '../
 export interface ProcessResult {
   nodes: FlowchartNode[];
   edges: FlowchartEdge[];
-  entryNodeId: string | null;
+  entryNodeId: string;
   exitPoints: { id: string; label?: string }[];
   nodesConnectedToExit: Set<string>;
 }
@@ -49,6 +49,13 @@ interface LoopContext {
 export class TsAstParser {
   private nodeIdCounter = 0;
   private locationMap: LocationMapEntry[] = [];
+  private readonly nodeStyles = {
+      terminator: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;',
+      decision: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;',
+      process: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;',
+      special: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000',
+      break: 'fill:#eee,stroke:#000,stroke-width:2px,color:#000',
+  };
 
   private generateNodeId(prefix: string): string {
     return `${prefix}_${this.nodeIdCounter++}`;
@@ -127,8 +134,8 @@ export class TsAstParser {
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
-    nodes.push({ id: entryId, label: `start: ${finalFunctionName}`, shape: 'round', style: 'fill:#d4edda,stroke:#155724,stroke-width:2px,color:#155724' });
-    nodes.push({ id: exitId, label: 'end', shape: 'round', style: 'fill:#f8d7da,stroke:#721c24,stroke-width:2px,color:#721c24' });
+    nodes.push({ id: entryId, label: `start: ${finalFunctionName}`, shape: 'round', style: this.nodeStyles.terminator });
+    nodes.push({ id: exitId, label: 'end', shape: 'round', style: this.nodeStyles.terminator });
 
     const body = functionToAnalyze.getBody();
 
@@ -161,7 +168,9 @@ export class TsAstParser {
         start: functionToAnalyze.getStart(),
         end: functionToAnalyze.getEnd(),
       },
-      title: `Flowchart for ${finalFunctionName}`
+      title: `Flowchart for ${finalFunctionName}`,
+      entryNodeId: entryId,
+      exitNodeId: exitId,
     };
   }
 
@@ -176,7 +185,7 @@ export class TsAstParser {
   ): ProcessResult {
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
-    let entryNodeId: string | null = null;
+    let entryNodeId: string = "";
     const nodesConnectedToExit = new Set<string>();
     let lastExitPoints: { id: string; label?: string }[] = [];
 
@@ -186,7 +195,7 @@ export class TsAstParser {
       return {
         nodes: [],
         edges: [],
-        entryNodeId: null,
+        entryNodeId: "",
         exitPoints: [],
         nodesConnectedToExit,
       };
@@ -206,7 +215,7 @@ export class TsAstParser {
         });
       } else {
         // This is the first statement in the block, so it's the entry point.
-        entryNodeId = result.entryNodeId;
+        entryNodeId = result.entryNodeId || "";
       }
 
       lastExitPoints = result.exitPoints;
@@ -312,7 +321,7 @@ export class TsAstParser {
   private processAwaitExpression(statement: Statement): ProcessResult {
     const nodeId = this.generateNodeId("await_stmt");
     const nodeText = this.escapeString(statement.getText());
-    const nodes: FlowchartNode[] = [{ id: nodeId, label: `/${nodeText}/`, shape: 'stadium', style: 'stroke:#004085,stroke-width:2px' }];
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: nodeText, shape: 'stadium', style: this.nodeStyles.special }];
 
     const start = statement.getStart();
     const end = statement.getEnd();
@@ -333,7 +342,7 @@ export class TsAstParser {
   ): ProcessResult {
     const nodeId = this.generateNodeId("return_stmt");
     const nodeText = this.escapeString(returnStmt.getText());
-    const nodes: FlowchartNode[] = [{ id: nodeId, label: `{${nodeText}}`, shape: 'rect', style: 'fill:#fff3cd,stroke:#856404,stroke-width:2px' }];
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: nodeText, shape: 'stadium', style: this.nodeStyles.special }];
     const edges: FlowchartEdge[] = [{ from: nodeId, to: exitId }];
 
     const start = returnStmt.getStart();
@@ -354,7 +363,7 @@ export class TsAstParser {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("break_stmt");
-    const nodes: FlowchartNode[] = [{ id: nodeId, label: 'break', shape: 'stadium' }];
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: 'break', shape: 'stadium', style: this.nodeStyles.break }];
     const edges: FlowchartEdge[] = [{ from: nodeId, to: loopContext.breakTargetId }];
 
     const start = breakStmt.getStart();
@@ -375,7 +384,7 @@ export class TsAstParser {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("continue_stmt");
-    const nodes: FlowchartNode[] = [{ id: nodeId, label: 'continue', shape: 'stadium' }];
+    const nodes: FlowchartNode[] = [{ id: nodeId, label: 'continue', shape: 'stadium', style: this.nodeStyles.break }];
     const edges: FlowchartEdge[] = [{ from: nodeId, to: loopContext.continueTargetId }];
 
     const start = continueStmt.getStart();
@@ -421,7 +430,7 @@ export class TsAstParser {
 
     const exprText = this.escapeString(switchStmt.getExpression().getText());
     const switchEntryId = this.generateNodeId("switch");
-    nodes.push({ id: switchEntryId, label: `switch (${exprText})`, shape: 'diamond' });
+    nodes.push({ id: switchEntryId, label: `switch (${exprText})`, shape: 'diamond', style: this.nodeStyles.decision });
 
     let lastCaseExitPoints: { id:string; label?: string }[] | null = null;
     
@@ -564,7 +573,7 @@ export class TsAstParser {
             expression.getExpression().getText()
           );
           const conditionText = `For each item in ${collectionName}`;
-          nodes.push({ id: loopId, label: conditionText, shape: 'diamond' });
+          nodes.push({ id: loopId, label: conditionText, shape: 'diamond', style: this.nodeStyles.decision });
 
           const bodyResult = this.processCallback(callback, exitId);
 
@@ -753,7 +762,7 @@ export class TsAstParser {
     const conditionText = this.escapeString(condExpr.getCondition().getText());
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
-    nodes.push({ id: conditionId, label: conditionText, shape: 'diamond' });
+    nodes.push({ id: conditionId, label: conditionText, shape: 'diamond', style: this.nodeStyles.decision });
 
 
     const start = condExpr.getStart();
@@ -790,7 +799,7 @@ export class TsAstParser {
     const conditionId = this.generateNodeId("if_cond");
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
-    nodes.push({ id: conditionId, label: condition, shape: 'diamond' });
+    nodes.push({ id: conditionId, label: condition, shape: 'diamond', style: this.nodeStyles.decision });
 
     const start = ifStmt.getStart();
     const end = ifStmt.getEnd();
@@ -862,7 +871,7 @@ export class TsAstParser {
     const finallyBlock = tryStmt.getFinallyBlock();
 
     const entryNodeId = this.generateNodeId("try_entry");
-    nodes.push({ id: entryNodeId, label: "Try", shape: "stadium" });
+    nodes.push({ id: entryNodeId, label: "Try", shape: "stadium", style: this.nodeStyles.special });
 
     const start = tryStmt.getStart();
     const end = tryStmt.getEnd();
@@ -949,7 +958,7 @@ export class TsAstParser {
     const condition = forStmt.getCondition();
     const condText = condition ? this.escapeString(condition.getText()) : "true";
     const condId = this.generateNodeId("for_cond");
-    nodes.push({ id: condId, label: condText, shape: 'diamond' });
+    nodes.push({ id: condId, label: condText, shape: 'diamond', style: this.nodeStyles.decision });
     edges.push({ from: initId, to: condId });
 
     const incText = this.escapeString(
@@ -959,7 +968,7 @@ export class TsAstParser {
     nodes.push({ id: incId, label: incText || "increment", shape: 'rect' });
 
     const loopExitId = this.generateNodeId("for_exit");
-    nodes.push({ id: loopExitId, label: '', shape: 'round' }); // Dummy node for break
+    nodes.push({ id: loopExitId, label: '', shape: 'stadium' }); // Dummy node for break
     const loopContext: LoopContext = {
       breakTargetId: loopExitId,
       continueTargetId: incId,
@@ -1010,7 +1019,7 @@ export class TsAstParser {
     const loopHeaderText = this.escapeString(
       `for (${initializer} of ${expression})`
     );
-    nodes.push({ id: loopHeaderId, label: loopHeaderText, shape: 'diamond' });
+    nodes.push({ id: loopHeaderId, label: loopHeaderText, shape: 'diamond', style: this.nodeStyles.decision });
 
     const start = forOfStmt.getStart();
     const end = forOfStmt.getEnd();
@@ -1061,7 +1070,7 @@ export class TsAstParser {
     const loopHeaderText = this.escapeString(
       `for (${initializer} in ${expression})`
     );
-    nodes.push({ id: loopHeaderId, label: loopHeaderText, shape: 'diamond' });
+    nodes.push({ id: loopHeaderId, label: loopHeaderText, shape: 'diamond', style: this.nodeStyles.decision });
 
     const start = forInStmt.getStart();
     const end = forInStmt.getEnd();
@@ -1111,7 +1120,7 @@ export class TsAstParser {
 
     const condition = this.escapeString(whileStmt.getExpression().getText());
     const conditionId = this.generateNodeId("while_cond");
-    nodes.push({ id: conditionId, label: condition, shape: 'diamond' });
+    nodes.push({ id: conditionId, label: condition, shape: 'diamond', style: this.nodeStyles.decision });
 
     const start = whileStmt.getStart();
     const end = whileStmt.getEnd();
@@ -1137,7 +1146,6 @@ export class TsAstParser {
       edges.push({ from: exitPoint.id, to: conditionId, label: label });
     });
 
-    const exitPoints = [{ id: conditionId, label: "No" }];
     edges.push({ from: conditionId, to: exitLoopId, label: 'No' });
 
     return {
@@ -1169,7 +1177,7 @@ export class TsAstParser {
 
     const condition = this.escapeString(doStmt.getExpression().getText());
     const conditionId = this.generateNodeId("do_while_cond");
-    nodes.push({ id: conditionId, label: condition, shape: 'diamond' });
+    nodes.push({ id: conditionId, label: condition, shape: 'diamond', style: this.nodeStyles.decision });
 
     const exitLoopId = this.generateNodeId("do_while_exit");
     nodes.push({ id: exitLoopId, label: "end loop", shape: 'stadium' });

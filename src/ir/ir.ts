@@ -13,7 +13,7 @@ export interface FlowchartNode {
 
 export interface FlowchartEdge {
     from: string; // nodeId
-    to: string | null; // nodeId
+    to: string; // nodeId
     label?: string;
 }
 

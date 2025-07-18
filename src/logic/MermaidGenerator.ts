@@ -13,9 +13,9 @@ export class MermaidGenerator {
             const shape = this.getShape(node);
             const label = this.escapeString(node.label);
             mermaid += `    ${node.id}${shape[0]}"${label}"${shape[1]}\n`;
-            if(node.style) {
-                 mermaid += `    style ${node.id} ${node.style}\n`
-            }
+            if (node.style) {  
+                mermaid += `    style ${node.id} ${node.style}\n`;  
+            }  
         });
 
         ir.edges.forEach(edge => {
@@ -50,6 +50,6 @@ export class MermaidGenerator {
 
     private escapeString(str: string): string {
         if (!str) return '';
-        return str.replace(/"/g, '#quot;').replace(/\n/g, ' ').trim();
+        return str.replace(/"/g, '&quot;').replace(/\n/g, ' ').trim();
     }
 } 

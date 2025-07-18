@@ -58,6 +58,8 @@
     "test": "vscode-test"
   },
   "dependencies": {
+    "tree-sitter": "^0.25.0",
+    "tree-sitter-python": "^0.23.6",
     "ts-morph": "^26.0.0"
   },
   "devDependencies": {
