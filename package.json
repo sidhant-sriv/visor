@@ -6,10 +6,11 @@
   "engines": {
     "vscode": "^1.102.0"
   },
+   "icon": "media/icon2.png",
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": ["onView:sidvis.flowchartView"],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -17,7 +18,7 @@
         {
           "id": "sidvis-container",
           "title": "Sid Vis",
-          "icon": "media/icon.svg"
+          "icon": "media/icon2.png"
         }
       ]
     },
