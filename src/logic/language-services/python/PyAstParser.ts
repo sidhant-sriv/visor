@@ -1,45 +1,14 @@
 import Parser from "tree-sitter";
 import Python from "tree-sitter-python";
-import { FlowchartIR, FlowchartNode, FlowchartEdge, LocationMapEntry } from "../../../ir/ir";
+import {
+  FlowchartIR,
+  FlowchartNode,
+  FlowchartEdge,
+  LocationMapEntry,
+} from "../../../ir/ir";
 
 // Type guards for Python AST node types
 type PythonLanguage = Parser.Language;
-
-function isIfStatement(node: Parser.SyntaxNode): node is Parser.SyntaxNode & { type: "if_statement" } {
-  return node.type === "if_statement";
-}
-
-function isForStatement(node: Parser.SyntaxNode): node is Parser.SyntaxNode & { type: "for_statement" } {
-  return node.type === "for_statement";
-}
-
-function isWhileStatement(node: Parser.SyntaxNode): node is Parser.SyntaxNode & { type: "while_statement" } {
-  return node.type === "while_statement";
-}
-
-function isTryStatement(node: Parser.SyntaxNode): node is Parser.SyntaxNode & { type: "try_statement" } {
-  return node.type === "try_statement";
-}
-
-function isWithStatement(node: Parser.SyntaxNode): node is Parser.SyntaxNode & { type: "with_statement" } {
-  return node.type === "with_statement";
-}
-
-function isReturnStatement(node: Parser.SyntaxNode): node is Parser.SyntaxNode & { type: "return_statement" } {
-  return node.type === "return_statement";
-}
-
-function isBreakStatement(node: Parser.SyntaxNode): node is Parser.SyntaxNode & { type: "break_statement" } {
-  return node.type === "break_statement";
-}
-
-function isContinueStatement(node: Parser.SyntaxNode): node is Parser.SyntaxNode & { type: "continue_statement" } {
-  return node.type === "continue_statement";
-}
-
-function isElseClause(node: Parser.SyntaxNode): node is Parser.SyntaxNode & { type: "else_clause" } {
-  return node.type === "else_clause";
-}
 
 interface ProcessResult {
   nodes: FlowchartNode[];
@@ -77,7 +46,7 @@ export class PyAstParser {
     if (!str) {
       return "";
     }
-    
+
     const sanitized = str
       .replace(/"/g, "#quot;")
       .replace(/\n/g, " ")
@@ -98,31 +67,41 @@ export class PyAstParser {
     parser.setLanguage(Python as PythonLanguage);
     const tree = parser.parse(sourceCode);
     const functions = tree.rootNode.descendantsOfType("function_definition");
-    return functions.map((f: Parser.SyntaxNode) => f.childForFieldName("name")?.text || "[anonymous]");
+    return functions.map(
+      (f: Parser.SyntaxNode) =>
+        f.childForFieldName("name")?.text || "[anonymous]"
+    );
   }
 
   /**
    * Finds the function that contains the given position.
    */
-  public findFunctionAtPosition(sourceCode: string, position: number): string | undefined {
+  public findFunctionAtPosition(
+    sourceCode: string,
+    position: number
+  ): string | undefined {
     const parser = new Parser();
     parser.setLanguage(Python as PythonLanguage);
     const tree = parser.parse(sourceCode);
     const functions = tree.rootNode.descendantsOfType("function_definition");
-    
+
     for (const func of functions) {
       if (position >= func.startIndex && position <= func.endIndex) {
         return func.childForFieldName("name")?.text || "[anonymous]";
       }
     }
-    
+
     return undefined;
   }
 
   /**
    * Main public method to generate a flowchart from Python source code.
    */
-  public generateFlowchart(sourceCode: string, functionName?: string, position?: number): FlowchartIR {
+  public generateFlowchart(
+    sourceCode: string,
+    functionName?: string,
+    position?: number
+  ): FlowchartIR {
     this.nodeIdCounter = 0;
     this.locationMap = [];
 
@@ -131,23 +110,29 @@ export class PyAstParser {
     const tree = parser.parse(sourceCode);
 
     let functionNode: Parser.SyntaxNode | undefined;
-    const functionNodes = tree.rootNode.descendantsOfType("function_definition");
+    const functionNodes = tree.rootNode.descendantsOfType(
+      "function_definition"
+    );
 
     if (position !== undefined) {
-      functionNode = functionNodes.find(f => position >= f.startIndex && position <= f.endIndex);
+      functionNode = functionNodes.find(
+        (f) => position >= f.startIndex && position <= f.endIndex
+      );
     } else if (functionName) {
-      functionNode = functionNodes.find(f => f.childForFieldName("name")?.text === functionName);
+      functionNode = functionNodes.find(
+        (f) => f.childForFieldName("name")?.text === functionName
+      );
     } else {
       functionNode = functionNodes[0];
     }
 
     if (!functionNode) {
-      const message = functionName 
+      const message = functionName
         ? `Function '${functionName}' not found.`
         : position !== undefined
         ? "Place cursor inside a function to generate a flowchart."
         : "No function found in code.";
-      
+
       return {
         nodes: [{ id: "A", label: message, shape: "rect" }],
         edges: [],
@@ -225,14 +210,18 @@ export class PyAstParser {
   /**
    * Processes a block of statements, connecting them sequentially.
    */
-  private processBlock(blockNode: Parser.SyntaxNode | null, exitId: string, loopContext?: LoopContext): ProcessResult {
+  private processBlock(
+    blockNode: Parser.SyntaxNode | null,
+    exitId: string,
+    loopContext?: LoopContext
+  ): ProcessResult {
     if (!blockNode) {
-      return { 
-        nodes: [], 
-        edges: [], 
-        entryNodeId: undefined, 
-        exitPoints: [], 
-        nodesConnectedToExit: new Set<string>() 
+      return {
+        nodes: [],
+        edges: [],
+        entryNodeId: undefined,
+        exitPoints: [],
+        nodesConnectedToExit: new Set<string>(),
       };
     }
 
@@ -242,41 +231,56 @@ export class PyAstParser {
     const nodesConnectedToExit = new Set<string>();
     let lastExitPoints: { id: string; label?: string }[] = [];
 
-    const statements = blockNode.namedChildren.filter((s: Parser.SyntaxNode) => 
-      s.type !== 'pass_statement' && s.type !== 'comment'
+    const statements = blockNode.namedChildren.filter(
+      (s: Parser.SyntaxNode) =>
+        s.type !== "pass_statement" && s.type !== "comment"
     );
 
     if (statements.length === 0) {
-      return { 
-        nodes: [], 
-        edges: [], 
-        entryNodeId: undefined, 
-        exitPoints: [], 
-        nodesConnectedToExit 
+      return {
+        nodes: [],
+        edges: [],
+        entryNodeId: undefined,
+        exitPoints: [],
+        nodesConnectedToExit,
       };
     }
-    
+
     for (const statement of statements) {
       const result = this.processStatement(statement, exitId, loopContext);
       nodes.push(...result.nodes);
       edges.push(...result.edges);
 
-      if (lastExitPoints.length > 0) {
-        lastExitPoints.forEach((exitPoint) => {
-          if (result.entryNodeId) {
-            edges.push({
-              from: exitPoint.id,
-              to: result.entryNodeId,
-              label: exitPoint.label,
-            });
-          }
-        });
-      } else if (!entryNodeId) {
+      // Track terminal statements (those that connect directly to function exit)
+      const isTerminalStatement = result.nodesConnectedToExit.size > 0;
+
+      if (!entryNodeId) {
         entryNodeId = result.entryNodeId;
       }
-      
-      lastExitPoints = result.exitPoints;
-      result.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+
+      // Connect previous exit points to current statement entry (if not terminal)
+      if (lastExitPoints.length > 0 && result.entryNodeId) {
+        lastExitPoints.forEach((exitPoint) => {
+          edges.push({
+            from: exitPoint.id,
+            to: result.entryNodeId!,
+            label: exitPoint.label,
+          });
+        });
+      }
+
+      // Update flow tracking:
+      // - If current statement terminates, don't continue sequential flow
+      // - Otherwise, use its exit points for next iteration
+      if (isTerminalStatement) {
+        // Terminal statements don't provide exit points for sequential flow
+        // but we still track that they connect to the function exit
+        result.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+        lastExitPoints = []; // No further sequential flow after terminal statements
+      } else {
+        // Non-terminal statements provide exit points for sequential flow
+        lastExitPoints = result.exitPoints;
+      }
     }
 
     return {
@@ -291,12 +295,16 @@ export class PyAstParser {
   /**
    * Delegates a statement to the appropriate processing function based on its type.
    */
-  private processStatement(statement: Parser.SyntaxNode, exitId: string, loopContext?: LoopContext): ProcessResult {
+  private processStatement(
+    statement: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext
+  ): ProcessResult {
     switch (statement.type) {
       case "if_statement":
         return this.processIfStatement(statement, exitId, loopContext);
       case "elif_clause":
-        return this.processIfStatement(statement, exitId, loopContext);
+        return this.processElifClause(statement, exitId, loopContext);
       case "else_clause":
         return this.processElseClause(statement, exitId, loopContext);
       case "for_statement":
@@ -320,12 +328,12 @@ export class PyAstParser {
         }
         return this.processDefaultStatement(statement);
       case "pass_statement":
-        return { 
-          nodes: [], 
-          edges: [], 
-          entryNodeId: undefined, 
-          exitPoints: [], 
-          nodesConnectedToExit: new Set<string>() 
+        return {
+          nodes: [],
+          edges: [],
+          entryNodeId: undefined,
+          exitPoints: [],
+          nodesConnectedToExit: new Set<string>(),
         };
       default:
         return this.processDefaultStatement(statement);
@@ -340,11 +348,11 @@ export class PyAstParser {
     const nodeText = this.escapeString(statement.text);
 
     const nodes: FlowchartNode[] = [
-      { 
-        id: nodeId, 
-        label: nodeText, 
-        shape: "rect"
-      }
+      {
+        id: nodeId,
+        label: nodeText,
+        shape: "rect",
+      },
     ];
 
     this.locationMap.push({
@@ -361,16 +369,22 @@ export class PyAstParser {
       nodesConnectedToExit: new Set<string>(),
     };
   }
-  
+
   /**
    * Processes an if statement.
    */
-  private processIfStatement(ifNode: Parser.SyntaxNode, exitId: string, loopContext?: LoopContext): ProcessResult {
+  private processIfStatement(
+    ifNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext
+  ): ProcessResult {
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
     const nodesConnectedToExit = new Set<string>();
 
-    const condition = this.escapeString(ifNode.childForFieldName("condition")!.text);
+    const condition = this.escapeString(
+      ifNode.childForFieldName("condition")!.text
+    );
     const conditionId = this.generateNodeId("if_cond");
     nodes.push({
       id: conditionId,
@@ -378,7 +392,7 @@ export class PyAstParser {
       shape: "diamond",
       style: this.nodeStyles.decision,
     });
-    
+
     this.locationMap.push({
       start: ifNode.startIndex,
       end: ifNode.endIndex,
@@ -387,27 +401,35 @@ export class PyAstParser {
 
     let exitPoints: { id: string; label?: string }[] = [];
 
-    // Process "then" block
-    const thenBlock = ifNode.childForFieldName("body")!;
-    const thenResult = this.processBlock(thenBlock, exitId, loopContext);
+    // Process "then" block (consequence)
+    const consequence = ifNode.childForFieldName("consequence");
+    const thenResult = this.processBlock(consequence, exitId, loopContext);
     nodes.push(...thenResult.nodes);
     edges.push(...thenResult.edges);
-    
     if (thenResult.entryNodeId) {
-      edges.push({ from: conditionId, to: thenResult.entryNodeId, label: "True" });
-      exitPoints.push(...thenResult.exitPoints);
-    } else {
+      edges.push({
+        from: conditionId,
+        to: thenResult.entryNodeId,
+        label: "True",
+      });
+    }
+    exitPoints.push(...thenResult.exitPoints);
+    thenResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+    if (thenResult.nodes.length === 0) {
       exitPoints.push({ id: conditionId, label: "True" });
     }
-    thenResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
 
-    // Process 'else' clause if it exists
+    // Process 'alternative' (elif/else clause)
     const alternative = ifNode.childForFieldName("alternative");
     if (alternative) {
-      const elseResult = this.processStatement(alternative, exitId, loopContext);
+      const elseResult = this.processStatement(
+        alternative,
+        exitId,
+        loopContext
+      );
       nodes.push(...elseResult.nodes);
       edges.push(...elseResult.edges);
-      
+
       if (elseResult.entryNodeId) {
         edges.push({
           from: conditionId,
@@ -416,9 +438,10 @@ export class PyAstParser {
         });
       }
       exitPoints.push(...elseResult.exitPoints);
-      elseResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+      elseResult.nodesConnectedToExit.forEach((n) =>
+        nodesConnectedToExit.add(n)
+      );
     } else {
-      // No 'else', so the 'False' path is a valid exit
       exitPoints.push({ id: conditionId, label: "False" });
     }
 
@@ -434,32 +457,35 @@ export class PyAstParser {
   /**
    * Processes a for loop.
    */
-  private processForStatement(forNode: Parser.SyntaxNode, exitId: string): ProcessResult {
+  private processForStatement(
+    forNode: Parser.SyntaxNode,
+    exitId: string
+  ): ProcessResult {
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
     const nodesConnectedToExit = new Set<string>();
 
-    const left = forNode.childForFieldName('left')!.text;
-    const right = forNode.childForFieldName('right')!.text;
+    const left = forNode.childForFieldName("left")!.text;
+    const right = forNode.childForFieldName("right")!.text;
     const headerText = this.escapeString(`for ${left} in ${right}`);
     const headerId = this.generateNodeId("for_header");
-    
-    nodes.push({ 
-      id: headerId, 
-      label: headerText, 
-      shape: "diamond", 
-      style: this.nodeStyles.decision 
+
+    nodes.push({
+      id: headerId,
+      label: headerText,
+      shape: "diamond",
+      style: this.nodeStyles.decision,
     });
-    
-    this.locationMap.push({ 
-      start: forNode.startIndex, 
-      end: forNode.endIndex, 
-      nodeId: headerId 
+
+    this.locationMap.push({
+      start: forNode.startIndex,
+      end: forNode.endIndex,
+      nodeId: headerId,
     });
 
     const loopExitId = this.generateNodeId("for_exit");
     nodes.push({ id: loopExitId, label: "end loop", shape: "stadium" });
-    
+
     const loopContext: LoopContext = {
       breakTargetId: loopExitId,
       continueTargetId: headerId,
@@ -485,41 +511,46 @@ export class PyAstParser {
     // Exit the loop
     edges.push({ from: headerId, to: loopExitId, label: "End Loop" });
 
-    return { 
-      nodes, 
-      edges, 
-      entryNodeId: headerId, 
-      exitPoints: [{ id: loopExitId }], 
-      nodesConnectedToExit 
+    return {
+      nodes,
+      edges,
+      entryNodeId: headerId,
+      exitPoints: [{ id: loopExitId }],
+      nodesConnectedToExit,
     };
   }
 
   /**
    * Processes a while loop.
    */
-  private processWhileStatement(whileNode: Parser.SyntaxNode, exitId: string): ProcessResult {
+  private processWhileStatement(
+    whileNode: Parser.SyntaxNode,
+    exitId: string
+  ): ProcessResult {
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
     const nodesConnectedToExit = new Set<string>();
 
-    const conditionText = this.escapeString(whileNode.childForFieldName('condition')!.text);
+    const conditionText = this.escapeString(
+      whileNode.childForFieldName("condition")!.text
+    );
     const conditionId = this.generateNodeId("while_cond");
-    nodes.push({ 
-      id: conditionId, 
-      label: conditionText, 
-      shape: "diamond", 
-      style: this.nodeStyles.decision 
+    nodes.push({
+      id: conditionId,
+      label: conditionText,
+      shape: "diamond",
+      style: this.nodeStyles.decision,
     });
-    
-    this.locationMap.push({ 
-      start: whileNode.startIndex, 
-      end: whileNode.endIndex, 
-      nodeId: conditionId 
+
+    this.locationMap.push({
+      start: whileNode.startIndex,
+      end: whileNode.endIndex,
+      nodeId: conditionId,
     });
 
     const loopExitId = this.generateNodeId("while_exit");
     nodes.push({ id: loopExitId, label: "end loop", shape: "stadium" });
-    
+
     const loopContext: LoopContext = {
       breakTargetId: loopExitId,
       continueTargetId: conditionId,
@@ -532,7 +563,11 @@ export class PyAstParser {
     bodyResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
 
     if (bodyResult.entryNodeId) {
-      edges.push({ from: conditionId, to: bodyResult.entryNodeId, label: "True" });
+      edges.push({
+        from: conditionId,
+        to: bodyResult.entryNodeId,
+        label: "True",
+      });
     } else {
       edges.push({ from: conditionId, to: conditionId, label: "True" });
     }
@@ -545,44 +580,50 @@ export class PyAstParser {
     // Exit the loop
     edges.push({ from: conditionId, to: loopExitId, label: "False" });
 
-    return { 
-      nodes, 
-      edges, 
-      entryNodeId: conditionId, 
-      exitPoints: [{ id: loopExitId }], 
-      nodesConnectedToExit 
+    return {
+      nodes,
+      edges,
+      entryNodeId: conditionId,
+      exitPoints: [{ id: loopExitId }],
+      nodesConnectedToExit,
     };
   }
 
   /**
    * Processes a return statement.
    */
-  private processReturnStatement(returnNode: Parser.SyntaxNode, exitId: string): ProcessResult {
+  private processReturnStatement(
+    returnNode: Parser.SyntaxNode,
+    exitId: string
+  ): ProcessResult {
     const nodeId = this.generateNodeId("return");
-    
-    // Extract the return value from the AST
-    const argumentNode = returnNode.childForFieldName("argument");
-    let nodeText = "None";
-    
-    if (argumentNode) {
-      nodeText = this.escapeString(argumentNode.text);
+
+    // A 'return_statement' in the tree-sitter-python grammar has its value(s) as named children.
+    // Anonymous children include the 'return' keyword itself.
+    const valueNodes = returnNode.namedChildren;
+
+    let labelText: string;
+
+    if (valueNodes.length > 0) {
+      // If value nodes exist, construct the return value string from them.
+      // This correctly handles single values, tuples, etc.
+      const returnValueText = valueNodes.map((n) => n.text).join(", ");
+      labelText = `return ${this.escapeString(returnValueText)}`;
     } else {
-      // Try to get the first named child if "argument" field doesn't work
-      const namedChildren = returnNode.namedChildren;
-      if (namedChildren && namedChildren.length > 0) {
-        nodeText = this.escapeString(namedChildren[0].text);
-      }
+      // If there are no named children, it's a bare `return`.
+      labelText = "return";
     }
 
     const nodes: FlowchartNode[] = [
       {
         id: nodeId,
-        label: nodeText,
+        label: labelText,
         shape: "stadium",
         style: this.nodeStyles.special,
       },
     ];
 
+    // All return statements connect directly to the function's exit node.
     const edges: FlowchartEdge[] = [{ from: nodeId, to: exitId }];
 
     this.locationMap.push({
@@ -595,35 +636,131 @@ export class PyAstParser {
       nodes,
       edges,
       entryNodeId: nodeId,
-      exitPoints: [], // Return terminates the current execution path
+      // A return statement is a terminal point in a flow, so it has no onward exit points
+      // from its block. The flow terminates here and goes to the main function exit.
+      exitPoints: [],
       nodesConnectedToExit: new Set<string>().add(nodeId),
+    };
+  }
+
+  /**
+   * Processes an elif clause.
+   */
+  private processElifClause(
+    elifNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext
+  ): ProcessResult {
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+
+    const condition = this.escapeString(
+      elifNode.childForFieldName("condition")!.text
+    );
+    const conditionId = this.generateNodeId("elif_cond");
+    nodes.push({
+      id: conditionId,
+      label: condition,
+      shape: "diamond",
+      style: this.nodeStyles.decision,
+    });
+
+    this.locationMap.push({
+      start: elifNode.startIndex,
+      end: elifNode.endIndex,
+      nodeId: conditionId,
+    });
+
+    let exitPoints: { id: string; label?: string }[] = [];
+
+    const consequence = elifNode.childForFieldName("consequence");
+    const thenResult = this.processBlock(consequence, exitId, loopContext);
+    nodes.push(...thenResult.nodes);
+    edges.push(...thenResult.edges);
+    if (thenResult.entryNodeId) {
+      edges.push({
+        from: conditionId,
+        to: thenResult.entryNodeId,
+        label: "True",
+      });
+    }
+    exitPoints.push(...thenResult.exitPoints);
+    thenResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+    if (thenResult.nodes.length === 0) {
+      exitPoints.push({ id: conditionId, label: "True" });
+    }
+
+    const alternative = elifNode.childForFieldName("alternative");
+    if (alternative) {
+      const elseResult = this.processStatement(
+        alternative,
+        exitId,
+        loopContext
+      );
+      nodes.push(...elseResult.nodes);
+      edges.push(...elseResult.edges);
+
+      if (elseResult.entryNodeId) {
+        edges.push({
+          from: conditionId,
+          to: elseResult.entryNodeId,
+          label: "False",
+        });
+      }
+      exitPoints.push(...elseResult.exitPoints);
+      elseResult.nodesConnectedToExit.forEach((n) =>
+        nodesConnectedToExit.add(n)
+      );
+    } else {
+      exitPoints.push({ id: conditionId, label: "False" });
+    }
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: conditionId,
+      exitPoints,
+      nodesConnectedToExit,
     };
   }
 
   /**
    * Processes an else clause.
    */
-  private processElseClause(elseNode: Parser.SyntaxNode, exitId: string, loopContext?: LoopContext): ProcessResult {
-    const blockNode = elseNode.namedChildren.find((c: Parser.SyntaxNode) => c.type === "block") || null;
+  private processElseClause(
+    elseNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext
+  ): ProcessResult {
+    const blockNode = elseNode.childForFieldName("body") || null;
     return this.processBlock(blockNode, exitId, loopContext);
   }
 
   /**
    * Processes a break statement.
    */
-  private processBreakStatement(breakNode: Parser.SyntaxNode, loopContext: LoopContext): ProcessResult {
+  private processBreakStatement(
+    breakNode: Parser.SyntaxNode,
+    loopContext: LoopContext
+  ): ProcessResult {
     const nodeId = this.generateNodeId("break");
     const nodes: FlowchartNode[] = [
-      { id: nodeId, label: "break", shape: "stadium", style: this.nodeStyles.break },
+      {
+        id: nodeId,
+        label: "break",
+        shape: "stadium",
+        style: this.nodeStyles.break,
+      },
     ];
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.breakTargetId },
     ];
-    
-    this.locationMap.push({ 
-      start: breakNode.startIndex, 
-      end: breakNode.endIndex, 
-      nodeId 
+
+    this.locationMap.push({
+      start: breakNode.startIndex,
+      end: breakNode.endIndex,
+      nodeId,
     });
 
     return {
@@ -638,19 +775,27 @@ export class PyAstParser {
   /**
    * Processes a continue statement.
    */
-  private processContinueStatement(continueNode: Parser.SyntaxNode, loopContext: LoopContext): ProcessResult {
+  private processContinueStatement(
+    continueNode: Parser.SyntaxNode,
+    loopContext: LoopContext
+  ): ProcessResult {
     const nodeId = this.generateNodeId("continue");
     const nodes: FlowchartNode[] = [
-      { id: nodeId, label: "continue", shape: "stadium", style: this.nodeStyles.break },
+      {
+        id: nodeId,
+        label: "continue",
+        shape: "stadium",
+        style: this.nodeStyles.break,
+      },
     ];
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.continueTargetId },
     ];
-    
-    this.locationMap.push({ 
-      start: continueNode.startIndex, 
-      end: continueNode.endIndex, 
-      nodeId 
+
+    this.locationMap.push({
+      start: continueNode.startIndex,
+      end: continueNode.endIndex,
+      nodeId,
     });
 
     return {
@@ -665,18 +810,27 @@ export class PyAstParser {
   /**
    * Processes a try statement.
    */
-  private processTryStatement(tryNode: Parser.SyntaxNode, exitId: string, loopContext?: LoopContext): ProcessResult {
+  private processTryStatement(
+    tryNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext
+  ): ProcessResult {
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
     const nodesConnectedToExit = new Set<string>();
 
     const entryNodeId = this.generateNodeId("try");
-    nodes.push({ id: entryNodeId, label: "try", shape: "stadium", style: this.nodeStyles.special });
-    
-    this.locationMap.push({ 
-      start: tryNode.startIndex, 
-      end: tryNode.endIndex, 
-      nodeId: entryNodeId 
+    nodes.push({
+      id: entryNodeId,
+      label: "try",
+      shape: "stadium",
+      style: this.nodeStyles.special,
+    });
+
+    this.locationMap.push({
+      start: tryNode.startIndex,
+      end: tryNode.endIndex,
+      nodeId: entryNodeId,
     });
 
     let lastExitPoints: { id: string; label?: string }[] = [];
@@ -686,8 +840,10 @@ export class PyAstParser {
       const tryResult = this.processBlock(tryBody, exitId, loopContext);
       nodes.push(...tryResult.nodes);
       edges.push(...tryResult.edges);
-      tryResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
-      
+      tryResult.nodesConnectedToExit.forEach((n) =>
+        nodesConnectedToExit.add(n)
+      );
+
       if (tryResult.entryNodeId) {
         edges.push({ from: entryNodeId, to: tryResult.entryNodeId });
       }
@@ -695,17 +851,25 @@ export class PyAstParser {
     }
 
     // Process except clauses
-    const exceptClauses = tryNode.children.filter((c: Parser.SyntaxNode) => c.type === "except_clause");
+    const exceptClauses = tryNode.children.filter(
+      (c: Parser.SyntaxNode) => c.type === "except_clause"
+    );
     for (const clause of exceptClauses) {
       const exceptBody = clause.childForFieldName("body");
       if (exceptBody) {
         const exceptResult = this.processBlock(exceptBody, exitId, loopContext);
         nodes.push(...exceptResult.nodes);
         edges.push(...exceptResult.edges);
-        exceptResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+        exceptResult.nodesConnectedToExit.forEach((n) =>
+          nodesConnectedToExit.add(n)
+        );
 
         if (exceptResult.entryNodeId) {
-          edges.push({ from: entryNodeId, to: exceptResult.entryNodeId, label: "except" });
+          edges.push({
+            from: entryNodeId,
+            to: exceptResult.entryNodeId,
+            label: "except",
+          });
         }
         lastExitPoints.push(...exceptResult.exitPoints);
       }
@@ -716,10 +880,16 @@ export class PyAstParser {
     if (finallyClause) {
       const finallyBody = finallyClause.childForFieldName("body");
       if (finallyBody) {
-        const finallyResult = this.processBlock(finallyBody, exitId, loopContext);
+        const finallyResult = this.processBlock(
+          finallyBody,
+          exitId,
+          loopContext
+        );
         nodes.push(...finallyResult.nodes);
         edges.push(...finallyResult.edges);
-        finallyResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+        finallyResult.nodesConnectedToExit.forEach((n) =>
+          nodesConnectedToExit.add(n)
+        );
 
         if (finallyResult.entryNodeId) {
           lastExitPoints.forEach((ep) => {
@@ -744,25 +914,33 @@ export class PyAstParser {
   /**
    * Processes a with statement.
    */
-  private processWithStatement(withNode: Parser.SyntaxNode, exitId: string, loopContext?: LoopContext): ProcessResult {
+  private processWithStatement(
+    withNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext
+  ): ProcessResult {
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
-    
-    const withClauseNode = withNode.children.find((c: Parser.SyntaxNode) => c.type === 'with_clause');
-    const withClauseText = this.escapeString(withClauseNode?.text || "with ...");
+
+    const withClauseNode = withNode.children.find(
+      (c: Parser.SyntaxNode) => c.type === "with_clause"
+    );
+    const withClauseText = this.escapeString(
+      withClauseNode?.text || "with ..."
+    );
 
     const withEntryId = this.generateNodeId("with");
-    nodes.push({ 
-      id: withEntryId, 
-      label: withClauseText, 
-      shape: "rect", 
-      style: this.nodeStyles.special 
+    nodes.push({
+      id: withEntryId,
+      label: withClauseText,
+      shape: "rect",
+      style: this.nodeStyles.special,
     });
-    
-    this.locationMap.push({ 
-      start: withNode.startIndex, 
-      end: withNode.endIndex, 
-      nodeId: withEntryId 
+
+    this.locationMap.push({
+      start: withNode.startIndex,
+      end: withNode.endIndex,
+      nodeId: withEntryId,
     });
 
     const body = withNode.childForFieldName("body");
@@ -775,7 +953,10 @@ export class PyAstParser {
         edges.push({ from: withEntryId, to: bodyResult.entryNodeId });
       }
 
-      const exitPoints = bodyResult.exitPoints.length > 0 ? bodyResult.exitPoints : [{ id: withEntryId }];
+      const exitPoints =
+        bodyResult.exitPoints.length > 0
+          ? bodyResult.exitPoints
+          : [{ id: withEntryId }];
 
       return {
         nodes,

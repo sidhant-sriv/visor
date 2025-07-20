@@ -1,0 +1,1210 @@
+[PyAstParser] Function: async full_feature_test
+[PyAstParser] Nodes: [
+  {
+    "id": "start_0",
+    "label": "start: async full_feature_test",
+    "shape": "round",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "end_1",
+    "label": "End",
+    "shape": "round",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "stmt_2",
+    "label": "print(#quot;Function execution started.#quot;)",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "stmt_3",
+    "label": "processed_items = []",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "with_entry_4",
+    "label": "with open(config_path, 'r') as f",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000"
+  },
+  {
+    "id": "stmt_5",
+    "label": "config = f.read()",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "stmt_6",
+    "label": "print(#quot;Config loaded successfully.#quot;)",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "for_header_7",
+    "label": "for item in data_list",
+    "shape": "diamond",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "for_final_exit_8",
+    "label": " ",
+    "shape": "stadium",
+    "style": "width:0;height:0;"
+  },
+  {
+    "id": "for_natural_exit_9",
+    "label": " ",
+    "shape": "stadium",
+    "style": "width:0;height:0;"
+  },
+  {
+    "id": "if_cond_10",
+    "label": "item is None",
+    "shape": "diamond",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "if_cond_11",
+    "label": "item < 0",
+    "shape": "diamond",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "stmt_12",
+    "label": "print(#quot;For loop completed without a break.#quot;)",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "stmt_13",
+    "label": "count = 3",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "while_cond_14",
+    "label": "count > 0",
+    "shape": "diamond",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "while_final_exit_15",
+    "label": " ",
+    "shape": "stadium",
+    "style": "width:0;height:0;"
+  },
+  {
+    "id": "while_natural_exit_16",
+    "label": " ",
+    "shape": "stadium",
+    "style": "width:0;height:0;"
+  },
+  {
+    "id": "stmt_17",
+    "label": "print(f#quot;Countdown: {count}#quot;)",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "stmt_18",
+    "label": "count -= 1",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "if_cond_19",
+    "label": "count == 1",
+    "shape": "diamond",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "stmt_20",
+    "label": "print(#quot;This should not be printed.#quot;)",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "return_stmt_21",
+    "label": "return",
+    "shape": "stadium",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000"
+  }
+]
+[PyAstParser] Edges: [
+  {
+    "from": "stmt_2",
+    "to": "stmt_3"
+  },
+  {
+    "from": "stmt_5",
+    "to": "stmt_6"
+  },
+  {
+    "from": "with_entry_4",
+    "to": "stmt_5"
+  },
+  {
+    "from": "stmt_3",
+    "to": "with_entry_4"
+  },
+  {
+    "from": "if_cond_10",
+    "to": "if_cond_11",
+    "label": "False"
+  },
+  {
+    "from": "for_header_7",
+    "to": "if_cond_10",
+    "label": "Loop"
+  },
+  {
+    "from": "if_cond_10",
+    "to": "for_header_7"
+  },
+  {
+    "from": "if_cond_11",
+    "to": "for_header_7"
+  },
+  {
+    "from": "if_cond_11",
+    "to": "for_header_7"
+  },
+  {
+    "from": "for_header_7",
+    "to": "for_natural_exit_9",
+    "label": "End Loop"
+  },
+  {
+    "from": "for_natural_exit_9",
+    "to": "stmt_12"
+  },
+  {
+    "from": "stmt_12",
+    "to": "for_final_exit_8"
+  },
+  {
+    "from": "stmt_6",
+    "to": "for_header_7"
+  },
+  {
+    "from": "for_final_exit_8",
+    "to": "stmt_13"
+  },
+  {
+    "from": "stmt_17",
+    "to": "stmt_18"
+  },
+  {
+    "from": "stmt_18",
+    "to": "if_cond_19"
+  },
+  {
+    "from": "while_cond_14",
+    "to": "stmt_17",
+    "label": "True"
+  },
+  {
+    "from": "if_cond_19",
+    "to": "while_cond_14"
+  },
+  {
+    "from": "if_cond_19",
+    "to": "while_cond_14"
+  },
+  {
+    "from": "while_cond_14",
+    "to": "while_natural_exit_16",
+    "label": "False"
+  },
+  {
+    "from": "while_natural_exit_16",
+    "to": "stmt_20"
+  },
+  {
+    "from": "stmt_20",
+    "to": "while_final_exit_15"
+  },
+  {
+    "from": "stmt_13",
+    "to": "while_cond_14"
+  },
+  {
+    "from": "return_stmt_21",
+    "to": "end_1"
+  },
+  {
+    "from": "while_final_exit_15",
+    "to": "return_stmt_21"
+  },
+  {
+    "from": "start_0",
+    "to": "stmt_2"
+  }
+]
+[PyAstParser] LocationMap: [
+  {
+    "start": 58,
+    "end": 94,
+    "nodeId": "stmt_2"
+  },
+  {
+    "start": 99,
+    "end": 119,
+    "nodeId": "stmt_3"
+  },
+  {
+    "start": 155,
+    "end": 259,
+    "nodeId": "with_entry_4"
+  },
+  {
+    "start": 197,
+    "end": 214,
+    "nodeId": "stmt_5"
+  },
+  {
+    "start": 223,
+    "end": 259,
+    "nodeId": "stmt_6"
+  },
+  {
+    "start": 312,
+    "end": 1514,
+    "nodeId": "for_header_7"
+  },
+  {
+    "start": 343,
+    "end": 1403,
+    "nodeId": "if_cond_10"
+  },
+  {
+    "start": 492,
+    "end": 608,
+    "nodeId": "if_cond_11"
+  },
+  {
+    "start": 1470,
+    "end": 1514,
+    "nodeId": "stmt_12"
+  },
+  {
+    "start": 1553,
+    "end": 1562,
+    "nodeId": "stmt_13"
+  },
+  {
+    "start": 1567,
+    "end": 1808,
+    "nodeId": "while_cond_14"
+  },
+  {
+    "start": 1592,
+    "end": 1620,
+    "nodeId": "stmt_17"
+  },
+  {
+    "start": 1629,
+    "end": 1639,
+    "nodeId": "stmt_18"
+  },
+  {
+    "start": 1648,
+    "end": 1753,
+    "nodeId": "if_cond_19"
+  },
+  {
+    "start": 1772,
+    "end": 1808,
+    "nodeId": "stmt_20"
+  },
+  {
+    "start": 1814,
+    "end": 1836,
+    "nodeId": "return_stmt_21"
+  }
+]
+[PyAstParser] FlowchartIR: {
+  "nodes": [
+    {
+      "id": "start_0",
+      "label": "start: async full_feature_test",
+      "shape": "round",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "end_1",
+      "label": "End",
+      "shape": "round",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "stmt_2",
+      "label": "print(#quot;Function execution started.#quot;)",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "stmt_3",
+      "label": "processed_items = []",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "with_entry_4",
+      "label": "with open(config_path, 'r') as f",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000"
+    },
+    {
+      "id": "stmt_5",
+      "label": "config = f.read()",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "stmt_6",
+      "label": "print(#quot;Config loaded successfully.#quot;)",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "for_header_7",
+      "label": "for item in data_list",
+      "shape": "diamond",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "for_final_exit_8",
+      "label": " ",
+      "shape": "stadium",
+      "style": "width:0;height:0;"
+    },
+    {
+      "id": "for_natural_exit_9",
+      "label": " ",
+      "shape": "stadium",
+      "style": "width:0;height:0;"
+    },
+    {
+      "id": "if_cond_10",
+      "label": "item is None",
+      "shape": "diamond",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "if_cond_11",
+      "label": "item < 0",
+      "shape": "diamond",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "stmt_12",
+      "label": "print(#quot;For loop completed without a break.#quot;)",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "stmt_13",
+      "label": "count = 3",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "while_cond_14",
+      "label": "count > 0",
+      "shape": "diamond",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "while_final_exit_15",
+      "label": " ",
+      "shape": "stadium",
+      "style": "width:0;height:0;"
+    },
+    {
+      "id": "while_natural_exit_16",
+      "label": " ",
+      "shape": "stadium",
+      "style": "width:0;height:0;"
+    },
+    {
+      "id": "stmt_17",
+      "label": "print(f#quot;Countdown: {count}#quot;)",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "stmt_18",
+      "label": "count -= 1",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "if_cond_19",
+      "label": "count == 1",
+      "shape": "diamond",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "stmt_20",
+      "label": "print(#quot;This should not be printed.#quot;)",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "return_stmt_21",
+      "label": "return",
+      "shape": "stadium",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000"
+    }
+  ],
+  "edges": [
+    {
+      "from": "stmt_2",
+      "to": "stmt_3"
+    },
+    {
+      "from": "stmt_5",
+      "to": "stmt_6"
+    },
+    {
+      "from": "with_entry_4",
+      "to": "stmt_5"
+    },
+    {
+      "from": "stmt_3",
+      "to": "with_entry_4"
+    },
+    {
+      "from": "if_cond_10",
+      "to": "if_cond_11",
+      "label": "False"
+    },
+    {
+      "from": "for_header_7",
+      "to": "if_cond_10",
+      "label": "Loop"
+    },
+    {
+      "from": "if_cond_10",
+      "to": "for_header_7"
+    },
+    {
+      "from": "if_cond_11",
+      "to": "for_header_7"
+    },
+    {
+      "from": "if_cond_11",
+      "to": "for_header_7"
+    },
+    {
+      "from": "for_header_7",
+      "to": "for_natural_exit_9",
+      "label": "End Loop"
+    },
+    {
+      "from": "for_natural_exit_9",
+      "to": "stmt_12"
+    },
+    {
+      "from": "stmt_12",
+      "to": "for_final_exit_8"
+    },
+    {
+      "from": "stmt_6",
+      "to": "for_header_7"
+    },
+    {
+      "from": "for_final_exit_8",
+      "to": "stmt_13"
+    },
+    {
+      "from": "stmt_17",
+      "to": "stmt_18"
+    },
+    {
+      "from": "stmt_18",
+      "to": "if_cond_19"
+    },
+    {
+      "from": "while_cond_14",
+      "to": "stmt_17",
+      "label": "True"
+    },
+    {
+      "from": "if_cond_19",
+      "to": "while_cond_14"
+    },
+    {
+      "from": "if_cond_19",
+      "to": "while_cond_14"
+    },
+    {
+      "from": "while_cond_14",
+      "to": "while_natural_exit_16",
+      "label": "False"
+    },
+    {
+      "from": "while_natural_exit_16",
+      "to": "stmt_20"
+    },
+    {
+      "from": "stmt_20",
+      "to": "while_final_exit_15"
+    },
+    {
+      "from": "stmt_13",
+      "to": "while_cond_14"
+    },
+    {
+      "from": "return_stmt_21",
+      "to": "end_1"
+    },
+    {
+      "from": "while_final_exit_15",
+      "to": "return_stmt_21"
+    },
+    {
+      "from": "start_0",
+      "to": "stmt_2"
+    }
+  ],
+  "locationMap": [
+    {
+      "start": 58,
+      "end": 94,
+      "nodeId": "stmt_2"
+    },
+    {
+      "start": 99,
+      "end": 119,
+      "nodeId": "stmt_3"
+    },
+    {
+      "start": 155,
+      "end": 259,
+      "nodeId": "with_entry_4"
+    },
+    {
+      "start": 197,
+      "end": 214,
+      "nodeId": "stmt_5"
+    },
+    {
+      "start": 223,
+      "end": 259,
+      "nodeId": "stmt_6"
+    },
+    {
+      "start": 312,
+      "end": 1514,
+      "nodeId": "for_header_7"
+    },
+    {
+      "start": 343,
+      "end": 1403,
+      "nodeId": "if_cond_10"
+    },
+    {
+      "start": 492,
+      "end": 608,
+      "nodeId": "if_cond_11"
+    },
+    {
+      "start": 1470,
+      "end": 1514,
+      "nodeId": "stmt_12"
+    },
+    {
+      "start": 1553,
+      "end": 1562,
+      "nodeId": "stmt_13"
+    },
+    {
+      "start": 1567,
+      "end": 1808,
+      "nodeId": "while_cond_14"
+    },
+    {
+      "start": 1592,
+      "end": 1620,
+      "nodeId": "stmt_17"
+    },
+    {
+      "start": 1629,
+      "end": 1639,
+      "nodeId": "stmt_18"
+    },
+    {
+      "start": 1648,
+      "end": 1753,
+      "nodeId": "if_cond_19"
+    },
+    {
+      "start": 1772,
+      "end": 1808,
+      "nodeId": "stmt_20"
+    },
+    {
+      "start": 1814,
+      "end": 1836,
+      "nodeId": "return_stmt_21"
+    }
+  ],
+  "functionRange": {
+    "start": 1,
+    "end": 1836
+  },
+  "title": "Flowchart for full_feature_test",
+  "entryNodeId": "start_0",
+  "exitNodeId": "end_1"
+}
+{
+  nodes: [
+    {
+      id: 'start_0',
+      label: 'start: async full_feature_test',
+      shape: 'round',
+      style: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;'
+    },
+    {
+      id: 'end_1',
+      label: 'End',
+      shape: 'round',
+      style: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;'
+    },
+    {
+      id: 'stmt_2',
+      label: 'print(#quot;Function execution started.#quot;)',
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;'
+    },
+    {
+      id: 'stmt_3',
+      label: 'processed_items = []',
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;'
+    },
+    {
+      id: 'with_entry_4',
+      label: "with open(config_path, 'r') as f",
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000'
+    },
+    {
+      id: 'stmt_5',
+      label: 'config = f.read()',
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;'
+    },
+    {
+      id: 'stmt_6',
+      label: 'print(#quot;Config loaded successfully.#quot;)',
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;'
+    },
+    {
+      id: 'for_header_7',
+      label: 'for item in data_list',
+      shape: 'diamond',
+      style: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;'
+    },
+    {
+      id: 'for_final_exit_8',
+      label: ' ',
+      shape: 'stadium',
+      style: 'width:0;height:0;'
+    },
+    {
+      id: 'for_natural_exit_9',
+      label: ' ',
+      shape: 'stadium',
+      style: 'width:0;height:0;'
+    },
+    {
+      id: 'if_cond_10',
+      label: 'item is None',
+      shape: 'diamond',
+      style: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;'
+    },
+    {
+      id: 'if_cond_11',
+      label: 'item < 0',
+      shape: 'diamond',
+      style: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;'
+    },
+    {
+      id: 'stmt_12',
+      label: 'print(#quot;For loop completed without a break.#quot;)',
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;'
+    },
+    {
+      id: 'stmt_13',
+      label: 'count = 3',
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;'
+    },
+    {
+      id: 'while_cond_14',
+      label: 'count > 0',
+      shape: 'diamond',
+      style: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;'
+    },
+    {
+      id: 'while_final_exit_15',
+      label: ' ',
+      shape: 'stadium',
+      style: 'width:0;height:0;'
+    },
+    {
+      id: 'while_natural_exit_16',
+      label: ' ',
+      shape: 'stadium',
+      style: 'width:0;height:0;'
+    },
+    {
+      id: 'stmt_17',
+      label: 'print(f#quot;Countdown: {count}#quot;)',
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;'
+    },
+    {
+      id: 'stmt_18',
+      label: 'count -= 1',
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;'
+    },
+    {
+      id: 'if_cond_19',
+      label: 'count == 1',
+      shape: 'diamond',
+      style: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000;'
+    },
+    {
+      id: 'stmt_20',
+      label: 'print(#quot;This should not be printed.#quot;)',
+      shape: 'rect',
+      style: 'fill:#eee,stroke:#000,stroke-width:1px,color:#000;'
+    },
+    {
+      id: 'return_stmt_21',
+      label: 'return',
+      shape: 'stadium',
+      style: 'fill:#eee,stroke:#000,stroke-width:4px,color:#000'
+    }
+  ],
+  edges: [
+    { from: 'stmt_2', to: 'stmt_3', label: undefined },
+    { from: 'stmt_5', to: 'stmt_6', label: undefined },
+    { from: 'with_entry_4', to: 'stmt_5' },
+    { from: 'stmt_3', to: 'with_entry_4', label: undefined },
+    { from: 'if_cond_10', to: 'if_cond_11', label: 'False' },
+    { from: 'for_header_7', to: 'if_cond_10', label: 'Loop' },
+    { from: 'if_cond_10', to: 'for_header_7' },
+    { from: 'if_cond_11', to: 'for_header_7' },
+    { from: 'if_cond_11', to: 'for_header_7' },
+    {
+      from: 'for_header_7',
+      to: 'for_natural_exit_9',
+      label: 'End Loop'
+    },
+    { from: 'for_natural_exit_9', to: 'stmt_12' },
+    { from: 'stmt_12', to: 'for_final_exit_8' },
+    { from: 'stmt_6', to: 'for_header_7', label: undefined },
+    { from: 'for_final_exit_8', to: 'stmt_13', label: undefined },
+    { from: 'stmt_17', to: 'stmt_18', label: undefined },
+    { from: 'stmt_18', to: 'if_cond_19', label: undefined },
+    { from: 'while_cond_14', to: 'stmt_17', label: 'True' },
+    { from: 'if_cond_19', to: 'while_cond_14' },
+    { from: 'if_cond_19', to: 'while_cond_14' },
+    {
+      from: 'while_cond_14',
+      to: 'while_natural_exit_16',
+      label: 'False'
+    },
+    { from: 'while_natural_exit_16', to: 'stmt_20' },
+    { from: 'stmt_20', to: 'while_final_exit_15' },
+    { from: 'stmt_13', to: 'while_cond_14', label: undefined },
+    { from: 'return_stmt_21', to: 'end_1' },
+    {
+      from: 'while_final_exit_15',
+      to: 'return_stmt_21',
+      label: undefined
+    },
+    { from: 'start_0', to: 'stmt_2' }
+  ],
+  locationMap: [
+    { start: 58, end: 94, nodeId: 'stmt_2' },
+    { start: 99, end: 119, nodeId: 'stmt_3' },
+    { start: 155, end: 259, nodeId: 'with_entry_4' },
+    { start: 197, end: 214, nodeId: 'stmt_5' },
+    { start: 223, end: 259, nodeId: 'stmt_6' },
+    { start: 312, end: 1514, nodeId: 'for_header_7' },
+    { start: 343, end: 1403, nodeId: 'if_cond_10' },
+    { start: 492, end: 608, nodeId: 'if_cond_11' },
+    { start: 1470, end: 1514, nodeId: 'stmt_12' },
+    { start: 1553, end: 1562, nodeId: 'stmt_13' },
+    { start: 1567, end: 1808, nodeId: 'while_cond_14' },
+    { start: 1592, end: 1620, nodeId: 'stmt_17' },
+    { start: 1629, end: 1639, nodeId: 'stmt_18' },
+    { start: 1648, end: 1753, nodeId: 'if_cond_19' },
+    { start: 1772, end: 1808, nodeId: 'stmt_20' },
+    { start: 1814, end: 1836, nodeId: 'return_stmt_21' }
+  ],
+  functionRange: { start: 1, end: 1836 },
+  title: 'Flowchart for full_feature_test',
+  entryNodeId: 'start_0',
+  exitNodeId: 'end_1'
+}
+flowchart TD
+start_0("start: async full_feature_test")
+end_1("End")
+stmt_2["print(#quot;Function execution started.#quot;)"]
+stmt_3["processed_items = []"]
+with_entry_4["with open(config_path, 'r') as f"]
+stmt_5["config = f.read()"]
+stmt_6["print(#quot;Config loaded successfully.#quot;)"]
+for_header_7{"for item in data_list"}
+for_final_exit_8([ ])
+for_natural_exit_9([ ])
+if_cond_10{"item is None"}
+if_cond_11{"item < 0"}
+stmt_12["print(#quot;For loop completed without a break.#quot;)"]
+stmt_13["count = 3"]
+while_cond_14{"count > 0"}
+while_final_exit_15([ ])
+while_natural_exit_16([ ])
+stmt_17["print(f#quot;Countdown: {count}#quot;)"]
+stmt_18["count -= 1"]
+if_cond_19{"count == 1"}
+stmt_20["print(#quot;This should not be printed.#quot;)"]
+return_stmt_21([return])
+stmt_2 --> stmt_3
+stmt_5 --> stmt_6
+with_entry_4 --> stmt_5
+stmt_3 --> with_entry_4
+if_cond_10 -->|False| if_cond_11
+for_header_7 -->|Loop| if_cond_10
+if_cond_10 --> for_header_7
+if_cond_11 --> for_header_7
+if_cond_11 --> for_header_7
+for_header_7 -->|End Loop| for_natural_exit_9
+for_natural_exit_9 --> stmt_12
+stmt_12 --> for_final_exit_8
+stmt_6 --> for_header_7
+for_final_exit_8 --> stmt_13
+stmt_17 --> stmt_18
+stmt_18 --> if_cond_19
+while_cond_14 -->|True| stmt_17
+if_cond_19 --> while_cond_14
+if_cond_19 --> while_cond_14
+while_cond_14 -->|False| while_natural_exit_16
+while_natural_exit_16 --> stmt_20
+stmt_20 --> while_final_exit_15
+stmt_13 --> while_cond_14
+return_stmt_21 --> end_1
+while_final_exit_15 --> return_stmt_21
+start_0 --> stmt_2
+style start_0 fill:#eee,stroke:#000,stroke-width:4px,color:#000;
+style end_1 fill:#eee,stroke:#000,stroke-width:4px,color:#000;
+style stmt_2 fill:#eee,stroke:#000,stroke-width:1px,color:#000;
+style stmt_3 fill:#eee,stroke:#000,stroke-width:1px,color:#000;
+style with_entry_4 fill:#eee,stroke:#000,stroke-width:4px,color:#000
+style stmt_5 fill:#eee,stroke:#000,stroke-width:1px,color:#000;
+style stmt_6 fill:#eee,stroke:#000,stroke-width:1px,color:#000;
+style for_header_7 fill:#eee,stroke:#000,stroke-width:4px,color:#000;
+style for_final_exit_8 width:0;height:0;
+style for_natural_exit_9 width:0;height:0;
+style if_cond_10 fill:#eee,stroke:#000,stroke-width:4px,color:#000;
+style if_cond_11 fill:#eee,stroke:#000,stroke-width:4px,color:#000;
+style stmt_12 fill:#eee,stroke:#000,stroke-width:1px,color:#000;
+style stmt_13 fill:#eee,stroke:#000,stroke-width:1px,color:#000;
+style while_cond_14 fill:#eee,stroke:#000,stroke-width:4px,color:#000;
+style while_final_exit_15 width:0;height:0;
+style while_natural_exit_16 width:0;height:0;
+style stmt_17 fill:#eee,stroke:#000,stroke-width:1px,color:#000;
+style stmt_18 fill:#eee,stroke:#000,stroke-width:1px,color:#000;
+style if_cond_19 fill:#eee,stroke:#000,stroke-width:4px,color:#000;
+style stmt_20 fill:#eee,stroke:#000,stroke-width:1px,color:#000;
+style return_stmt_21 fill:#eee,stroke:#000,stroke-width:4px,color:#000
+=== Testing simple return ===
+Simple code: def simple_test():
+    return "hello"
+
+[PyAstParser] Function: simple_test
+[PyAstParser] Nodes: [
+  {
+    "id": "start_0",
+    "label": "start: simple_test",
+    "shape": "round",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "end_1",
+    "label": "End",
+    "shape": "round",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "return_stmt_2",
+    "label": "return",
+    "shape": "stadium",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000"
+  }
+]
+[PyAstParser] Edges: [
+  {
+    "from": "return_stmt_2",
+    "to": "end_1"
+  },
+  {
+    "from": "start_0",
+    "to": "return_stmt_2"
+  }
+]
+[PyAstParser] LocationMap: [
+  {
+    "start": 23,
+    "end": 37,
+    "nodeId": "return_stmt_2"
+  }
+]
+[PyAstParser] FlowchartIR: {
+  "nodes": [
+    {
+      "id": "start_0",
+      "label": "start: simple_test",
+      "shape": "round",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "end_1",
+      "label": "End",
+      "shape": "round",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "return_stmt_2",
+      "label": "return",
+      "shape": "stadium",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000"
+    }
+  ],
+  "edges": [
+    {
+      "from": "return_stmt_2",
+      "to": "end_1"
+    },
+    {
+      "from": "start_0",
+      "to": "return_stmt_2"
+    }
+  ],
+  "locationMap": [
+    {
+      "start": 23,
+      "end": 37,
+      "nodeId": "return_stmt_2"
+    }
+  ],
+  "functionRange": {
+    "start": 0,
+    "end": 37
+  },
+  "title": "Flowchart for simple_test",
+  "entryNodeId": "start_0",
+  "exitNodeId": "end_1"
+}
+Simple result nodes: 3
+  start_0: start: simple_test (round)
+  end_1: End (round)
+  return_stmt_2: return (stadium)
+
+=== Testing test_multiple_returns ===
+[PyAstParser] Function: test_multiple_returns
+[PyAstParser] Nodes: [
+  {
+    "id": "start_0",
+    "label": "start: test_multiple_returns",
+    "shape": "round",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "end_1",
+    "label": "End",
+    "shape": "round",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "stmt_2",
+    "label": "x = 5",
+    "shape": "rect",
+    "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+  },
+  {
+    "id": "if_cond_3",
+    "label": "x > 0",
+    "shape": "diamond",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  },
+  {
+    "id": "if_cond_4",
+    "label": "x < 0",
+    "shape": "diamond",
+    "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+  }
+]
+[PyAstParser] Edges: [
+  {
+    "from": "if_cond_3",
+    "to": "if_cond_4",
+    "label": "False"
+  },
+  {
+    "from": "stmt_2",
+    "to": "if_cond_3"
+  },
+  {
+    "from": "start_0",
+    "to": "stmt_2"
+  },
+  {
+    "from": "if_cond_3",
+    "to": "end_1",
+    "label": "True"
+  },
+  {
+    "from": "if_cond_4",
+    "to": "end_1",
+    "label": "True"
+  },
+  {
+    "from": "if_cond_4",
+    "to": "end_1",
+    "label": "False"
+  }
+]
+[PyAstParser] LocationMap: [
+  {
+    "start": 33,
+    "end": 38,
+    "nodeId": "stmt_2"
+  },
+  {
+    "start": 43,
+    "end": 152,
+    "nodeId": "if_cond_3"
+  },
+  {
+    "start": 83,
+    "end": 120,
+    "nodeId": "if_cond_4"
+  }
+]
+[PyAstParser] FlowchartIR: {
+  "nodes": [
+    {
+      "id": "start_0",
+      "label": "start: test_multiple_returns",
+      "shape": "round",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "end_1",
+      "label": "End",
+      "shape": "round",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "stmt_2",
+      "label": "x = 5",
+      "shape": "rect",
+      "style": "fill:#eee,stroke:#000,stroke-width:1px,color:#000;"
+    },
+    {
+      "id": "if_cond_3",
+      "label": "x > 0",
+      "shape": "diamond",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    },
+    {
+      "id": "if_cond_4",
+      "label": "x < 0",
+      "shape": "diamond",
+      "style": "fill:#eee,stroke:#000,stroke-width:4px,color:#000;"
+    }
+  ],
+  "edges": [
+    {
+      "from": "if_cond_3",
+      "to": "if_cond_4",
+      "label": "False"
+    },
+    {
+      "from": "stmt_2",
+      "to": "if_cond_3"
+    },
+    {
+      "from": "start_0",
+      "to": "stmt_2"
+    },
+    {
+      "from": "if_cond_3",
+      "to": "end_1",
+      "label": "True"
+    },
+    {
+      "from": "if_cond_4",
+      "to": "end_1",
+      "label": "True"
+    },
+    {
+      "from": "if_cond_4",
+      "to": "end_1",
+      "label": "False"
+    }
+  ],
+  "locationMap": [
+    {
+      "start": 33,
+      "end": 38,
+      "nodeId": "stmt_2"
+    },
+    {
+      "start": 43,
+      "end": 152,
+      "nodeId": "if_cond_3"
+    },
+    {
+      "start": 83,
+      "end": 120,
+      "nodeId": "if_cond_4"
+    }
+  ],
+  "functionRange": {
+    "start": 0,
+    "end": 152
+  },
+  "title": "Flowchart for test_multiple_returns",
+  "entryNodeId": "start_0",
+  "exitNodeId": "end_1"
+}
+Nodes:
+  start_0: start: test_multiple_returns (round)
+  end_1: End (round)
+  stmt_2: x = 5 (rect)
+  if_cond_3: x > 0 (diamond)
+  if_cond_4: x < 0 (diamond)
+Edges:
+  if_cond_3 -> if_cond_4 (False)
+  stmt_2 -> if_cond_3
+  start_0 -> stmt_2
+  if_cond_3 -> end_1 (True)
+  if_cond_4 -> end_1 (True)
+  if_cond_4 -> end_1 (False)
+Return statements found: 1
+  Return node: start_0 - start: test_multiple_returns
