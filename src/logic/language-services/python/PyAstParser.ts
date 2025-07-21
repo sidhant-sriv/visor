@@ -232,9 +232,13 @@ export class PyAstParser {
     const nodesConnectedToExit = new Set<string>();
     let lastExitPoints: { id: string; label?: string }[] = [];
 
+    // Filter out clauses that are handled by their parent statements
     const statements = blockNode.namedChildren.filter(
       (s: Parser.SyntaxNode) =>
-        s.type !== "pass_statement" && s.type !== "comment"
+        s.type !== "pass_statement" && 
+        s.type !== "comment" &&
+        s.type !== "elif_clause" && // Exclude elif_clause as it's handled by if_statement
+        s.type !== "else_clause"   // Exclude else_clause as it's handled by if_statement
     );
 
     if (statements.length === 0) {
@@ -377,7 +381,9 @@ export class PyAstParser {
   }
 
   /**
-   * Processes an if statement.
+   * Processes an if-elif-else statement chain.
+   * This version correctly handles the AST structure where an if_statement node
+   * can have multiple 'alternative' children (for elif and else clauses).
    */
   private processIfStatement(
     ifNode: Parser.SyntaxNode,
@@ -390,104 +396,106 @@ export class PyAstParser {
     const nodesConnectedToExit = new Set<string>();
     const allExitPoints: { id: string; label?: string }[] = [];
 
-    let currentIfNode: Parser.SyntaxNode | null = ifNode;
-    let lastConditionId: string | null = null;
+    // 1. Process the main 'if' part
+    const ifConditionNode = ifNode.childForFieldName("condition");
+    const ifConsequenceNode = ifNode.childForFieldName("consequence");
 
-    while (currentIfNode && currentIfNode.type === "if_statement") {
-      const condition = this.escapeString(
-        currentIfNode.childForFieldName("condition")!.text
-      );
-      const conditionId = this.generateNodeId("if_cond");
-      nodes.push({
-        id: conditionId,
-        label: condition,
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      });
-      this.locationMap.push({
-        start: currentIfNode.startIndex,
-        end: currentIfNode.endIndex,
-        nodeId: conditionId,
-      });
-
-      if (lastConditionId) {
-        edges.push({ from: lastConditionId, to: conditionId, label: "False" });
-      }
-
-      const consequence = currentIfNode.childForFieldName("consequence");
-      const thenResult = this.processBlock(
-        consequence,
-        exitId,
-        loopContext,
-        finallyContext
-      );
-      nodes.push(...thenResult.nodes);
-      edges.push(...thenResult.edges);
-      thenResult.nodesConnectedToExit.forEach((n) =>
-        nodesConnectedToExit.add(n)
-      );
-
-      if (thenResult.entryNodeId) {
-        edges.push({
-          from: conditionId,
-          to: thenResult.entryNodeId,
-          label: "True",
-        });
-      } else {
-        // Empty then block, the condition itself is an exit point for the true path
-        allExitPoints.push({ id: conditionId, label: "True" });
-      }
-      allExitPoints.push(...thenResult.exitPoints);
-
-      lastConditionId = conditionId;
-      const alternative = currentIfNode.childForFieldName("alternative");
-
-      if (alternative) {
-        if (alternative.type === "if_statement") {
-          currentIfNode = alternative;
-        } else if (alternative.type === "else_clause") {
-          const elseBody = alternative.childForFieldName("body");
-          const elseResult = this.processBlock(
-            elseBody,
-            exitId,
-            loopContext,
-            finallyContext
-          );
-          nodes.push(...elseResult.nodes);
-          edges.push(...elseResult.edges);
-          elseResult.nodesConnectedToExit.forEach((n) =>
-            nodesConnectedToExit.add(n)
-          );
-
-          if (elseResult.entryNodeId) {
-            edges.push({
-              from: lastConditionId,
-              to: elseResult.entryNodeId,
-              label: "False",
-            });
-          } else {
-            // Empty else block
-            allExitPoints.push({ id: lastConditionId, label: "False" });
-          }
-          allExitPoints.push(...elseResult.exitPoints);
-          currentIfNode = null; // End of the chain
-        } else {
-          // Should be elif, but tree-sitter python grammar seems to flatten elifs into nested if_statements
-          currentIfNode = null;
-        }
-      } else {
-        // No alternative, the false path from the last condition is an exit point
-        allExitPoints.push({ id: lastConditionId, label: "False" });
-        currentIfNode = null;
-      }
+    if (!ifConditionNode || !ifConsequenceNode) {
+        return { nodes: [], edges: [], entryNodeId: undefined, exitPoints: [], nodesConnectedToExit };
     }
 
+    const ifConditionId = this.generateNodeId("cond");
+    nodes.push({
+        id: ifConditionId,
+        label: this.escapeString(ifConditionNode.text),
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+    });
+    this.locationMap.push({ start: ifConditionNode.startIndex, end: ifConditionNode.endIndex, nodeId: ifConditionId });
+
+    const entryNodeId = ifConditionId;
+    let lastConditionId = ifConditionId;
+
+    const ifConsequenceResult = this.processBlock(ifConsequenceNode, exitId, loopContext, finallyContext);
+    nodes.push(...ifConsequenceResult.nodes);
+    edges.push(...ifConsequenceResult.edges);
+    ifConsequenceResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+
+    if (ifConsequenceResult.entryNodeId) {
+        edges.push({ from: ifConditionId, to: ifConsequenceResult.entryNodeId, label: "True" });
+    } else {
+        allExitPoints.push({ id: ifConditionId, label: "True" });
+    }
+    allExitPoints.push(...ifConsequenceResult.exitPoints);
+
+    // 2. Process all alternatives (elif and else clauses) using `childrenForFieldName`
+    const alternatives = ifNode.childrenForFieldName("alternative");
+    let elseClause: Parser.SyntaxNode | null = null;
+
+    for (const clause of alternatives) {
+        if (clause.type === 'elif_clause') {
+            const elifConditionNode = clause.childForFieldName("condition");
+            const elifConsequenceNode = clause.childForFieldName("consequence");
+
+            if (!elifConditionNode || !elifConsequenceNode) continue;
+
+            const elifConditionId = this.generateNodeId("cond");
+            nodes.push({
+                id: elifConditionId,
+                label: this.escapeString(elifConditionNode.text),
+                shape: "diamond",
+                style: this.nodeStyles.decision,
+            });
+            this.locationMap.push({ start: elifConditionNode.startIndex, end: elifConditionNode.endIndex, nodeId: elifConditionId });
+            
+            // Connect previous false branch to this new condition
+            edges.push({ from: lastConditionId, to: elifConditionId, label: "False" });
+            lastConditionId = elifConditionId;
+
+            const elifConsequenceResult = this.processBlock(elifConsequenceNode, exitId, loopContext, finallyContext);
+            nodes.push(...elifConsequenceResult.nodes);
+            edges.push(...elifConsequenceResult.edges);
+            elifConsequenceResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+
+            if (elifConsequenceResult.entryNodeId) {
+                edges.push({ from: elifConditionId, to: elifConsequenceResult.entryNodeId, label: "True" });
+            } else {
+                allExitPoints.push({ id: elifConditionId, label: "True" });
+            }
+            allExitPoints.push(...elifConsequenceResult.exitPoints);
+
+        } else if (clause.type === 'else_clause') {
+            elseClause = clause;
+            // An else clause must be the last alternative, so we can stop looking.
+            break; 
+        }
+    }
+
+    // 3. Process the 'else' clause if it was found
+    if (elseClause) {
+        const elseBody = elseClause.childForFieldName("body");
+        const elseResult = this.processBlock(elseBody, exitId, loopContext, finallyContext);
+        nodes.push(...elseResult.nodes);
+        edges.push(...elseResult.edges);
+        elseResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+
+        if (elseResult.entryNodeId) {
+            edges.push({ from: lastConditionId, to: elseResult.entryNodeId, label: "False" });
+        } else {
+            allExitPoints.push({ id: lastConditionId, label: "False" });
+        }
+        allExitPoints.push(...elseResult.exitPoints);
+    } else {
+        // 4. No 'else' clause, so the last 'false' branch is an exit point for the whole if-structure
+        allExitPoints.push({ id: lastConditionId, label: "False" });
+    }
+  
     return {
-      nodes,
-      edges,
-      entryNodeId: nodes[0]?.id,
-      exitPoints: allExitPoints,
-      nodesConnectedToExit,
+        nodes,
+        edges,
+        entryNodeId: entryNodeId,
+        exitPoints: allExitPoints,
+        nodesConnectedToExit,
     };
   }
 
