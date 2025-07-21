@@ -1,4 +1,5 @@
 import { analyzeTypeScriptCode } from "./language-services/typescript";
+import { analyzePythonCode } from "./language-services/python";
 import { LocationMapEntry } from "../ir/ir";
 
 /**
@@ -14,9 +15,13 @@ export function analyzeCode(
   locationMap: LocationMapEntry[];
   functionRange?: { start: number; end: number };
 } {
-  // TODO: Add language selection logic
+  // Language selection logic
   if (language === 'typescript' || language === 'javascript') {
     return analyzeTypeScriptCode(code, position);
+  }
+  
+  if (language === 'python') {
+    return analyzePythonCode(code, position);
   }
   
   // Default or unsupported language

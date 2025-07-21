@@ -62,7 +62,9 @@ export class TsAstParser {
   }
 
   private escapeString(str: string): string {
-    if (!str) return "";
+    if (!str) {
+      return "";
+    }
     const sanitized = str.replace(/"/g, "#quot;").replace(/\n/g, " ").trim();
     return sanitized.length > 60
       ? sanitized.substring(0, 57) + "..."

@@ -3,3 +3,13 @@ dist
 node_modules
 .vscode-test/
 *.vsix
+
+# Compiled TypeScript files
+src/**/*.js
+src/**/*.js.map
+*.tsbuildinfo
+
+# Temporary test files
+test_*.py
+test_*.js
+simple_test.py

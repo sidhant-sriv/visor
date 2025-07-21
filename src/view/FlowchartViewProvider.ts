@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { analyzeCode } from "../logic/analyzer";
 import { LocationMapEntry } from "../ir/ir";
 
-const MERMAID_VERSION = "10.9.1";
+const MERMAID_VERSION = "11.8.0";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
 
 /**
