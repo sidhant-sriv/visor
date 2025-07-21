@@ -147,7 +147,11 @@ export class PyAstParser {
     hofCallNode: Parser.SyntaxNode,
     containerName?: string
   ): FlowchartIR {
-    this.log("Generating HOF flowchart.", { statementNode: statementNode.text, hofCallNode: hofCallNode.text, containerName });
+    this.log("Generating HOF flowchart.", {
+      statementNode: statementNode.text,
+      hofCallNode: hofCallNode.text,
+      containerName,
+    });
     this.nodeIdCounter = 0;
     this.locationMap = [];
 
@@ -157,8 +161,8 @@ export class PyAstParser {
     // 1. Process the core HOF logic (map, filter, etc.)
     const hofResult = this.processHigherOrderFunctionCall(hofCallNode);
     if (!hofResult) {
-        this.log("HOF processing returned null, falling back to default.");
-        return this.generateFlowchart(statementNode.text);
+      this.log("HOF processing returned null, falling back to default.");
+      return this.generateFlowchart(statementNode.text);
     }
 
     nodes.push(...hofResult.nodes);
@@ -168,71 +172,93 @@ export class PyAstParser {
     let finalExitPoints = hofResult.exitPoints;
 
     // 2. Prepend an assignment node if the HOF is part of an assignment
-    if (statementNode.type === 'assignment' || (statementNode.type === 'expression_statement' && statementNode.namedChild(0)?.type === 'assignment')) {
-        const assignment = statementNode.type === 'assignment' ? statementNode : statementNode.namedChild(0)!;
-        const assignId = this.generateNodeId("assign_hof");
-        const leftText = this.escapeString(assignment.childForFieldName("left")!.text);
-        const assignNode: FlowchartNode = {
-            id: assignId,
-            label: `${leftText} = ...`,
-            shape: "rect",
-            style: this.nodeStyles.process,
-        };
-        nodes.unshift(assignNode);
-        if (entryPointId) {
-            edges.unshift({ from: assignId, to: entryPointId });
-        }
-        entryPointId = assignId;
-        this.locationMap.push({
-            start: assignment.childForFieldName("left")!.startIndex,
-            end: assignment.childForFieldName("left")!.endIndex,
-            nodeId: assignId,
-        });
+    if (
+      statementNode.type === "assignment" ||
+      (statementNode.type === "expression_statement" &&
+        statementNode.namedChild(0)?.type === "assignment")
+    ) {
+      const assignment =
+        statementNode.type === "assignment"
+          ? statementNode
+          : statementNode.namedChild(0)!;
+      const assignId = this.generateNodeId("assign_hof");
+      const leftText = this.escapeString(
+        assignment.childForFieldName("left")!.text
+      );
+      const assignNode: FlowchartNode = {
+        id: assignId,
+        label: `${leftText} = ...`,
+        shape: "rect",
+        style: this.nodeStyles.process,
+      };
+      nodes.unshift(assignNode);
+      if (entryPointId) {
+        edges.unshift({ from: assignId, to: entryPointId });
+      }
+      entryPointId = assignId;
+      this.locationMap.push({
+        start: assignment.childForFieldName("left")!.startIndex,
+        end: assignment.childForFieldName("left")!.endIndex,
+        nodeId: assignId,
+      });
     }
 
     // 3. Append a container conversion node if the HOF was wrapped (e.g., list(map(...)))
     if (containerName) {
-        const convertId = this.generateNodeId("convert");
-        const convertNode: FlowchartNode = {
-            id: convertId,
-            label: `Convert to ${containerName}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
-        };
-        nodes.push(convertNode);
-        finalExitPoints.forEach(ep => {
-            edges.push({ from: ep.id, to: convertId, label: ep.label });
-        });
-        finalExitPoints = [{ id: convertId }];
+      const convertId = this.generateNodeId("convert");
+      const convertNode: FlowchartNode = {
+        id: convertId,
+        label: `Convert to ${containerName}`,
+        shape: "rect",
+        style: this.nodeStyles.process,
+      };
+      nodes.push(convertNode);
+      finalExitPoints.forEach((ep) => {
+        edges.push({ from: ep.id, to: convertId, label: ep.label });
+      });
+      finalExitPoints = [{ id: convertId }];
     }
 
     // 4. Add the global start and end nodes for the complete flowchart
     const startId = this.generateNodeId("start");
     const endId = this.generateNodeId("end");
-    nodes.unshift({ id: startId, label: "Start", shape: "round", style: this.nodeStyles.terminator });
-    nodes.push({ id: endId, label: "End", shape: "round", style: this.nodeStyles.terminator });
+    nodes.unshift({
+      id: startId,
+      label: "Start",
+      shape: "round",
+      style: this.nodeStyles.terminator,
+    });
+    nodes.push({
+      id: endId,
+      label: "End",
+      shape: "round",
+      style: this.nodeStyles.terminator,
+    });
 
     if (entryPointId) {
-        edges.unshift({ from: startId, to: entryPointId });
+      edges.unshift({ from: startId, to: entryPointId });
     } else {
-        edges.unshift({ from: startId, to: endId });
+      edges.unshift({ from: startId, to: endId });
     }
 
-    finalExitPoints.forEach(ep => {
-        edges.push({ from: ep.id, to: endId, label: ep.label });
+    finalExitPoints.forEach((ep) => {
+      edges.push({ from: ep.id, to: endId, label: ep.label });
     });
 
     const statementText = this.escapeString(statementNode.text);
     const title = `Flowchart for: ${statementText}`;
 
     return {
-        nodes,
-        edges,
-        locationMap: this.locationMap,
-        functionRange: { start: statementNode.startIndex, end: statementNode.endIndex },
-        title,
-        entryNodeId: startId,
-        exitNodeId: endId,
+      nodes,
+      edges,
+      locationMap: this.locationMap,
+      functionRange: {
+        start: statementNode.startIndex,
+        end: statementNode.endIndex,
+      },
+      title,
+      entryNodeId: startId,
+      exitNodeId: endId,
     };
   }
 
@@ -271,59 +297,78 @@ export class PyAstParser {
           }
         }
       }
-      
+
       if (smallestStatement) {
-        this.log(`Found smallest statement: [${smallestStatement.type}] ${smallestStatement.text}`);
-        
+        this.log(
+          `Found smallest statement: [${smallestStatement.type}] ${smallestStatement.text}`
+        );
+
         let potentialCallNode: Parser.SyntaxNode | null | undefined;
         let baseStatement = smallestStatement;
 
-        if (smallestStatement.type === 'assignment') {
-            potentialCallNode = smallestStatement.childForFieldName("right");
-        } else if (smallestStatement.type === 'expression_statement') {
-            const child = smallestStatement.namedChild(0);
-            if (child?.type === 'assignment') {
-                potentialCallNode = child.childForFieldName("right");
-                baseStatement = child; // Treat the inner assignment as the base
-            } else {
-                potentialCallNode = child;
-            }
-        } else if (smallestStatement.type === 'return_statement') {
-            potentialCallNode = smallestStatement.namedChild(0);
+        if (smallestStatement.type === "assignment") {
+          potentialCallNode = smallestStatement.childForFieldName("right");
+        } else if (smallestStatement.type === "expression_statement") {
+          const child = smallestStatement.namedChild(0);
+          if (child?.type === "assignment") {
+            potentialCallNode = child.childForFieldName("right");
+            baseStatement = child; // Treat the inner assignment as the base
+          } else {
+            potentialCallNode = child;
+          }
+        } else if (smallestStatement.type === "return_statement") {
+          potentialCallNode = smallestStatement.namedChild(0);
         }
-        
-        this.log(`Extracted potential call node: [${potentialCallNode?.type}] ${potentialCallNode?.text}`);
 
-        if (potentialCallNode?.type === 'call') {
-            const funcNode = potentialCallNode.childForFieldName('function');
-            const funcName = funcNode?.text;
-            const argsNode = potentialCallNode.childForFieldName("arguments");
-            const args = argsNode?.namedChildren || [];
-            this.log(`Expression is a call to "${funcName}" with ${args.length} arguments.`);
+        this.log(
+          `Extracted potential call node: [${potentialCallNode?.type}] ${potentialCallNode?.text}`
+        );
 
-            let hofCallNode: Parser.SyntaxNode | undefined = undefined;
-            let containerName: string | undefined = undefined;
+        if (potentialCallNode?.type === "call") {
+          const funcNode = potentialCallNode.childForFieldName("function");
+          const funcName = funcNode?.text;
+          const argsNode = potentialCallNode.childForFieldName("arguments");
+          const args = argsNode?.namedChildren || [];
+          this.log(
+            `Expression is a call to "${funcName}" with ${args.length} arguments.`
+          );
 
-            // Check if it's a container (list, tuple, set) wrapping a HOF call
-            if ((funcName === 'list' || funcName === 'tuple' || funcName === 'set') && args.length === 1 && args[0].type === 'call' && this.isHofCall(args[0])) {
-                this.log(`Detected HOF call wrapped in container "${funcName}".`);
-                hofCallNode = args[0];
-                containerName = funcName;
-            }
-            // Check if it's a direct HOF call
-            else if (this.isHofCall(potentialCallNode)) {
-                this.log(`Detected direct HOF call.`);
-                hofCallNode = potentialCallNode;
-            }
+          let hofCallNode: Parser.SyntaxNode | undefined = undefined;
+          let containerName: string | undefined = undefined;
 
-            if (hofCallNode) {
-                return this.generateHofFlowchart(baseStatement, hofCallNode, containerName);
-            } else {
-                this.log(`Call to "${funcName}" is not a handled HOF. Proceeding to normal function search.`);
-            }
+          // Check if it's a container (list, tuple, set) wrapping a HOF call
+          if (
+            (funcName === "list" ||
+              funcName === "tuple" ||
+              funcName === "set") &&
+            args.length === 1 &&
+            args[0].type === "call" &&
+            this.isHofCall(args[0])
+          ) {
+            this.log(`Detected HOF call wrapped in container "${funcName}".`);
+            hofCallNode = args[0];
+            containerName = funcName;
+          }
+          // Check if it's a direct HOF call
+          else if (this.isHofCall(potentialCallNode)) {
+            this.log(`Detected direct HOF call.`);
+            hofCallNode = potentialCallNode;
+          }
+
+          if (hofCallNode) {
+            return this.generateHofFlowchart(
+              baseStatement,
+              hofCallNode,
+              containerName
+            );
+          } else {
+            this.log(
+              `Call to "${funcName}" is not a handled HOF. Proceeding to normal function search.`
+            );
+          }
         }
       } else {
-          this.log("No statement found at the given position.");
+        this.log("No statement found at the given position.");
       }
     }
 
@@ -372,7 +417,9 @@ export class PyAstParser {
     }
 
     if (!targetNode) {
-      this.log("No target function or HOF statement found. Displaying default message.");
+      this.log(
+        "No target function or HOF statement found. Displaying default message."
+      );
       return {
         nodes: [
           {
@@ -388,7 +435,9 @@ export class PyAstParser {
     }
 
     // Reset state and process the entire function/lambda
-    this.log(`Found target ${isLambda ? 'lambda' : 'function'}: ${targetNode.text}`);
+    this.log(
+      `Found target ${isLambda ? "lambda" : "function"}: ${targetNode.text}`
+    );
     this.nodeIdCounter = 0;
     this.locationMap = [];
     this.currentFunctionIsLambda = isLambda;
@@ -1312,6 +1361,7 @@ export class PyAstParser {
     loopContext?: LoopContext,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
+    this.log("Processing match statement", { matchNode: matchNode.text });
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
     const nodesConnectedToExit = new Set<string>();
@@ -1319,8 +1369,11 @@ export class PyAstParser {
 
     const subjectNode = matchNode.childForFieldName("subject");
     if (!subjectNode) {
+      this.log("No subject node found in match statement");
       return this.processDefaultStatement(matchNode);
     }
+
+    this.log("Match subject found", { subject: subjectNode.text });
 
     const subjectId = this.generateNodeId("match_subject");
     nodes.push({
@@ -1338,16 +1391,35 @@ export class PyAstParser {
     const entryNodeId = subjectId;
     let lastConditionExit: { id: string; label?: string } = { id: subjectId };
 
-    const caseClauses = matchNode.childrenForFieldName("case_clause");
+    // Find case clauses - they are within a block child of the match statement
+    let caseClauses: Parser.SyntaxNode[] = [];
+
+    // Get the main block (the match body)
+    const blockNode = matchNode.children.find(
+      (child) => child.type === "block"
+    );
+    this.log("Looking for block node", { hasBlock: !!blockNode });
+
+    if (blockNode) {
+      caseClauses = blockNode.children.filter(
+        (child) => child.type === "case_clause"
+      );
+      this.log("Case clauses found in block", { count: caseClauses.length });
+    }
+
+    this.log("Total case clauses to process", { count: caseClauses.length });
 
     for (const clause of caseClauses) {
-      const patternNode = clause.childForFieldName("pattern");
-      const guardNode = clause.childForFieldName("guard");
-      const bodyNode = clause.childForFieldName("body");
+      // For case_clause nodes, get the case_pattern child
+      const casePatternNode = clause.children.find(
+        (c) => c.type === "case_pattern"
+      );
+      const guardNode = clause.childForFieldName("guard"); // Guards might still use field names
+      const bodyNode = clause.children.find((c) => c.type === "block");
 
-      if (!patternNode || !bodyNode) continue;
+      if (!casePatternNode || !bodyNode) continue;
 
-      let caseLabel = `case ${this.escapeString(patternNode.text)}`;
+      let caseLabel = `case ${this.escapeString(casePatternNode.text)}`;
       if (guardNode) {
         caseLabel += ` if ${this.escapeString(guardNode.text)}`;
       }
@@ -1693,31 +1765,31 @@ export class PyAstParser {
    */
   private processArgument(argNode: Parser.SyntaxNode): ProcessResult {
     if (this.isHofCall(argNode)) {
-        // It's a nested HOF, process it recursively.
-        // processHigherOrderFunctionCall returns a complete sub-graph.
-        return this.processHigherOrderFunctionCall(argNode)!;
+      // It's a nested HOF, process it recursively.
+      // processHigherOrderFunctionCall returns a complete sub-graph.
+      return this.processHigherOrderFunctionCall(argNode)!;
     } else {
-        // It's a simple argument (e.g., a list literal). Create a single node for it.
-        const nodeId = this.generateNodeId("input");
-        const nodeText = this.escapeString(argNode.text);
-        const node: FlowchartNode = {
-            id: nodeId,
-            label: `Input: ${nodeText}`,
-            shape: "rect",
-            style: this.nodeStyles.special,
-        };
-        this.locationMap.push({
-            start: argNode.startIndex,
-            end: argNode.endIndex,
-            nodeId,
-        });
-        return {
-            nodes: [node],
-            edges: [],
-            entryNodeId: nodeId,
-            exitPoints: [{ id: nodeId }],
-            nodesConnectedToExit: new Set<string>(),
-        };
+      // It's a simple argument (e.g., a list literal). Create a single node for it.
+      const nodeId = this.generateNodeId("input");
+      const nodeText = this.escapeString(argNode.text);
+      const node: FlowchartNode = {
+        id: nodeId,
+        label: `Input: ${nodeText}`,
+        shape: "rect",
+        style: this.nodeStyles.special,
+      };
+      this.locationMap.push({
+        start: argNode.startIndex,
+        end: argNode.endIndex,
+        nodeId,
+      });
+      return {
+        nodes: [node],
+        edges: [],
+        entryNodeId: nodeId,
+        exitPoints: [{ id: nodeId }],
+        nodesConnectedToExit: new Set<string>(),
+      };
     }
   }
 
@@ -1778,8 +1850,8 @@ export class PyAstParser {
       style: this.nodeStyles.hof,
     });
     // Connect the output of the iterable processing to the map call
-    iterableResult.exitPoints.forEach(ep => {
-        edges.push({ from: ep.id, to: mapId, label: ep.label });
+    iterableResult.exitPoints.forEach((ep) => {
+      edges.push({ from: ep.id, to: mapId, label: ep.label });
     });
 
     // Node 3: Apply lambda
@@ -1791,19 +1863,19 @@ export class PyAstParser {
       style: this.nodeStyles.process,
     });
     this.locationMap.push({
-        start: functionArg.startIndex,
-        end: functionArg.endIndex,
-        nodeId: applyId,
+      start: functionArg.startIndex,
+      end: functionArg.endIndex,
+      nodeId: applyId,
     });
     edges.push({ from: mapId, to: applyId, label: "Next item" });
 
     // Node 4: Collect result and loop back
     const collectId = this.generateNodeId("map_collect");
     nodes.push({
-        id: collectId,
-        label: "Collect transformed element",
-        shape: "rect",
-        style: this.nodeStyles.process,
+      id: collectId,
+      label: "Collect transformed element",
+      shape: "rect",
+      style: this.nodeStyles.process,
     });
     edges.push({ from: applyId, to: collectId });
     edges.push({ from: collectId, to: mapId }); // Loop back to controller
@@ -1854,8 +1926,8 @@ export class PyAstParser {
       style: this.nodeStyles.hof,
     });
     // Connect the output of the iterable processing to the filter call
-    iterableResult.exitPoints.forEach(ep => {
-        edges.push({ from: ep.id, to: filterId, label: ep.label });
+    iterableResult.exitPoints.forEach((ep) => {
+      edges.push({ from: ep.id, to: filterId, label: ep.label });
     });
 
     // Node 3: Apply lambda
@@ -1867,9 +1939,9 @@ export class PyAstParser {
       style: this.nodeStyles.process,
     });
     this.locationMap.push({
-        start: functionArg.startIndex,
-        end: functionArg.endIndex,
-        nodeId: applyId,
+      start: functionArg.startIndex,
+      end: functionArg.endIndex,
+      nodeId: applyId,
     });
     edges.push({ from: filterId, to: applyId, label: "Next item" });
 
@@ -1897,10 +1969,10 @@ export class PyAstParser {
     // Node 6: Discard element
     const discardId = this.generateNodeId("filter_discard");
     nodes.push({
-        id: discardId,
-        label: "Discard element",
-        shape: "rect",
-        style: this.nodeStyles.break,
+      id: discardId,
+      label: "Discard element",
+      shape: "rect",
+      style: this.nodeStyles.break,
     });
     edges.push({ from: decisionId, to: discardId, label: "No" });
     edges.push({ from: discardId, to: filterId }); // Loop back to controller
@@ -1914,7 +1986,6 @@ export class PyAstParser {
       style: this.nodeStyles.special,
     });
     edges.push({ from: filterId, to: collectedId, label: "End of list" });
-
 
     return {
       nodes,
@@ -1958,15 +2029,15 @@ export class PyAstParser {
       style: this.nodeStyles.process,
     });
     if (initializerArgNode) {
-        this.locationMap.push({
-            start: initializerArgNode.startIndex,
-            end: initializerArgNode.endIndex,
-            nodeId: initId,
-        });
+      this.locationMap.push({
+        start: initializerArgNode.startIndex,
+        end: initializerArgNode.endIndex,
+        nodeId: initId,
+      });
     }
     // Connect the output of the iterable processing to the init node
-    iterableResult.exitPoints.forEach(ep => {
-        edges.push({ from: ep.id, to: initId, label: ep.label });
+    iterableResult.exitPoints.forEach((ep) => {
+      edges.push({ from: ep.id, to: initId, label: ep.label });
     });
 
     // Node 3: Loop Header (Controller)
@@ -1991,9 +2062,9 @@ export class PyAstParser {
       style: this.nodeStyles.process,
     });
     this.locationMap.push({
-        start: functionArg.startIndex,
-        end: functionArg.endIndex,
-        nodeId: applyId,
+      start: functionArg.startIndex,
+      end: functionArg.endIndex,
+      nodeId: applyId,
     });
     edges.push({ from: headerId, to: applyId, label: "Next" });
     edges.push({ from: applyId, to: headerId }); // Loop back
