@@ -25,19 +25,28 @@ interface LoopContext {
 
 /**
  * A class to manage the construction of Control Flow Graphs from Python code.
- * It handles standard functions, lambda functions, and basic control flow.
+ * It handles standard functions, lambda functions, and basic control flow,
+ * including special visualization for higher-order functions like map, filter, and reduce.
  */
 export class PyAstParser {
   private nodeIdCounter = 0;
   private locationMap: LocationMapEntry[] = [];
   private currentFunctionIsLambda = false; // Tracks if the current scope is a lambda
+  private debug = true; // Set to true to enable console logging for diagnostics
   private readonly nodeStyles = {
-    terminator: "fill:#eee,stroke:#000,stroke-width:4px,color:#000;",
-    decision: "fill:#eee,stroke:#000,stroke-width:4px,color:#000;",
-    process: "fill:#eee,stroke:#000,stroke-width:1px,color:#000;",
-    special: "fill:#eee,stroke:#000,stroke-width:4px,color:#000",
-    break: "fill:#eee,stroke:#000,stroke-width:2px,color:#000",
+    terminator: "fill:#f9f9f9,stroke:#333,stroke-width:2px,color:#333",
+    decision: "fill:#fff,stroke:#333,stroke-width:1.5px,color:#333",
+    process: "fill:#fff,stroke:#333,stroke-width:1.5px,color:#333",
+    special: "fill:#e3f2fd,stroke:#0d47a1,stroke-width:1.5px,color:#000",
+    break: "fill:#ffebee,stroke:#c62828,stroke-width:1.5px,color:#000",
+    hof: "fill:#e8eaf6,stroke:#3f51b5,stroke-width:1.5px,color:#000",
   };
+
+  private log(message: string, ...args: any[]) {
+    if (this.debug) {
+      console.log(`[PyAstParser] ${message}`, ...args);
+    }
+  }
 
   private generateNodeId(prefix: string): string {
     return `${prefix}_${this.nodeIdCounter++}`;
@@ -117,6 +126,117 @@ export class PyAstParser {
   }
 
   /**
+   * Checks if a given AST node is a call to a handled higher-order function.
+   */
+  private isHofCall(node: Parser.SyntaxNode | null | undefined): boolean {
+    if (!node || node.type !== "call") return false;
+    const functionNode = node.childForFieldName("function");
+    if (!functionNode) return false;
+    const functionName = functionNode.text.split(".").pop();
+    const isHof = ["map", "filter", "reduce"].includes(functionName!);
+    this.log(`isHofCall check on "${functionNode.text}": ${isHof}`);
+    return isHof;
+  }
+
+  /**
+   * Generates a detailed, self-contained flowchart for a higher-order function statement.
+   * This orchestrates the generation by handling assignment and container (e.g., list()) wrappers.
+   */
+  private generateHofFlowchart(
+    statementNode: Parser.SyntaxNode,
+    hofCallNode: Parser.SyntaxNode,
+    containerName?: string
+  ): FlowchartIR {
+    this.log("Generating HOF flowchart.", { statementNode: statementNode.text, hofCallNode: hofCallNode.text, containerName });
+    this.nodeIdCounter = 0;
+    this.locationMap = [];
+
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+
+    // 1. Process the core HOF logic (map, filter, etc.)
+    const hofResult = this.processHigherOrderFunctionCall(hofCallNode);
+    if (!hofResult) {
+        this.log("HOF processing returned null, falling back to default.");
+        return this.generateFlowchart(statementNode.text);
+    }
+
+    nodes.push(...hofResult.nodes);
+    edges.push(...hofResult.edges);
+
+    let entryPointId = hofResult.entryNodeId;
+    let finalExitPoints = hofResult.exitPoints;
+
+    // 2. Prepend an assignment node if the HOF is part of an assignment
+    if (statementNode.type === 'assignment' || (statementNode.type === 'expression_statement' && statementNode.namedChild(0)?.type === 'assignment')) {
+        const assignment = statementNode.type === 'assignment' ? statementNode : statementNode.namedChild(0)!;
+        const assignId = this.generateNodeId("assign_hof");
+        const leftText = this.escapeString(assignment.childForFieldName("left")!.text);
+        const assignNode: FlowchartNode = {
+            id: assignId,
+            label: `${leftText} = ...`,
+            shape: "rect",
+            style: this.nodeStyles.process,
+        };
+        nodes.unshift(assignNode);
+        if (entryPointId) {
+            edges.unshift({ from: assignId, to: entryPointId });
+        }
+        entryPointId = assignId;
+        this.locationMap.push({
+            start: assignment.childForFieldName("left")!.startIndex,
+            end: assignment.childForFieldName("left")!.endIndex,
+            nodeId: assignId,
+        });
+    }
+
+    // 3. Append a container conversion node if the HOF was wrapped (e.g., list(map(...)))
+    if (containerName) {
+        const convertId = this.generateNodeId("convert");
+        const convertNode: FlowchartNode = {
+            id: convertId,
+            label: `Convert to ${containerName}`,
+            shape: "rect",
+            style: this.nodeStyles.process,
+        };
+        nodes.push(convertNode);
+        finalExitPoints.forEach(ep => {
+            edges.push({ from: ep.id, to: convertId, label: ep.label });
+        });
+        finalExitPoints = [{ id: convertId }];
+    }
+
+    // 4. Add the global start and end nodes for the complete flowchart
+    const startId = this.generateNodeId("start");
+    const endId = this.generateNodeId("end");
+    nodes.unshift({ id: startId, label: "Start", shape: "round", style: this.nodeStyles.terminator });
+    nodes.push({ id: endId, label: "End", shape: "round", style: this.nodeStyles.terminator });
+
+    if (entryPointId) {
+        edges.unshift({ from: startId, to: entryPointId });
+    } else {
+        edges.unshift({ from: startId, to: endId });
+    }
+
+    finalExitPoints.forEach(ep => {
+        edges.push({ from: ep.id, to: endId, label: ep.label });
+    });
+
+    const statementText = this.escapeString(statementNode.text);
+    const title = `Flowchart for: ${statementText}`;
+
+    return {
+        nodes,
+        edges,
+        locationMap: this.locationMap,
+        functionRange: { start: statementNode.startIndex, end: statementNode.endIndex },
+        title,
+        entryNodeId: startId,
+        exitNodeId: endId,
+    };
+  }
+
+  /**
    * Main public method to generate a flowchart from Python source code.
    * It can now detect and process both standard functions and lambda functions.
    */
@@ -125,82 +245,175 @@ export class PyAstParser {
     functionName?: string,
     position?: number
   ): FlowchartIR {
-    this.nodeIdCounter = 0;
-    this.locationMap = [];
-    this.currentFunctionIsLambda = false; // Reset for each run
-
     const parser = new Parser();
     parser.setLanguage(Python as PythonLanguage);
     const tree = parser.parse(sourceCode);
+    this.log("Starting flowchart generation.", { functionName, position });
 
+    // Priority 1: If a cursor position is provided, check if it's on a HOF statement.
+    if (position !== undefined) {
+      this.log(`Searching for statement at position: ${position}`);
+      const statements = tree.rootNode.descendantsOfType([
+        "assignment",
+        "expression_statement",
+        "return_statement",
+      ]);
+
+      let smallestStatement: Parser.SyntaxNode | undefined;
+      for (const stmt of statements) {
+        if (position >= stmt.startIndex && position <= stmt.endIndex) {
+          if (
+            !smallestStatement ||
+            stmt.endIndex - stmt.startIndex <
+              smallestStatement.endIndex - smallestStatement.startIndex
+          ) {
+            smallestStatement = stmt;
+          }
+        }
+      }
+      
+      if (smallestStatement) {
+        this.log(`Found smallest statement: [${smallestStatement.type}] ${smallestStatement.text}`);
+        
+        let potentialCallNode: Parser.SyntaxNode | null | undefined;
+        let baseStatement = smallestStatement;
+
+        if (smallestStatement.type === 'assignment') {
+            potentialCallNode = smallestStatement.childForFieldName("right");
+        } else if (smallestStatement.type === 'expression_statement') {
+            const child = smallestStatement.namedChild(0);
+            if (child?.type === 'assignment') {
+                potentialCallNode = child.childForFieldName("right");
+                baseStatement = child; // Treat the inner assignment as the base
+            } else {
+                potentialCallNode = child;
+            }
+        } else if (smallestStatement.type === 'return_statement') {
+            potentialCallNode = smallestStatement.namedChild(0);
+        }
+        
+        this.log(`Extracted potential call node: [${potentialCallNode?.type}] ${potentialCallNode?.text}`);
+
+        if (potentialCallNode?.type === 'call') {
+            const funcNode = potentialCallNode.childForFieldName('function');
+            const funcName = funcNode?.text;
+            const argsNode = potentialCallNode.childForFieldName("arguments");
+            const args = argsNode?.namedChildren || [];
+            this.log(`Expression is a call to "${funcName}" with ${args.length} arguments.`);
+
+            let hofCallNode: Parser.SyntaxNode | undefined = undefined;
+            let containerName: string | undefined = undefined;
+
+            // Check if it's a container (list, tuple, set) wrapping a HOF call
+            if ((funcName === 'list' || funcName === 'tuple' || funcName === 'set') && args.length === 1 && args[0].type === 'call' && this.isHofCall(args[0])) {
+                this.log(`Detected HOF call wrapped in container "${funcName}".`);
+                hofCallNode = args[0];
+                containerName = funcName;
+            }
+            // Check if it's a direct HOF call
+            else if (this.isHofCall(potentialCallNode)) {
+                this.log(`Detected direct HOF call.`);
+                hofCallNode = potentialCallNode;
+            }
+
+            if (hofCallNode) {
+                return this.generateHofFlowchart(baseStatement, hofCallNode, containerName);
+            } else {
+                this.log(`Call to "${funcName}" is not a handled HOF. Proceeding to normal function search.`);
+            }
+        }
+      } else {
+          this.log("No statement found at the given position.");
+      }
+    }
+
+    // Priority 2: Fallback to finding the containing function or lambda and graphing it.
     let targetNode: Parser.SyntaxNode | undefined;
     let isLambda = false;
-    let discoveredFunctionName = "[anonymous]";
 
     if (position !== undefined) {
-      // Priority 1: Find a regular function definition containing the cursor.
       targetNode = tree.rootNode
         .descendantsOfType("function_definition")
         .find((f) => position >= f.startIndex && position <= f.endIndex);
 
-      // Priority 2: If not in a function, find a lambda assignment.
       if (!targetNode) {
         const assignmentNode = tree.rootNode
           .descendantsOfType("assignment")
-          .find((a) => position >= a.startIndex && position <= a.endIndex);
-
-        if (assignmentNode?.childForFieldName("right")?.type === "lambda") {
+          .find(
+            (a) =>
+              position >= a.startIndex &&
+              position <= a.endIndex &&
+              a.childForFieldName("right")?.type === "lambda"
+          );
+        if (assignmentNode) {
           targetNode = assignmentNode;
           isLambda = true;
-          discoveredFunctionName = this.escapeString(
-            assignmentNode.childForFieldName("left")?.text ||
-              "[anonymous lambda]"
-          );
-        }
-      }
-
-      // Priority 3: Find the smallest raw lambda containing the cursor.
-      if (!targetNode) {
-        const lambdaNodes = tree.rootNode.descendantsOfType("lambda");
-        let smallestLambda: Parser.SyntaxNode | undefined = undefined;
-        for (const lambda of lambdaNodes) {
-          if (position >= lambda.startIndex && position <= lambda.endIndex) {
-            if (
-              !smallestLambda ||
-              lambda.endIndex - lambda.startIndex <
-                smallestLambda.endIndex - smallestLambda.startIndex
-            ) {
-              smallestLambda = lambda;
-            }
-          }
-        }
-        if (smallestLambda) {
-          targetNode = smallestLambda;
-          isLambda = true;
-          discoveredFunctionName = "[anonymous lambda]";
         }
       }
     } else if (functionName) {
-      // Fallback to finding by name (less likely to work for lambdas)
       targetNode = tree.rootNode
         .descendantsOfType("function_definition")
         .find((f) => f.childForFieldName("name")?.text === functionName);
+      if (!targetNode) {
+        const assignmentNode = tree.rootNode
+          .descendantsOfType("assignment")
+          .find(
+            (a) =>
+              a.childForFieldName("left")?.text === functionName &&
+              a.childForFieldName("right")?.type === "lambda"
+          );
+        if (assignmentNode) {
+          targetNode = assignmentNode;
+          isLambda = true;
+        }
+      }
     } else {
-      // Fallback to the first function if no position or name is given
       targetNode = tree.rootNode.descendantsOfType("function_definition")[0];
     }
 
-    // Set the flag to indicate if we are processing a lambda function.
+    if (!targetNode) {
+      this.log("No target function or HOF statement found. Displaying default message.");
+      return {
+        nodes: [
+          {
+            id: "A",
+            label:
+              "Place cursor inside a function or statement to generate a flowchart.",
+            shape: "rect",
+          },
+        ],
+        edges: [],
+        locationMap: [],
+      };
+    }
+
+    // Reset state and process the entire function/lambda
+    this.log(`Found target ${isLambda ? 'lambda' : 'function'}: ${targetNode.text}`);
+    this.nodeIdCounter = 0;
+    this.locationMap = [];
     this.currentFunctionIsLambda = isLambda;
 
-    if (!targetNode) {
-      const message =
-        position !== undefined
-          ? "Place cursor inside a function or lambda to generate a flowchart."
-          : "No function or lambda found in code.";
+    let bodyToProcess: Parser.SyntaxNode | null;
+    let title: string;
 
+    if (isLambda) {
+      const lambdaNode = targetNode.childForFieldName("right")!;
+      bodyToProcess = lambdaNode.childForFieldName("body");
+      const funcName = this.escapeString(
+        targetNode.childForFieldName("left")!.text
+      );
+      title = `Flowchart for lambda: ${funcName}`;
+    } else {
+      bodyToProcess = targetNode.childForFieldName("body");
+      const funcName = this.escapeString(
+        targetNode.childForFieldName("name")!.text
+      );
+      title = `Flowchart for function: ${funcName}`;
+    }
+
+    if (!bodyToProcess) {
       return {
-        nodes: [{ id: "A", label: message, shape: "rect" }],
+        nodes: [{ id: "A", label: "Function has no body.", shape: "rect" }],
         edges: [],
         locationMap: [],
       };
@@ -208,80 +421,43 @@ export class PyAstParser {
 
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
-
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
-    let body: Parser.SyntaxNode | null = null;
-    const functionRange = {
-      start: targetNode.startIndex,
-      end: targetNode.endIndex,
-    };
-
-    if (isLambda) {
-      let lambdaNode: Parser.SyntaxNode | undefined;
-      if (targetNode.type === "assignment") {
-        lambdaNode = targetNode.childForFieldName("right")!;
-      } else {
-        // It's a raw lambda node
-        lambdaNode = targetNode;
-      }
-      body = lambdaNode.childForFieldName("body");
-    } else {
-      // It's a function_definition
-      const funcNameNode = targetNode.childForFieldName("name");
-      discoveredFunctionName = funcNameNode?.text || "[anonymous]";
-      body = targetNode.childForFieldName("body");
-    }
-
     nodes.push({
       id: entryId,
-      label: `start: ${discoveredFunctionName}`,
+      label: `Start`,
       shape: "round",
       style: this.nodeStyles.terminator,
     });
     nodes.push({
       id: exitId,
-      label: "end",
+      label: "End",
       shape: "round",
       style: this.nodeStyles.terminator,
     });
 
-    if (body) {
-      console.log(
-        `[PyAstParser DBG] Processing function '${discoveredFunctionName}'. Is lambda: ${isLambda}. Body node type: ${body.type}`
-      );
-      let bodyResult;
-      // A lambda's body is a single expression, treated as one statement.
-      // A function's body is a block of multiple statements.
-      if (isLambda) {
-        bodyResult = this.processStatement(body, exitId);
-      } else {
-        bodyResult = this.processBlock(body, exitId);
-      }
+    let bodyResult;
+    if (isLambda) {
+      bodyResult = this.processStatement(bodyToProcess, exitId);
+    } else {
+      bodyResult = this.processBlock(bodyToProcess, exitId);
+    }
 
-      nodes.push(...bodyResult.nodes);
-      edges.push(...bodyResult.edges);
+    nodes.push(...bodyResult.nodes);
+    edges.push(...bodyResult.edges);
 
-      if (bodyResult.entryNodeId) {
-        edges.push({ from: entryId, to: bodyResult.entryNodeId });
-      } else {
-        edges.push({ from: entryId, to: exitId });
-      }
-
-      // Connect any loose ends to the main exit node.
-      bodyResult.exitPoints.forEach((exitPoint) => {
-        if (!bodyResult.nodesConnectedToExit.has(exitPoint.id)) {
-          edges.push({
-            from: exitPoint.id,
-            to: exitId,
-            label: exitPoint.label,
-          });
-        }
-      });
+    if (bodyResult.entryNodeId) {
+      edges.push({ from: entryId, to: bodyResult.entryNodeId });
     } else {
       edges.push({ from: entryId, to: exitId });
     }
+
+    bodyResult.exitPoints.forEach((ep) => {
+      if (!bodyResult.nodesConnectedToExit.has(ep.id)) {
+        edges.push({ from: ep.id, to: exitId, label: ep.label });
+      }
+    });
 
     const nodeIdSet = new Set(nodes.map((n) => n.id));
     const validEdges = edges.filter(
@@ -292,8 +468,11 @@ export class PyAstParser {
       nodes,
       edges: validEdges,
       locationMap: this.locationMap,
-      functionRange,
-      title: `Flowchart for ${discoveredFunctionName}`,
+      functionRange: {
+        start: targetNode.startIndex,
+        end: targetNode.endIndex,
+      },
+      title,
       entryNodeId: entryId,
       exitNodeId: exitId,
     };
@@ -388,20 +567,7 @@ export class PyAstParser {
     loopContext?: LoopContext,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    console.log(
-      `[PyAstParser DBG] processStatement: type = '${
-        statement.type
-      }', isLambda = ${
-        this.currentFunctionIsLambda
-      }, text = "${statement.text.substring(0, 50)}"`
-    );
-
-    // This explicit check ensures conditional expressions are always handled correctly,
-    // especially when they are the body of a lambda.
     if (statement.type === "conditional_expression") {
-      console.log(
-        "[PyAstParser DBG] Matched 'conditional_expression'. Routing to processConditionalExpression."
-      );
       return this.processConditionalExpression(
         statement,
         exitId,
@@ -472,27 +638,19 @@ export class PyAstParser {
           exitPoints: [],
           nodesConnectedToExit: new Set<string>(),
         };
-      default:
-        console.log(
-          `[PyAstParser DBG] Reached default case for type '${statement.type}'.`
-        );
-        // If we are in a lambda, and the expression type is not a control-flow statement
-        // that has its own case, we treat it as an implicit return value.
+      default: {
+        // When processing a function block, HOFs are treated as simple statements.
+        // The detailed breakdown only happens when a HOF line is clicked directly.
         if (this.currentFunctionIsLambda) {
-          console.log(
-            `[PyAstParser DBG] In lambda, treating as implicit return.`
-          );
           return this.processReturnStatementForExpression(
             statement,
             exitId,
             finallyContext
           );
         } else {
-          console.log(
-            `[PyAstParser DBG] Not in lambda, treating as default statement.`
-          );
           return this.processDefaultStatement(statement);
         }
+      }
     }
   }
 
@@ -508,6 +666,7 @@ export class PyAstParser {
         id: nodeId,
         label: nodeText,
         shape: "rect",
+        style: this.nodeStyles.process,
       },
     ];
 
@@ -579,7 +738,6 @@ export class PyAstParser {
     loopContext?: LoopContext,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    console.log("[PyAstParser DBG] Inside processConditionalExpression.");
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
     const nodesConnectedToExit = new Set<string>();
@@ -594,14 +752,10 @@ export class PyAstParser {
     const conditionNode = namedChildren[1];
     let alternativeNode = namedChildren[2];
 
-    // Handle `(nested_conditional)` by looking inside the parentheses
     if (
       alternativeNode.type === "parenthesized_expression" &&
       alternativeNode.namedChild(0)?.type === "conditional_expression"
     ) {
-      console.log(
-        "[PyAstParser DBG] Found parenthesized nested conditional. Unwrapping it."
-      );
       alternativeNode = alternativeNode.namedChild(0)!;
     }
 
@@ -620,8 +774,6 @@ export class PyAstParser {
 
     const entryNodeId = conditionId;
 
-    // Process consequence (True path) by dispatching back to the main statement processor.
-    // This allows for correct recursive handling of nested structures.
     const consequenceResult = this.processStatement(
       consequenceNode,
       exitId,
@@ -645,7 +797,6 @@ export class PyAstParser {
       allExitPoints.push({ id: conditionId, label: "True" });
     }
 
-    // Process alternative (False path)
     const alternativeResult = this.processStatement(
       alternativeNode,
       exitId,
@@ -673,8 +824,6 @@ export class PyAstParser {
       nodes,
       edges,
       entryNodeId,
-      // If inside a lambda, the branches are terminal returns and have no exit points that flow onward.
-      // Otherwise, the exits from the branches are the exits for the whole expression.
       exitPoints: this.currentFunctionIsLambda ? [] : allExitPoints,
       nodesConnectedToExit,
     };
@@ -1241,7 +1390,6 @@ export class PyAstParser {
           label: "True",
         });
       } else {
-        // If a case has no body, its "True" path is an exit point.
         allExitPoints.push({ id: caseConditionId, label: "True" });
       }
       allExitPoints.push(...bodyResult.exitPoints);
@@ -1249,7 +1397,6 @@ export class PyAstParser {
       lastConditionExit = { id: caseConditionId, label: "False" };
     }
 
-    // The final "False" from the last case is an exit from the whole match statement.
     allExitPoints.push(lastConditionExit);
 
     return {
@@ -1505,10 +1652,8 @@ export class PyAstParser {
 
     const entryNodeId = conditionId;
 
-    // True path: continue execution
     allExitPoints.push({ id: conditionId, label: "True" });
 
-    // False path: raise AssertionError
     const raiseNodeId = this.generateNodeId("raise_assert");
     let label = "raise AssertionError";
     if (assertNode.namedChildren.length > 1) {
@@ -1525,10 +1670,9 @@ export class PyAstParser {
       edges.push({
         from: raiseNodeId,
         to: finallyContext.finallyEntryId,
-        label: "False",
       });
     } else {
-      edges.push({ from: raiseNodeId, to: exitId, label: "False" });
+      edges.push({ from: raiseNodeId, to: exitId });
     }
     nodesConnectedToExit.add(raiseNodeId);
     edges.push({ from: conditionId, to: raiseNodeId, label: "False" });
@@ -1539,6 +1683,324 @@ export class PyAstParser {
       entryNodeId,
       exitPoints: allExitPoints,
       nodesConnectedToExit,
+    };
+  }
+
+  /**
+   * Dispatches a call expression to a specialized HOF processor if applicable.
+   */
+  private processHigherOrderFunctionCall(
+    callNode: Parser.SyntaxNode
+  ): ProcessResult | null {
+    const functionNode = callNode.childForFieldName("function");
+    if (!functionNode) return null;
+
+    const functionName = functionNode.text.split(".").pop();
+    this.log(`Processing HOF call: ${functionName}`);
+
+    switch (functionName) {
+      case "map":
+        return this.processMap(callNode);
+      case "filter":
+        return this.processFilter(callNode);
+      case "reduce":
+        return this.processReduce(callNode);
+      default:
+        this.log(`Unknown HOF: ${functionName}`);
+        return null;
+    }
+  }
+
+  /**
+   * Generates a detailed flowchart for a 'map(function, iterable)' call.
+   */
+  private processMap(callNode: Parser.SyntaxNode): ProcessResult {
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+
+    const args = callNode.childForFieldName("arguments")?.namedChildren || [];
+    if (args.length < 2) return this.processDefaultStatement(callNode);
+
+    const functionArg = args[0];
+    const iterableArgNode = args[1];
+    const iterableText = this.escapeString(iterableArgNode.text);
+    const functionText = this.escapeString(functionArg.text);
+    const lambdaBodyText =
+      functionArg.type === "lambda"
+        ? this.escapeString(functionArg.childForFieldName("body")!.text)
+        : `${functionText}(item)`;
+
+    // Node 1: Input Iterable
+    const inputId = this.generateNodeId("map_input");
+    nodes.push({
+      id: inputId,
+      label: `Input List: ${iterableText}`,
+      shape: "rect",
+      style: this.nodeStyles.special,
+    });
+    this.locationMap.push({
+        start: iterableArgNode.startIndex,
+        end: iterableArgNode.endIndex,
+        nodeId: inputId,
+    });
+
+    // Node 2: Map call (Loop Controller)
+    const mapId = this.generateNodeId("map_call");
+    nodes.push({
+      id: mapId,
+      label: `map()`,
+      shape: "rect",
+      style: this.nodeStyles.hof,
+    });
+    edges.push({ from: inputId, to: mapId });
+
+    // Node 3: Apply lambda
+    const applyId = this.generateNodeId("map_apply");
+    nodes.push({
+      id: applyId,
+      label: `Apply lambda to each element: new_item = ${lambdaBodyText}`,
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    this.locationMap.push({
+        start: functionArg.startIndex,
+        end: functionArg.endIndex,
+        nodeId: applyId,
+    });
+    edges.push({ from: mapId, to: applyId, label: "Next item" });
+
+    // Node 4: Collect result and loop back
+    const collectId = this.generateNodeId("map_collect");
+    nodes.push({
+        id: collectId,
+        label: "Collect transformed element",
+        shape: "rect",
+        style: this.nodeStyles.process,
+    });
+    edges.push({ from: applyId, to: collectId });
+    edges.push({ from: collectId, to: mapId }); // Loop back to controller
+
+    // Node 5: Final output
+    const resultId = this.generateNodeId("map_result");
+    nodes.push({
+      id: resultId,
+      label: "Collected results",
+      shape: "rect",
+      style: this.nodeStyles.special,
+    });
+    edges.push({ from: mapId, to: resultId, label: "End of list" });
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: inputId,
+      exitPoints: [{ id: resultId }],
+      nodesConnectedToExit: new Set<string>(),
+    };
+  }
+
+  /**
+   * Generates a detailed flowchart for a 'filter(function, iterable)' call.
+   */
+  private processFilter(callNode: Parser.SyntaxNode): ProcessResult {
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+
+    const args = callNode.childForFieldName("arguments")?.namedChildren || [];
+    if (args.length < 2) return this.processDefaultStatement(callNode);
+
+    const functionArg = args[0];
+    const iterableArgNode = args[1];
+    const iterableText = this.escapeString(iterableArgNode.text);
+
+    // Node 1: Input Iterable
+    const inputId = this.generateNodeId("filter_input");
+    nodes.push({
+      id: inputId,
+      label: `Input List: ${iterableText}`,
+      shape: "rect",
+      style: this.nodeStyles.special,
+    });
+    this.locationMap.push({
+        start: iterableArgNode.startIndex,
+        end: iterableArgNode.endIndex,
+        nodeId: inputId,
+    });
+
+    // Node 2: Filter call (Loop Controller)
+    const filterId = this.generateNodeId("filter_call");
+    nodes.push({
+      id: filterId,
+      label: `filter()`,
+      shape: "rect",
+      style: this.nodeStyles.hof,
+    });
+    edges.push({ from: inputId, to: filterId });
+
+    // Node 3: Apply lambda
+    const applyId = this.generateNodeId("filter_apply");
+    nodes.push({
+      id: applyId,
+      label: `Apply lambda to each element`,
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    this.locationMap.push({
+        start: functionArg.startIndex,
+        end: functionArg.endIndex,
+        nodeId: applyId,
+    });
+    edges.push({ from: filterId, to: applyId, label: "Next item" });
+
+    // Node 4: Decision
+    const decisionId = this.generateNodeId("filter_decision");
+    nodes.push({
+      id: decisionId,
+      label: `lambda returns True?`,
+      shape: "diamond",
+      style: this.nodeStyles.decision,
+    });
+    edges.push({ from: applyId, to: decisionId });
+
+    // Node 5: Keep element
+    const keepId = this.generateNodeId("filter_keep");
+    nodes.push({
+      id: keepId,
+      label: "Keep element",
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    edges.push({ from: decisionId, to: keepId, label: "Yes" });
+    edges.push({ from: keepId, to: filterId }); // Loop back to controller
+
+    // Node 6: Discard element
+    const discardId = this.generateNodeId("filter_discard");
+    nodes.push({
+        id: discardId,
+        label: "Discard element",
+        shape: "rect",
+        style: this.nodeStyles.break,
+    });
+    edges.push({ from: decisionId, to: discardId, label: "No" });
+    edges.push({ from: discardId, to: filterId }); // Loop back to controller
+
+    // Node 7: Collected results
+    const collectedId = this.generateNodeId("filter_collected");
+    nodes.push({
+      id: collectedId,
+      label: "Collected results",
+      shape: "rect",
+      style: this.nodeStyles.special,
+    });
+    edges.push({ from: filterId, to: collectedId, label: "End of list" });
+
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: inputId,
+      exitPoints: [{ id: collectedId }],
+      nodesConnectedToExit: new Set<string>(),
+    };
+  }
+
+  /**
+   * Generates a detailed flowchart for a 'reduce(function, iterable[, initializer])' call.
+   */
+  private processReduce(callNode: Parser.SyntaxNode): ProcessResult {
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+
+    const args = callNode.childForFieldName("arguments")?.namedChildren || [];
+    if (args.length < 2) return this.processDefaultStatement(callNode);
+
+    const functionArg = args[0];
+    const iterableArgNode = args[1];
+    const functionText = this.escapeString(functionArg.text);
+    const iterableText = this.escapeString(iterableArgNode.text);
+    const hasInitializer = args.length > 2;
+    const initializerArgNode = hasInitializer ? args[2] : null;
+    const initializerText = initializerArgNode
+      ? this.escapeString(initializerArgNode.text)
+      : `first item of ${iterableText}`;
+
+    // Node 1: Input Iterable
+    const inputId = this.generateNodeId("reduce_input");
+    nodes.push({
+      id: inputId,
+      label: `Input: ${iterableText}`,
+      shape: "rect",
+      style: this.nodeStyles.special,
+    });
+    this.locationMap.push({
+        start: iterableArgNode.startIndex,
+        end: iterableArgNode.endIndex,
+        nodeId: inputId,
+    });
+
+    // Node 2: Initialize Accumulator
+    const initId = this.generateNodeId("reduce_init");
+    nodes.push({
+      id: initId,
+      label: `accumulator = ${initializerText}`,
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    if (initializerArgNode) {
+        this.locationMap.push({
+            start: initializerArgNode.startIndex,
+            end: initializerArgNode.endIndex,
+            nodeId: initId,
+        });
+    }
+    edges.push({ from: inputId, to: initId });
+
+
+    // Node 3: Loop Header (Controller)
+    const headerId = this.generateNodeId("reduce_header");
+    const loopLabel = hasInitializer
+      ? `For each item`
+      : `For each remaining item`;
+    nodes.push({
+      id: headerId,
+      label: loopLabel,
+      shape: "rect",
+      style: this.nodeStyles.hof,
+    });
+    edges.push({ from: initId, to: headerId });
+
+    // Node 4: Apply function
+    const applyId = this.generateNodeId("reduce_apply");
+    nodes.push({
+      id: applyId,
+      label: `accumulator = ${functionText}(accumulator, item)`,
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    this.locationMap.push({
+        start: functionArg.startIndex,
+        end: functionArg.endIndex,
+        nodeId: applyId,
+    });
+    edges.push({ from: headerId, to: applyId, label: "Next" });
+    edges.push({ from: applyId, to: headerId }); // Loop back
+
+    // Node 5: Return result
+    const resultId = this.generateNodeId("reduce_result");
+    nodes.push({
+      id: resultId,
+      label: "Return final accumulator value",
+      shape: "rect",
+      style: this.nodeStyles.special,
+    });
+    edges.push({ from: headerId, to: resultId, label: "End" });
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: inputId,
+      exitPoints: [{ id: resultId }],
+      nodesConnectedToExit: new Set<string>(),
     };
   }
 }
