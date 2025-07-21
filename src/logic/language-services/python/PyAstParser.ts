@@ -1687,6 +1687,41 @@ export class PyAstParser {
   }
 
   /**
+   * Processes an argument, handling nested HOF calls recursively.
+   * @param argNode The AST node for the argument.
+   * @returns A ProcessResult for the argument's subgraph.
+   */
+  private processArgument(argNode: Parser.SyntaxNode): ProcessResult {
+    if (this.isHofCall(argNode)) {
+        // It's a nested HOF, process it recursively.
+        // processHigherOrderFunctionCall returns a complete sub-graph.
+        return this.processHigherOrderFunctionCall(argNode)!;
+    } else {
+        // It's a simple argument (e.g., a list literal). Create a single node for it.
+        const nodeId = this.generateNodeId("input");
+        const nodeText = this.escapeString(argNode.text);
+        const node: FlowchartNode = {
+            id: nodeId,
+            label: `Input: ${nodeText}`,
+            shape: "rect",
+            style: this.nodeStyles.special,
+        };
+        this.locationMap.push({
+            start: argNode.startIndex,
+            end: argNode.endIndex,
+            nodeId,
+        });
+        return {
+            nodes: [node],
+            edges: [],
+            entryNodeId: nodeId,
+            exitPoints: [{ id: nodeId }],
+            nodesConnectedToExit: new Set<string>(),
+        };
+    }
+  }
+
+  /**
    * Dispatches a call expression to a specialized HOF processor if applicable.
    */
   private processHigherOrderFunctionCall(
@@ -1723,26 +1758,16 @@ export class PyAstParser {
 
     const functionArg = args[0];
     const iterableArgNode = args[1];
-    const iterableText = this.escapeString(iterableArgNode.text);
     const functionText = this.escapeString(functionArg.text);
     const lambdaBodyText =
       functionArg.type === "lambda"
         ? this.escapeString(functionArg.childForFieldName("body")!.text)
         : `${functionText}(item)`;
 
-    // Node 1: Input Iterable
-    const inputId = this.generateNodeId("map_input");
-    nodes.push({
-      id: inputId,
-      label: `Input List: ${iterableText}`,
-      shape: "rect",
-      style: this.nodeStyles.special,
-    });
-    this.locationMap.push({
-        start: iterableArgNode.startIndex,
-        end: iterableArgNode.endIndex,
-        nodeId: inputId,
-    });
+    // Process the iterable argument, which might be a nested HOF
+    const iterableResult = this.processArgument(iterableArgNode);
+    nodes.push(...iterableResult.nodes);
+    edges.push(...iterableResult.edges);
 
     // Node 2: Map call (Loop Controller)
     const mapId = this.generateNodeId("map_call");
@@ -1752,7 +1777,10 @@ export class PyAstParser {
       shape: "rect",
       style: this.nodeStyles.hof,
     });
-    edges.push({ from: inputId, to: mapId });
+    // Connect the output of the iterable processing to the map call
+    iterableResult.exitPoints.forEach(ep => {
+        edges.push({ from: ep.id, to: mapId, label: ep.label });
+    });
 
     // Node 3: Apply lambda
     const applyId = this.generateNodeId("map_apply");
@@ -1793,7 +1821,7 @@ export class PyAstParser {
     return {
       nodes,
       edges,
-      entryNodeId: inputId,
+      entryNodeId: iterableResult.entryNodeId,
       exitPoints: [{ id: resultId }],
       nodesConnectedToExit: new Set<string>(),
     };
@@ -1811,21 +1839,11 @@ export class PyAstParser {
 
     const functionArg = args[0];
     const iterableArgNode = args[1];
-    const iterableText = this.escapeString(iterableArgNode.text);
 
-    // Node 1: Input Iterable
-    const inputId = this.generateNodeId("filter_input");
-    nodes.push({
-      id: inputId,
-      label: `Input List: ${iterableText}`,
-      shape: "rect",
-      style: this.nodeStyles.special,
-    });
-    this.locationMap.push({
-        start: iterableArgNode.startIndex,
-        end: iterableArgNode.endIndex,
-        nodeId: inputId,
-    });
+    // Process the iterable argument, which might be a nested HOF
+    const iterableResult = this.processArgument(iterableArgNode);
+    nodes.push(...iterableResult.nodes);
+    edges.push(...iterableResult.edges);
 
     // Node 2: Filter call (Loop Controller)
     const filterId = this.generateNodeId("filter_call");
@@ -1835,7 +1853,10 @@ export class PyAstParser {
       shape: "rect",
       style: this.nodeStyles.hof,
     });
-    edges.push({ from: inputId, to: filterId });
+    // Connect the output of the iterable processing to the filter call
+    iterableResult.exitPoints.forEach(ep => {
+        edges.push({ from: ep.id, to: filterId, label: ep.label });
+    });
 
     // Node 3: Apply lambda
     const applyId = this.generateNodeId("filter_apply");
@@ -1898,7 +1919,7 @@ export class PyAstParser {
     return {
       nodes,
       edges,
-      entryNodeId: inputId,
+      entryNodeId: iterableResult.entryNodeId,
       exitPoints: [{ id: collectedId }],
       nodesConnectedToExit: new Set<string>(),
     };
@@ -1917,26 +1938,16 @@ export class PyAstParser {
     const functionArg = args[0];
     const iterableArgNode = args[1];
     const functionText = this.escapeString(functionArg.text);
-    const iterableText = this.escapeString(iterableArgNode.text);
     const hasInitializer = args.length > 2;
     const initializerArgNode = hasInitializer ? args[2] : null;
     const initializerText = initializerArgNode
       ? this.escapeString(initializerArgNode.text)
-      : `first item of ${iterableText}`;
+      : `first item from input`;
 
-    // Node 1: Input Iterable
-    const inputId = this.generateNodeId("reduce_input");
-    nodes.push({
-      id: inputId,
-      label: `Input: ${iterableText}`,
-      shape: "rect",
-      style: this.nodeStyles.special,
-    });
-    this.locationMap.push({
-        start: iterableArgNode.startIndex,
-        end: iterableArgNode.endIndex,
-        nodeId: inputId,
-    });
+    // Process the iterable argument, which might be a nested HOF
+    const iterableResult = this.processArgument(iterableArgNode);
+    nodes.push(...iterableResult.nodes);
+    edges.push(...iterableResult.edges);
 
     // Node 2: Initialize Accumulator
     const initId = this.generateNodeId("reduce_init");
@@ -1953,8 +1964,10 @@ export class PyAstParser {
             nodeId: initId,
         });
     }
-    edges.push({ from: inputId, to: initId });
-
+    // Connect the output of the iterable processing to the init node
+    iterableResult.exitPoints.forEach(ep => {
+        edges.push({ from: ep.id, to: initId, label: ep.label });
+    });
 
     // Node 3: Loop Header (Controller)
     const headerId = this.generateNodeId("reduce_header");
@@ -1998,7 +2011,7 @@ export class PyAstParser {
     return {
       nodes,
       edges,
-      entryNodeId: inputId,
+      entryNodeId: iterableResult.entryNodeId,
       exitPoints: [{ id: resultId }],
       nodesConnectedToExit: new Set<string>(),
     };
