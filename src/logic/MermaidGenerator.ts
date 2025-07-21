@@ -12,8 +12,7 @@ export class MermaidGenerator {
         ir.nodes.forEach(node => {
             const shape = this.getShape(node);
             const label = this.escapeString(node.label);
-            const style = this.getStyle(node);
-            mermaid += `    ${node.id}${shape[0]}"${label}"${shape[1]}${style}\n`;
+            mermaid += `    ${node.id}${shape[0]}"${label}"${shape[1]}\n`;
         });
 
         ir.edges.forEach(edge => {

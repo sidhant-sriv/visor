@@ -137,6 +137,7 @@ async def full_feature_test(data_list, config_path):
         
         // Should return a valid flowchart
         assert.ok(result.flowchart);
+        console.log('Generated flowchart:', result.flowchart);
         
         // Should not be an error message
         assert.ok(!result.flowchart.includes('Error:'));
