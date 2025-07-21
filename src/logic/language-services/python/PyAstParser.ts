@@ -24,12 +24,13 @@ interface LoopContext {
 }
 
 /**
- * A simplified class to manage the construction of Control Flow Graphs from Python code.
- * Only handles basic control flow: if statements, for loops, while loops, and simple statements.
+ * A class to manage the construction of Control Flow Graphs from Python code.
+ * It handles standard functions, lambda functions, and basic control flow.
  */
 export class PyAstParser {
   private nodeIdCounter = 0;
   private locationMap: LocationMapEntry[] = [];
+  private currentFunctionIsLambda = false; // Tracks if the current scope is a lambda
   private readonly nodeStyles = {
     terminator: "fill:#eee,stroke:#000,stroke-width:4px,color:#000;",
     decision: "fill:#eee,stroke:#000,stroke-width:4px,color:#000;",
@@ -60,21 +61,29 @@ export class PyAstParser {
   }
 
   /**
-   * Lists all function names found in the source code.
+   * Lists all function and lambda assignment names found in the source code.
    */
   public listFunctions(sourceCode: string): string[] {
     const parser = new Parser();
     parser.setLanguage(Python as PythonLanguage);
     const tree = parser.parse(sourceCode);
+    
     const functions = tree.rootNode.descendantsOfType("function_definition");
-    return functions.map(
+    const funcNames = functions.map(
       (f: Parser.SyntaxNode) =>
         f.childForFieldName("name")?.text || "[anonymous]"
     );
+
+    const assignments = tree.rootNode.descendantsOfType("assignment");
+    const lambdaNames = assignments
+      .filter(a => a.childForFieldName('right')?.type === 'lambda')
+      .map(a => a.childForFieldName('left')?.text || '[anonymous lambda]');
+    
+    return [...funcNames, ...lambdaNames];
   }
 
   /**
-   * Finds the function that contains the given position.
+   * Finds the function or lambda assignment that contains the given position.
    */
   public findFunctionAtPosition(
     sourceCode: string,
@@ -83,11 +92,20 @@ export class PyAstParser {
     const parser = new Parser();
     parser.setLanguage(Python as PythonLanguage);
     const tree = parser.parse(sourceCode);
+    
+    // Check for regular functions first
     const functions = tree.rootNode.descendantsOfType("function_definition");
-
     for (const func of functions) {
       if (position >= func.startIndex && position <= func.endIndex) {
         return func.childForFieldName("name")?.text || "[anonymous]";
+      }
+    }
+
+    // Check for lambda assignments
+    const assignments = tree.rootNode.descendantsOfType("assignment");
+    for (const assign of assignments) {
+      if (position >= assign.startIndex && position <= assign.endIndex && assign.childForFieldName('right')?.type === 'lambda') {
+        return assign.childForFieldName('left')?.text || '[anonymous lambda]';
       }
     }
 
@@ -96,6 +114,7 @@ export class PyAstParser {
 
   /**
    * Main public method to generate a flowchart from Python source code.
+   * It can now detect and process both standard functions and lambda functions.
    */
   public generateFlowchart(
     sourceCode: string,
@@ -104,34 +123,67 @@ export class PyAstParser {
   ): FlowchartIR {
     this.nodeIdCounter = 0;
     this.locationMap = [];
+    this.currentFunctionIsLambda = false; // Reset for each run
 
     const parser = new Parser();
     parser.setLanguage(Python as PythonLanguage);
     const tree = parser.parse(sourceCode);
 
-    let functionNode: Parser.SyntaxNode | undefined;
-    const functionNodes = tree.rootNode.descendantsOfType(
-      "function_definition"
-    );
+    let targetNode: Parser.SyntaxNode | undefined;
+    let isLambda = false;
+    let discoveredFunctionName = "[anonymous]";
 
     if (position !== undefined) {
-      functionNode = functionNodes.find(
-        (f) => position >= f.startIndex && position <= f.endIndex
-      );
-    } else if (functionName) {
-      functionNode = functionNodes.find(
-        (f) => f.childForFieldName("name")?.text === functionName
-      );
-    } else {
-      functionNode = functionNodes[0];
-    }
+      // Priority 1: Find a regular function definition containing the cursor.
+      targetNode = tree.rootNode.descendantsOfType("function_definition")
+        .find(f => position >= f.startIndex && position <= f.endIndex);
 
-    if (!functionNode) {
-      const message = functionName
-        ? `Function '${functionName}' not found.`
-        : position !== undefined
-        ? "Place cursor inside a function to generate a flowchart."
-        : "No function found in code.";
+      // Priority 2: If not in a function, find a lambda assignment.
+      if (!targetNode) {
+        const assignmentNode = tree.rootNode.descendantsOfType("assignment")
+          .find(a => position >= a.startIndex && position <= a.endIndex);
+        
+        if (assignmentNode?.childForFieldName('right')?.type === 'lambda') {
+          targetNode = assignmentNode;
+          isLambda = true;
+          discoveredFunctionName = this.escapeString(assignmentNode.childForFieldName('left')?.text || '[anonymous lambda]');
+        }
+      }
+      
+      // Priority 3: Find the smallest raw lambda containing the cursor.
+      if (!targetNode) {
+          const lambdaNodes = tree.rootNode.descendantsOfType("lambda");
+          let smallestLambda: Parser.SyntaxNode | undefined = undefined;
+          for (const lambda of lambdaNodes) {
+              if (position >= lambda.startIndex && position <= lambda.endIndex) {
+                  if (!smallestLambda || (lambda.endIndex - lambda.startIndex < smallestLambda.endIndex - smallestLambda.startIndex)) {
+                      smallestLambda = lambda;
+                  }
+              }
+          }
+          if (smallestLambda) {
+              targetNode = smallestLambda;
+              isLambda = true;
+              discoveredFunctionName = "[anonymous lambda]";
+          }
+      }
+
+    } else if (functionName) {
+      // Fallback to finding by name (less likely to work for lambdas)
+      targetNode = tree.rootNode.descendantsOfType("function_definition")
+        .find(f => f.childForFieldName("name")?.text === functionName);
+    } else {
+      // Fallback to the first function if no position or name is given
+      targetNode = tree.rootNode.descendantsOfType("function_definition")[0];
+    }
+    
+    // Set the flag to indicate if we are processing a lambda function.
+    this.currentFunctionIsLambda = isLambda;
+
+    if (!targetNode) {
+      const message = position !== undefined
+        ? "Place cursor inside a function or lambda to generate a flowchart."
+        : "No function or lambda found in code.";
 
       return {
         nodes: [{ id: "A", label: message, shape: "rect" }],
@@ -140,14 +192,28 @@ export class PyAstParser {
       };
     }
 
-    const funcNameNode = functionNode.childForFieldName("name");
-    const discoveredFunctionName = funcNameNode?.text || "[anonymous]";
-
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
-
+    
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
+    
+    let body: Parser.SyntaxNode | null = null;
+    const functionRange = { start: targetNode.startIndex, end: targetNode.endIndex };
+
+    if (isLambda) {
+        let lambdaNode: Parser.SyntaxNode | undefined;
+        if (targetNode.type === 'assignment') {
+            lambdaNode = targetNode.childForFieldName('right')!;
+        } else { // It's a raw lambda node
+            lambdaNode = targetNode;
+        }
+        body = lambdaNode.childForFieldName("body");
+    } else { // It's a function_definition
+        const funcNameNode = targetNode.childForFieldName("name");
+        discoveredFunctionName = funcNameNode?.text || "[anonymous]";
+        body = targetNode.childForFieldName("body");
+    }
 
     nodes.push({
       id: entryId,
@@ -162,10 +228,18 @@ export class PyAstParser {
       style: this.nodeStyles.terminator,
     });
 
-    const body = functionNode.childForFieldName("body");
 
     if (body) {
-      const bodyResult = this.processBlock(body, exitId);
+      console.log(`[PyAstParser DBG] Processing function '${discoveredFunctionName}'. Is lambda: ${isLambda}. Body node type: ${body.type}`);
+      let bodyResult;
+      // A lambda's body is a single expression, treated as one statement.
+      // A function's body is a block of multiple statements.
+      if (isLambda) {
+        bodyResult = this.processStatement(body, exitId);
+      } else {
+        bodyResult = this.processBlock(body, exitId);
+      }
+
       nodes.push(...bodyResult.nodes);
       edges.push(...bodyResult.edges);
 
@@ -175,6 +249,7 @@ export class PyAstParser {
         edges.push({ from: entryId, to: exitId });
       }
 
+      // Connect any loose ends to the main exit node.
       bodyResult.exitPoints.forEach((exitPoint) => {
         if (!bodyResult.nodesConnectedToExit.has(exitPoint.id)) {
           edges.push({
@@ -197,10 +272,7 @@ export class PyAstParser {
       nodes,
       edges: validEdges,
       locationMap: this.locationMap,
-      functionRange: {
-        start: functionNode.startIndex,
-        end: functionNode.endIndex,
-      },
+      functionRange,
       title: `Flowchart for ${discoveredFunctionName}`,
       entryNodeId: entryId,
       exitNodeId: exitId,
@@ -232,13 +304,12 @@ export class PyAstParser {
     const nodesConnectedToExit = new Set<string>();
     let lastExitPoints: { id: string; label?: string }[] = [];
 
-    // Filter out clauses that are handled by their parent statements
     const statements = blockNode.namedChildren.filter(
       (s: Parser.SyntaxNode) =>
         s.type !== "pass_statement" && 
         s.type !== "comment" &&
-        s.type !== "elif_clause" && // Exclude elif_clause as it's handled by if_statement
-        s.type !== "else_clause"   // Exclude else_clause as it's handled by if_statement
+        s.type !== "elif_clause" &&
+        s.type !== "else_clause"
     );
 
     if (statements.length === 0) {
@@ -266,7 +337,6 @@ export class PyAstParser {
         entryNodeId = result.entryNodeId;
       }
 
-      // Connect previous exit points to current statement entry
       if (lastExitPoints.length > 0 && result.entryNodeId) {
         lastExitPoints.forEach((exitPoint) => {
           edges.push({
@@ -277,7 +347,6 @@ export class PyAstParser {
         });
       }
 
-      // The exit points of the current statement become the entry points for the next.
       lastExitPoints = result.exitPoints;
     }
 
@@ -289,8 +358,9 @@ export class PyAstParser {
       nodesConnectedToExit,
     };
   }
+  
   /**
-   * Delegates a statement to the appropriate processing function based on its type.
+   * Delegates a statement or expression to the appropriate processing function based on its type.
    */
   private processStatement(
     statement: Parser.SyntaxNode,
@@ -298,6 +368,20 @@ export class PyAstParser {
     loopContext?: LoopContext,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
+    console.log(`[PyAstParser DBG] processStatement: type = '${statement.type}', isLambda = ${this.currentFunctionIsLambda}, text = "${statement.text.substring(0, 50)}"`);
+
+    // This explicit check ensures conditional expressions are always handled correctly,
+    // especially when they are the body of a lambda.
+    if (statement.type === "conditional_expression") {
+      console.log("[PyAstParser DBG] Matched 'conditional_expression'. Routing to processConditionalExpression.");
+      return this.processConditionalExpression(
+          statement,
+          exitId,
+          loopContext,
+          finallyContext
+      );
+    }
+
     switch (statement.type) {
       case "if_statement":
         return this.processIfStatement(
@@ -306,7 +390,6 @@ export class PyAstParser {
           loopContext,
           finallyContext
         );
-      // Note: elif_clause and else_clause are handled recursively within processIfStatement
       case "for_statement":
         return this.processForStatement(statement, exitId, finallyContext);
       case "while_statement":
@@ -346,12 +429,21 @@ export class PyAstParser {
           nodesConnectedToExit: new Set<string>(),
         };
       default:
-        return this.processDefaultStatement(statement);
+        console.log(`[PyAstParser DBG] Reached default case for type '${statement.type}'.`);
+        // If we are in a lambda, and the expression type is not a control-flow statement
+        // that has its own case, we treat it as an implicit return value.
+        if (this.currentFunctionIsLambda) {
+            console.log(`[PyAstParser DBG] In lambda, treating as implicit return.`);
+            return this.processReturnStatementForExpression(statement, exitId, finallyContext);
+        } else {
+            console.log(`[PyAstParser DBG] Not in lambda, treating as default statement.`);
+            return this.processDefaultStatement(statement);
+        }
     }
   }
 
   /**
-   * Processes a standard statement, creating a single node.
+   * Processes a standard statement or expression, creating a single node.
    */
   private processDefaultStatement(statement: Parser.SyntaxNode): ProcessResult {
     const nodeId = this.generateNodeId("stmt");
@@ -381,9 +473,127 @@ export class PyAstParser {
   }
 
   /**
+   * Processes an expression node as an implicit return statement.
+   * This is used for the body of lambda functions.
+   */
+  private processReturnStatementForExpression(
+    exprNode: Parser.SyntaxNode,
+    exitId: string,
+    finallyContext?: { finallyEntryId: string }): ProcessResult {
+    const nodeId = this.generateNodeId("return");
+    const labelText = `return ${this.escapeString(exprNode.text)}`;
+    
+    const nodes: FlowchartNode[] = [{
+      id: nodeId,
+      label: labelText,
+      shape: "stadium",
+      style: this.nodeStyles.special,
+    }];
+  
+    const edges: FlowchartEdge[] = [];
+    if (finallyContext) {
+      edges.push({ from: nodeId, to: finallyContext.finallyEntryId });
+    } else {
+      edges.push({ from: nodeId, to: exitId });
+    }
+  
+    this.locationMap.push({
+      start: exprNode.startIndex,
+      end: exprNode.endIndex,
+      nodeId,
+    });
+  
+    return {
+      nodes,
+      edges,
+      entryNodeId: nodeId,
+      exitPoints: [], // A return statement is a terminal point in its flow.
+      nodesConnectedToExit: new Set<string>([nodeId]),
+    };
+  }
+
+  /**
+   * Processes a conditional expression (ternary operator).
+   * e.g., `a if condition else b`
+   */
+  private processConditionalExpression(
+    condExprNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    console.log("[PyAstParser DBG] Inside processConditionalExpression.");
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+    const allExitPoints: { id: string; label?: string }[] = [];
+
+    const namedChildren = condExprNode.namedChildren;
+    if (namedChildren.length < 3) {
+        return this.processDefaultStatement(condExprNode);
+    }
+
+    const consequenceNode = namedChildren[0];
+    const conditionNode = namedChildren[1];
+    let alternativeNode = namedChildren[2];
+
+    // Handle `(nested_conditional)` by looking inside the parentheses
+    if (alternativeNode.type === 'parenthesized_expression' && alternativeNode.namedChild(0)?.type === 'conditional_expression') {
+        console.log("[PyAstParser DBG] Found parenthesized nested conditional. Unwrapping it.");
+        alternativeNode = alternativeNode.namedChild(0)!;
+    }
+
+    const conditionId = this.generateNodeId("cond_expr");
+    nodes.push({
+        id: conditionId,
+        label: this.escapeString(conditionNode.text),
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+    });
+    this.locationMap.push({ start: conditionNode.startIndex, end: conditionNode.endIndex, nodeId: conditionId });
+
+    const entryNodeId = conditionId;
+
+    // Process consequence (True path) by dispatching back to the main statement processor.
+    // This allows for correct recursive handling of nested structures.
+    const consequenceResult = this.processStatement(consequenceNode, exitId, loopContext, finallyContext);
+    nodes.push(...consequenceResult.nodes);
+    edges.push(...consequenceResult.edges);
+    consequenceResult.nodesConnectedToExit.forEach(n => nodesConnectedToExit.add(n));
+    allExitPoints.push(...consequenceResult.exitPoints);
+
+    if (consequenceResult.entryNodeId) {
+        edges.push({ from: conditionId, to: consequenceResult.entryNodeId, label: "True" });
+    } else {
+        allExitPoints.push({ id: conditionId, label: "True" });
+    }
+
+    // Process alternative (False path)
+    const alternativeResult = this.processStatement(alternativeNode, exitId, loopContext, finallyContext);
+    nodes.push(...alternativeResult.nodes);
+    edges.push(...alternativeResult.edges);
+    alternativeResult.nodesConnectedToExit.forEach(n => nodesConnectedToExit.add(n));
+    allExitPoints.push(...alternativeResult.exitPoints);
+
+    if (alternativeResult.entryNodeId) {
+        edges.push({ from: conditionId, to: alternativeResult.entryNodeId, label: "False" });
+    } else {
+        allExitPoints.push({ id: conditionId, label: "False" });
+    }
+
+    return {
+        nodes,
+        edges,
+        entryNodeId,
+        // If inside a lambda, the branches are terminal returns and have no exit points that flow onward.
+        // Otherwise, the exits from the branches are the exits for the whole expression.
+        exitPoints: this.currentFunctionIsLambda ? [] : allExitPoints,
+        nodesConnectedToExit,
+    };
+  }
+
+  /**
    * Processes an if-elif-else statement chain.
-   * This version correctly handles the AST structure where an if_statement node
-   * can have multiple 'alternative' children (for elif and else clauses).
    */
   private processIfStatement(
     ifNode: Parser.SyntaxNode,
@@ -396,7 +606,6 @@ export class PyAstParser {
     const nodesConnectedToExit = new Set<string>();
     const allExitPoints: { id: string; label?: string }[] = [];
 
-    // 1. Process the main 'if' part
     const ifConditionNode = ifNode.childForFieldName("condition");
     const ifConsequenceNode = ifNode.childForFieldName("consequence");
 
@@ -428,7 +637,6 @@ export class PyAstParser {
     }
     allExitPoints.push(...ifConsequenceResult.exitPoints);
 
-    // 2. Process all alternatives (elif and else clauses) using `childrenForFieldName`
     const alternatives = ifNode.childrenForFieldName("alternative");
     let elseClause: Parser.SyntaxNode | null = null;
 
@@ -448,7 +656,6 @@ export class PyAstParser {
             });
             this.locationMap.push({ start: elifConditionNode.startIndex, end: elifConditionNode.endIndex, nodeId: elifConditionId });
             
-            // Connect previous false branch to this new condition
             edges.push({ from: lastConditionId, to: elifConditionId, label: "False" });
             lastConditionId = elifConditionId;
 
@@ -466,12 +673,10 @@ export class PyAstParser {
 
         } else if (clause.type === 'else_clause') {
             elseClause = clause;
-            // An else clause must be the last alternative, so we can stop looking.
             break; 
         }
     }
 
-    // 3. Process the 'else' clause if it was found
     if (elseClause) {
         const elseBody = elseClause.childForFieldName("body");
         const elseResult = this.processBlock(elseBody, exitId, loopContext, finallyContext);
@@ -486,7 +691,6 @@ export class PyAstParser {
         }
         allExitPoints.push(...elseResult.exitPoints);
     } else {
-        // 4. No 'else' clause, so the last 'false' branch is an exit point for the whole if-structure
         allExitPoints.push({ id: lastConditionId, label: "False" });
     }
   
@@ -554,12 +758,10 @@ export class PyAstParser {
       edges.push({ from: headerId, to: headerId, label: "Loop" });
     }
 
-    // Loop back to header
     bodyResult.exitPoints.forEach((ep) => {
       edges.push({ from: ep.id, to: headerId });
     });
 
-    // Exit the loop
     edges.push({ from: headerId, to: loopExitId, label: "End Loop" });
 
     return {
@@ -629,12 +831,10 @@ export class PyAstParser {
       edges.push({ from: conditionId, to: conditionId, label: "True" });
     }
 
-    // Loop back to condition
     bodyResult.exitPoints.forEach((ep) => {
       edges.push({ from: ep.id, to: conditionId });
     });
 
-    // Exit the loop
     edges.push({ from: conditionId, to: loopExitId, label: "False" });
 
     return {
@@ -655,20 +855,13 @@ export class PyAstParser {
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
     const nodeId = this.generateNodeId("return");
-
-    // A 'return_statement' in the tree-sitter-python grammar has its value(s) as named children.
-    // Anonymous children include the 'return' keyword itself.
     const valueNodes = returnNode.namedChildren;
-
     let labelText: string;
 
     if (valueNodes.length > 0) {
-      // If value nodes exist, construct the return value string from them.
-      // This correctly handles single values, tuples, etc.
       const returnValueText = valueNodes.map((n) => n.text).join(", ");
       labelText = `return ${this.escapeString(returnValueText)}`;
     } else {
-      // If there are no named children, it's a bare `return`.
       labelText = "return";
     }
 
@@ -698,8 +891,6 @@ export class PyAstParser {
       nodes,
       edges,
       entryNodeId: nodeId,
-      // A return statement is a terminal point in a flow, so it has no onward exit points
-      // from its block. The flow terminates here and goes to the main function exit.
       exitPoints: [],
       nodesConnectedToExit: new Set<string>().add(nodeId),
     };
@@ -776,7 +967,7 @@ export class PyAstParser {
   }
 
   /**
-   * Processes a try statement.
+   * Processes a try-except-finally statement.
    */
   private processTryStatement(
     tryNode: Parser.SyntaxNode,
@@ -807,8 +998,6 @@ export class PyAstParser {
       const finallyBody = finallyClause.namedChildren.find(
         (c) => c.type === "block"
       );
-      // Process the finally block first to get its entry point.
-      // It should be processed with the outer finallyContext, not the one it creates.
       finallyResult = this.processBlock(
         finallyBody!,
         exitId,
@@ -825,7 +1014,6 @@ export class PyAstParser {
       }
     }
 
-    // Now process the try block, passing the new context if a finally block exists.
     const tryBody = tryNode.namedChildren.find((c) => c.type === "block");
     const tryResult = this.processBlock(
       tryBody!,
@@ -840,7 +1028,6 @@ export class PyAstParser {
     if (tryResult.entryNodeId) {
       edges.push({ from: entryId, to: tryResult.entryNodeId });
     } else {
-      // If try block is empty, it goes to finally or exits.
       if (finallyResult && finallyResult.entryNodeId) {
         edges.push({ from: entryId, to: finallyResult.entryNodeId });
       } else {
@@ -848,7 +1035,6 @@ export class PyAstParser {
       }
     }
 
-    // Connect exit points of the try block to the finally block.
     tryResult.exitPoints.forEach((ep) => {
       if (finallyResult && finallyResult.entryNodeId) {
         edges.push({
@@ -873,7 +1059,6 @@ export class PyAstParser {
         ? this.escapeString(exceptTypeNode.text)
         : "exception";
 
-      // Process except blocks, also passing the new finally context.
       const exceptResult = this.processBlock(
         exceptBody!,
         exitId,
@@ -887,14 +1072,12 @@ export class PyAstParser {
       );
 
       if (exceptResult.entryNodeId) {
-        // The entry point for exceptions is the main 'try' node.
         edges.push({
           from: entryId,
           to: exceptResult.entryNodeId,
           label: `on ${exceptType}`,
         });
 
-        // Connect exit points of the except block to the finally block.
         exceptResult.exitPoints.forEach((ep) => {
           if (finallyResult && finallyResult.entryNodeId) {
             edges.push({
@@ -909,23 +1092,8 @@ export class PyAstParser {
       }
     }
 
-    // If there's a finally block, its exit points are the exit points of the whole statement.
     if (finallyResult) {
-      allExitPoints = finallyResult.exitPoints;
-    } else {
-      // If no finally, and no except clauses, the "normal" path from try is an exit.
-      if (exceptClauses.length === 0) {
-        // allExitPoints already contains tryResult.exitPoints
-      } else {
-        // If there are except clauses but no finally, the normal path from a non-empty try block
-        // is also an exit path.
-        if (tryResult.exitPoints.length > 0) {
-          // Already added
-        } else if (tryResult.nodes.length === 0) {
-          // Empty try block with except clauses, the main entry can be an exit point.
-          allExitPoints.push({ id: entryId });
-        }
-      }
+      allExitPoints.push(...finallyResult.exitPoints);
     }
 
     return {
