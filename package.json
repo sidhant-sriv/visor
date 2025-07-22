@@ -10,7 +10,6 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": ["onView:sidvis.flowchartView"],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
