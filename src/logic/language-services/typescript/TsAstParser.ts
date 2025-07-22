@@ -24,7 +24,7 @@ import {
   Expression,
 } from "ts-morph";
 import { FlowchartIR, FlowchartNode, FlowchartEdge, LocationMapEntry } from '../../../ir/ir';
-
+import { StringProcessor } from '../../utils/StringProcessor';
 
 /**
  * Defines the structure for the result of processing any AST node (statement or block).
@@ -57,18 +57,31 @@ export class TsAstParser {
       break: 'fill:#eee,stroke:#000,stroke-width:2px,color:#000',
   };
 
+  // Performance limits
+  private static readonly MAX_NODES = 200;
+  private static readonly MAX_FUNCTION_SIZE = 5000; // characters
+  private static readonly MAX_RECURSION_DEPTH = 50;
+  private recursionDepth = 0;
+  private shouldTerminateEarly = false;
+
   private generateNodeId(prefix: string): string {
     return `${prefix}_${this.nodeIdCounter++}`;
   }
 
   private escapeString(str: string): string {
-    if (!str) {
-      return "";
+    return StringProcessor.escapeString(str);
+  }
+
+  private checkPerformanceLimits(): boolean {
+    if (this.nodeIdCounter >= TsAstParser.MAX_NODES) {
+      this.shouldTerminateEarly = true;
+      return false;
     }
-    const sanitized = str.replace(/"/g, "#quot;").replace(/\n/g, " ").trim();
-    return sanitized.length > 60
-      ? sanitized.substring(0, 57) + "..."
-      : sanitized;
+    if (this.recursionDepth >= TsAstParser.MAX_RECURSION_DEPTH) {
+      this.shouldTerminateEarly = true;  
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -81,6 +94,8 @@ export class TsAstParser {
   ): FlowchartIR {
     this.nodeIdCounter = 0;
     this.locationMap = [];
+    this.shouldTerminateEarly = false;
+    this.recursionDepth = 0;
 
     const descendant = sourceFile.getDescendantAtPos(position);
     if (!descendant) {
@@ -115,6 +130,20 @@ export class TsAstParser {
       };
     }
 
+    // Check function size before processing
+    const functionText = functionToAnalyze.getText();
+    if (functionText.length > TsAstParser.MAX_FUNCTION_SIZE) {
+      return {
+        nodes: [{ 
+          id: 'A', 
+          label: `Function too large (${functionText.length} chars). Limit: ${TsAstParser.MAX_FUNCTION_SIZE}`, 
+          shape: 'rect' 
+        }],
+        edges: [],
+        locationMap: [],
+      };
+    }
+
     let functionName: string | undefined;
     if (
       Node.isFunctionDeclaration(functionToAnalyze) ||
@@ -132,7 +161,6 @@ export class TsAstParser {
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
 
-
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
@@ -143,21 +171,33 @@ export class TsAstParser {
 
     if (body && Node.isBlock(body)) {
       const bodyResult = this.processBlock(body, exitId);
-      nodes.push(...bodyResult.nodes);
-      edges.push(...bodyResult.edges);
-
-
-      if (bodyResult.entryNodeId) {
-        edges.push({ from: entryId, to: bodyResult.entryNodeId });
+      
+      // Check if we terminated early
+      if (this.shouldTerminateEarly) {
+        nodes.push({
+          id: 'truncated',
+          label: `... (truncated at ${this.nodeIdCounter} nodes)`,
+          shape: 'rect',
+          style: this.nodeStyles.special
+        });
+        edges.push({ from: entryId, to: 'truncated' });
+        edges.push({ from: 'truncated', to: exitId });
       } else {
-        edges.push({ from: entryId, to: exitId });
-      }
+        nodes.push(...bodyResult.nodes);
+        edges.push(...bodyResult.edges);
 
-      bodyResult.exitPoints.forEach((exitPoint) => {
-        if (!bodyResult.nodesConnectedToExit.has(exitPoint.id)) {
-            edges.push({ from: exitPoint.id, to: exitId, label: exitPoint.label });
+        if (bodyResult.entryNodeId) {
+          edges.push({ from: entryId, to: bodyResult.entryNodeId });
+        } else {
+          edges.push({ from: entryId, to: exitId });
         }
-      });
+
+        bodyResult.exitPoints.forEach((exitPoint) => {
+          if (!bodyResult.nodesConnectedToExit.has(exitPoint.id)) {
+              edges.push({ from: exitPoint.id, to: exitId, label: exitPoint.label });
+          }
+        });
+      }
     } else {
       edges.push({ from: entryId, to: exitId });
     }
@@ -185,6 +225,19 @@ export class TsAstParser {
     exitId: string,
     loopContext?: LoopContext
   ): ProcessResult {
+    this.recursionDepth++;
+    
+    if (!this.checkPerformanceLimits()) {
+      this.recursionDepth--;
+      return {
+        nodes: [],
+        edges: [],
+        entryNodeId: "",
+        exitPoints: [],
+        nodesConnectedToExit: new Set<string>(),
+      };
+    }
+
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
     let entryNodeId: string = "";
@@ -194,6 +247,7 @@ export class TsAstParser {
     const statements = blockNode.getStatements();
 
     if (statements.length === 0) {
+      this.recursionDepth--;
       return {
         nodes: [],
         edges: [],
@@ -204,6 +258,8 @@ export class TsAstParser {
     }
 
     for (const statement of statements) {
+      if (this.shouldTerminateEarly) break;
+      
       const result = this.processStatement(statement, exitId, loopContext);
       nodes.push(...result.nodes);
       edges.push(...result.edges);
@@ -224,6 +280,7 @@ export class TsAstParser {
       result.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
     }
 
+    this.recursionDepth--;
     return {
       nodes,
       edges,
