@@ -1,7 +1,6 @@
 import { Project, ScriptTarget, SourceFile } from "ts-morph";
 import { TsAstParser } from "./TsAstParser";
-import { MermaidGenerator } from "../../MermaidGenerator";
-import { FlowchartIR, LocationMapEntry } from "../../../ir/ir";
+import { FlowchartIR } from "../../../ir/ir";
 
 // Project pool for reuse
 class ProjectPool {
@@ -46,29 +45,21 @@ class ProjectPool {
 export function analyzeTypeScriptCode(
   code: string,
   position: number
-): {
-  flowchart: string;
-  locationMap: LocationMapEntry[];
-  functionRange?: { start: number; end: number };
-} {
+): FlowchartIR {
   const projectPool = ProjectPool.getInstance();
   const project = projectPool.getProject();
 
   try {
     const sourceFile = project.createSourceFile("temp.ts", code);
     const parser = new TsAstParser();
-    const ir = parser.generateFlowchart(sourceFile, position);
-
-    const mermaidGenerator = new MermaidGenerator();
-    const flowchart = mermaidGenerator.generate(ir);
-
-    return { flowchart, locationMap: ir.locationMap, functionRange: ir.functionRange };
+    return parser.generateFlowchart(sourceFile, position);
   } catch (error: any) {
     console.error("Error analyzing TypeScript code:", error);
-    const errorMessage = `graph TD\n    A[Error: Unable to parse code]\n    A --> B["${
-      error.message || error
-    }"]`;
-    return { flowchart: errorMessage, locationMap: [] };
+    return { 
+      nodes: [{ id: 'A', label: `Error: Unable to parse code. ${error.message || error}`, shape: 'rect' }],
+      edges: [],
+      locationMap: []
+    };
   } finally {
     projectPool.releaseProject(project);
   }

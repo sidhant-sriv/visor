@@ -24,43 +24,7 @@ import {
   Expression,
 } from "ts-morph";
 import { FlowchartIR, FlowchartNode, FlowchartEdge, LocationMapEntry } from '../../../ir/ir';
-
-// Optimized string handling
-class StringProcessor {
-  private static escapeCache = new Map<string, string>();
-  private static readonly MAX_CACHE_SIZE = 1000;
-  
-  // Precompiled regex for better performance
-  private static readonly escapeRegex = /"|\\|\n/g;
-  private static readonly escapeMap: Record<string, string> = {
-    '"': '&quot;',
-    '\\': '\\\\', 
-    '\n': ' '
-  };
-
-  static escapeString(str: string): string {
-    if (!str) return '';
-    
-    // Check cache first
-    const cached = this.escapeCache.get(str);
-    if (cached !== undefined) return cached;
-
-    // Clear cache if too large
-    if (this.escapeCache.size >= this.MAX_CACHE_SIZE) {
-      this.escapeCache.clear();
-    }
-
-    let escaped = str.replace(this.escapeRegex, match => this.escapeMap[match]);
-    escaped = escaped.trim();
-
-    this.escapeCache.set(str, escaped);
-    return escaped;
-  }
-
-  static clearCache(): void {
-    this.escapeCache.clear();
-  }
-}
+import { StringProcessor } from '../../utils/StringProcessor';
 
 /**
  * Defines the structure for the result of processing any AST node (statement or block).

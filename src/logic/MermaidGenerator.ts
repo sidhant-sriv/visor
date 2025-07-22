@@ -1,4 +1,5 @@
 import { FlowchartIR, FlowchartNode } from '../ir/ir';
+import { StringProcessor } from './utils/StringProcessor';
 
 // Optimized string building
 class StringBuilder {
@@ -23,7 +24,6 @@ class StringBuilder {
 
 export class MermaidGenerator {
     private sb = new StringBuilder();
-    private static escapeCache = new Map<string, string>();
     
     public generate(ir: FlowchartIR): string {
         this.sb.clear();
@@ -94,19 +94,6 @@ export class MermaidGenerator {
     }
 
     private escapeString(str: string): string {
-        if (!str) return '';
-        
-        // Check cache first
-        const cached = MermaidGenerator.escapeCache.get(str);
-        if (cached !== undefined) return cached;
-
-        // Clear cache if too large
-        if (MermaidGenerator.escapeCache.size >= 1000) {
-            MermaidGenerator.escapeCache.clear();
-        }
-
-        const escaped = str.replace(/"/g, '&quot;').replace(/\n/g, ' ').trim();
-        MermaidGenerator.escapeCache.set(str, escaped);
-        return escaped;
+        return StringProcessor.escapeString(str);
     }
 } 

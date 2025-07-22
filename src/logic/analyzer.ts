@@ -1,6 +1,7 @@
 import { analyzeTypeScriptCode } from "./language-services/typescript";
 import { analyzePythonCode } from "./language-services/python";
-import { LocationMapEntry } from "../ir/ir";
+import { FlowchartIR, LocationMapEntry } from "../ir/ir";
+import { MermaidGenerator } from "./MermaidGenerator";
 
 // Performance monitoring
 interface PerformanceMetrics {
@@ -66,21 +67,18 @@ export function analyzeCode(
 } {
   const startTime = performance.now();
 
-  let result: {
-    flowchart: string;
-    locationMap: LocationMapEntry[];
-    functionRange?: { start: number; end: number };
-  };
+  let ir: FlowchartIR;
 
   // Language selection logic
   if (language === 'typescript' || language === 'javascript') {
-    result = analyzeTypeScriptCode(code, position);
+    ir = analyzeTypeScriptCode(code, position);
   } else if (language === 'python') {
-    result = analyzePythonCode(code, position);
+    ir = analyzePythonCode(code, position);
   } else {
     // Default or unsupported language
-    result = {
-      flowchart: 'graph TD\n    A[Error: Unsupported language]\n    A --> B["' + language + '"]',
+    ir = {
+      nodes: [{ id: 'A', label: `Error: Unsupported language: ${language}`, shape: 'rect' }],
+      edges: [],
       locationMap: []
     };
   }
@@ -88,10 +86,10 @@ export function analyzeCode(
   const endTime = performance.now();
   const analysisTime = endTime - startTime;
 
-  // Extract metrics from result
-  const nodeCount = (result.flowchart.match(/^\s*\w+.*\[.*\]/gm) || []).length;
-  const edgeCount = (result.flowchart.match(/-->/g) || []).length;
-  const functionSize = code.length;
+  // Extract metrics from IR
+  const nodeCount = ir.nodes.length;
+  const edgeCount = ir.edges.length;
+  const functionSize = ir.functionRange ? ir.functionRange.end - ir.functionRange.start : 0;
 
   const metrics: PerformanceMetrics = {
     analysisTime,
@@ -107,8 +105,13 @@ export function analyzeCode(
     console.warn(`[Performance] Slow analysis: ${analysisTime.toFixed(2)}ms for ${functionSize} chars`);
   }
 
+  const mermaidGenerator = new MermaidGenerator();
+  const flowchart = mermaidGenerator.generate(ir);
+
   return {
-    ...result,
+    flowchart,
+    locationMap: ir.locationMap,
+    functionRange: ir.functionRange,
     performanceMetrics: metrics
   };
 }
