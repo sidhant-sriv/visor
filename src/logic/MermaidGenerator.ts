@@ -1,34 +1,82 @@
 import { FlowchartIR, FlowchartNode } from '../ir/ir';
 
+// Optimized string building
+class StringBuilder {
+    private parts: string[] = [];
+
+    append(str: string): void {
+        this.parts.push(str);
+    }
+
+    appendLine(str: string): void {
+        this.parts.push(str, '\n');
+    }
+
+    toString(): string {
+        return this.parts.join('');
+    }
+
+    clear(): void {
+        this.parts.length = 0;
+    }
+}
+
 export class MermaidGenerator {
+    private sb = new StringBuilder();
+    private static escapeCache = new Map<string, string>();
+    
     public generate(ir: FlowchartIR): string {
-        let mermaid = 'graph TD\n';
+        this.sb.clear();
+        this.sb.appendLine('graph TD');
 
         if (ir.title) {
-            // Mermaid doesn't have a formal title, but we can use a comment
-            mermaid += `%% ${ir.title}\n`;
+            this.sb.appendLine(`%% ${ir.title}`);
         }
 
-        ir.nodes.forEach(node => {
+        // Generate nodes efficiently
+        for (const node of ir.nodes) {
             const shape = this.getShape(node);
             const label = this.escapeString(node.label);
-            mermaid += `    ${node.id}${shape[0]}"${label}"${shape[1]}\n`;
-        });
+            this.sb.append('    ');
+            this.sb.append(node.id);
+            this.sb.append(shape[0]);
+            this.sb.append('"');
+            this.sb.append(label);
+            this.sb.append('"');
+            this.sb.append(shape[1]);
+            this.sb.appendLine('');
+        }
 
-        ir.edges.forEach(edge => {
+        // Generate edges efficiently  
+        for (const edge of ir.edges) {
+            this.sb.append('    ');
+            this.sb.append(edge.from);
+            
             if (edge.label) {
                 const label = this.escapeString(edge.label);
-                mermaid += `    ${edge.from} -- "${label}" --> ${edge.to}\n`;
+                this.sb.append(' -- "');
+                this.sb.append(label);
+                this.sb.append('" --> ');
             } else {
-                mermaid += `    ${edge.from} --> ${edge.to}\n`;
+                this.sb.append(' --> ');
             }
-        });
+            
+            this.sb.append(edge.to);
+            this.sb.appendLine('');
+        }
 
-        ir.locationMap.forEach(entry => {
-            mermaid += `    click ${entry.nodeId} call onNodeClick(${entry.start}, ${entry.end})\n`;
-        });
+        // Generate click handlers efficiently
+        for (const entry of ir.locationMap) {
+            this.sb.append('    click ');
+            this.sb.append(entry.nodeId);
+            this.sb.append(' call onNodeClick(');
+            this.sb.append(entry.start.toString());
+            this.sb.append(', ');
+            this.sb.append(entry.end.toString());
+            this.sb.appendLine(')');
+        }
 
-        return mermaid;
+        return this.sb.toString();
     }
 
     private getShape(node: FlowchartNode): [string, string] {
@@ -46,9 +94,19 @@ export class MermaidGenerator {
     }
 
     private escapeString(str: string): string {
-        if (!str) {
-            return '';
+        if (!str) return '';
+        
+        // Check cache first
+        const cached = MermaidGenerator.escapeCache.get(str);
+        if (cached !== undefined) return cached;
+
+        // Clear cache if too large
+        if (MermaidGenerator.escapeCache.size >= 1000) {
+            MermaidGenerator.escapeCache.clear();
         }
-        return str.replace(/"/g, '&quot;').replace(/\n/g, ' ').trim();
+
+        const escaped = str.replace(/"/g, '&quot;').replace(/\n/g, ' ').trim();
+        MermaidGenerator.escapeCache.set(str, escaped);
+        return escaped;
     }
 } 

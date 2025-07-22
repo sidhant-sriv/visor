@@ -4,6 +4,49 @@ import { FlowchartIR, FlowchartNode, FlowchartEdge, LocationMapEntry } from "../
 
 type PythonLanguage = Parser.Language;
 
+// Optimized string handling (shared with TypeScript parser)
+class StringProcessor {
+  private static escapeCache = new Map<string, string>();
+  private static readonly MAX_CACHE_SIZE = 1000;
+  
+  // Precompiled regex for better performance
+  private static readonly escapeRegex = /"|\\|\n/g;
+  private static readonly escapeMap: Record<string, string> = {
+    '"': '#quot;', // Python uses #quot; format
+    '\\': '\\\\', 
+    '\n': ' '
+  };
+
+  static escapeString(str: string): string {
+    if (!str) return '';
+    
+    // Check cache first
+    const cached = this.escapeCache.get(str);
+    if (cached !== undefined) return cached;
+
+    // Clear cache if too large
+    if (this.escapeCache.size >= this.MAX_CACHE_SIZE) {
+      this.escapeCache.clear();
+    }
+
+    let escaped = str.replace(this.escapeRegex, match => this.escapeMap[match]);
+    escaped = escaped.replace(/:$/, "").trim();
+
+    // Length limiting for readability
+    const MAX_LABEL_LENGTH = 80;
+    if (escaped.length > MAX_LABEL_LENGTH) {
+      escaped = escaped.substring(0, MAX_LABEL_LENGTH - 3) + "...";
+    }
+
+    this.escapeCache.set(str, escaped);
+    return escaped;
+  }
+
+  static clearCache(): void {
+    this.escapeCache.clear();
+  }
+}
+
 interface ProcessResult {
   nodes: FlowchartNode[];
   edges: FlowchartEdge[];
@@ -23,9 +66,9 @@ export class PyAstParser {
   private currentFunctionIsLambda = false;
   private debug = false;
   private readonly nodeStyles = {
-    terminator: "fill:#f9f9f9,stroke:#333,stroke-width:2px,color:#333",
-    decision: "fill:#fff,stroke:#333,stroke-width:1.5px,color:#333",
-    process: "fill:#fff,stroke:#333,stroke-width:1.5px,color:#333",
+    terminator: "fill:#e8f5e8,stroke:#2e7d32,stroke-width:1.5px,color:#000",
+    decision: "fill:#fff3e0,stroke:#f57c00,stroke-width:1.5px,color:#000",
+    process: "fill:#f3e5f5,stroke:#7b1fa2,stroke-width:1.5px,color:#000",
     special: "fill:#e3f2fd,stroke:#0d47a1,stroke-width:1.5px,color:#000",
     break: "fill:#ffebee,stroke:#c62828,stroke-width:1.5px,color:#000",
     hof: "fill:#e8eaf6,stroke:#3f51b5,stroke-width:1.5px,color:#000",
@@ -40,10 +83,7 @@ export class PyAstParser {
   }
 
   private escapeString(str: string): string {
-    if (!str) return "";
-    const sanitized = str.replace(/"/g, "#quot;").replace(/\n/g, " ").replace(/:$/, "").trim();
-    const MAX_LABEL_LENGTH = 80;
-    return sanitized.length > MAX_LABEL_LENGTH ? sanitized.substring(0, MAX_LABEL_LENGTH - 3) + "..." : sanitized;
+    return StringProcessor.escapeString(str);
   }
 
   public listFunctions(sourceCode: string): string[] {
