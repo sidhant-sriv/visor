@@ -1,8 +1,15 @@
-.vscode/**
-.vscode-test/**
-out/**
-node_modules/**
-src/**
+node_modules
+!/node_modules/tree-sitter/
+!/node_modules/tree-sitter-cpp/
+!/node_modules/tree-sitter-java/
+!/node_modules/tree-sitter-python/
+!/node_modules/tree-sitter-typescript/
+!/node_modules/web-tree-sitter/
+out/
+dist/
+src/
+.vscode-test/
+.vscode/
 .gitignore
 .yarnrc
 webpack.config.js
@@ -10,5 +17,4 @@ vsc-extension-quickstart.md
 **/tsconfig.json
 **/eslint.config.mjs
 **/*.map
-**/*.ts
 **/.vscode-test.*
