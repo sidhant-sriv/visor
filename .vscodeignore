@@ -1,42 +1,23 @@
-# Exclude node_modules but include necessary tree-sitter binaries
 node_modules
-!node_modules/tree-sitter/build/**/*.node
-!node_modules/tree-sitter-*/prebuilds/darwin-arm64/*.node
-!node_modules/tree-sitter-*/prebuilds/darwin-x64/*.node
-!node_modules/tree-sitter-*/prebuilds/linux-x64/*.node
-!node_modules/tree-sitter-*/prebuilds/win32-x64/*.node
-!node_modules/tree-sitter/package.json
-!node_modules/tree-sitter-*/package.json
-!node_modules/tree-sitter/index.js
-!node_modules/tree-sitter-*/index.js
-!node_modules/tree-sitter/tree-sitter.d.ts
 
-# Exclude source and output directories (we include dist/ via webpack bundle)
-out/
+!node_modules/tree-sitter-*/
+
+
+# Exclude source code, old build artifacts, and tests.
 src/
+out/
+.vscode-test/
 test.cpp
 
-# Exclude development and config files
-.vscode-test/
+# Exclude config, git, and lock files.
 .vscode/
+.git/
 .gitignore
 .yarnrc
-webpack.config.js
-vsc-extension-quickstart.md
-**/tsconfig.json
-**/eslint.config.mjs
-**/*.map
-**/.vscode-test.*
-
-# Exclude yarn/npm files
 yarn.lock
 package-lock.json
-
-# Exclude old VSIX files
 *.vsix
-
-# Exclude git
-.git/
-
-# Exclude scripts directory (if not needed at runtime)
-scripts/
+*.map
+**/tsconfig.json
+**/webpack.config.js
+**/eslint.config.mjs
