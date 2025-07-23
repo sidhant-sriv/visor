@@ -305,7 +305,7 @@ ${flowchartSyntax}
 }
 
 export class FlowchartViewProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = "sidvis.flowchartView";
+  public static readonly viewType = "visor.flowchartView";
   private _view?: vscode.WebviewView;
   private _disposables: vscode.Disposable[] = [];
   private _locationMap: LocationMapEntry[] = [];

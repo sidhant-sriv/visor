@@ -1,6 +1,7 @@
 {
-  "name": "sidvis",
-  "displayName": "sidvis",
+  "name": "visor",
+  "displayName": "visor",
+  "publisher" : "sidhantsriv",
   "description": "Makes a flowchart on the side for your code for better visualization.",
   "version": "0.0.1",
   "engines": {
@@ -15,16 +16,16 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "sidvis-container",
-          "title": "Sid Vis",
+          "id": "visor-container",
+          "title": "Visor",
           "icon": "media/icon.png"
         }
       ]
     },
     "views": {
-      "sidvis-container": [
+      "visor-container": [
         {
-          "id": "sidvis.flowchartView",
+          "id": "visor.flowchartView",
           "name": "Flowchart",
           "type": "webview",
           "icon": "media/icon.png"
@@ -33,14 +34,14 @@
     },
     "commands": [
       {
-        "command": "sidvis.generateFlowchart",
+        "command": "visor.generateFlowchart",
         "title": "Generate Flowchart"
       }
     ],
     "menus": {
       "editor/context": [
         {
-          "command": "sidvis.generateFlowchart",
+          "command": "visor.generateFlowchart",
           "when": "editorTextFocus && editorHasSelection",
           "group": "navigation"
         }
