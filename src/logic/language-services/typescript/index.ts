@@ -11,7 +11,7 @@ export function analyzeTypeScriptCode(
 ): FlowchartIR {
   try {
     const parser = new TsAstParserTreeSitter();
-    return parser.generateFlowchart(code, position);
+    return parser.generateFlowchart(code, undefined, position);
   } catch (error: any) {
     console.error("Error analyzing TypeScript code:", error);
     return {

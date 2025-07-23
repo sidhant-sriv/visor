@@ -1,37 +1,58 @@
-// Use require for tree-sitter modules to avoid TypeScript import issues
-const Parser = require("tree-sitter");
-const TypeScript = require("tree-sitter-typescript").typescript;
-
+import Parser from "tree-sitter";
+import Typescript from "tree-sitter-typescript";
 import {
   FlowchartIR,
   FlowchartNode,
   FlowchartEdge,
   LocationMapEntry,
 } from "../../../ir/ir";
-import { StringProcessor } from "../../utils/StringProcessor";
 
-// Type definitions for tree-sitter
-interface SyntaxNode {
-  type: string;
-  text: string;
-  startIndex: number;
-  endIndex: number;
-  namedChildren: SyntaxNode[];
-  namedChildCount: number;
-  parent: SyntaxNode | null;
-  firstNamedChild: SyntaxNode | null;
-  childForFieldName(fieldName: string): SyntaxNode | null;
-  descendantsOfType(type: string | string[]): SyntaxNode[];
-  descendantForIndex(index: number): SyntaxNode | null;
-}
+type TypescriptLanguage = Parser.Language;
 
-interface Tree {
-  rootNode: SyntaxNode;
-}
+// Optimized string handling (shared with TypeScript parser)
+class StringProcessor {
+  private static escapeCache = new Map<string, string>();
+  private static readonly MAX_CACHE_SIZE = 1000;
 
-interface ParserInstance {
-  setLanguage(language: any): void;
-  parse(code: string): Tree;
+  // Precompiled regex for better performance
+  private static readonly escapeRegex = /"|\\|\n/g;
+  private static readonly escapeMap: Record<string, string> = {
+    '"': "#quot;",
+    "\\": "\\\\",
+    "\n": " ",
+  };
+
+  static escapeString(str: string): string {
+    if (!str) return "";
+
+    // Check cache first
+    const cached = this.escapeCache.get(str);
+    if (cached !== undefined) return cached;
+
+    // Clear cache if too large
+    if (this.escapeCache.size >= this.MAX_CACHE_SIZE) {
+      this.escapeCache.clear();
+    }
+
+    let escaped = str.replace(
+      this.escapeRegex,
+      (match) => this.escapeMap[match]
+    );
+    escaped = escaped.replace(/:$/, "").trim();
+
+    // Length limiting for readability
+    const MAX_LABEL_LENGTH = 80;
+    if (escaped.length > MAX_LABEL_LENGTH) {
+      escaped = escaped.substring(0, MAX_LABEL_LENGTH - 3) + "...";
+    }
+
+    this.escapeCache.set(str, escaped);
+    return escaped;
+  }
+
+  static clearCache(): void {
+    this.escapeCache.clear();
+  }
 }
 
 interface ProcessResult {
@@ -47,42 +68,23 @@ interface LoopContext {
   continueTargetId: string;
 }
 
-interface FinallyContext {
-    finallyEntryId: string;
-}
-
-// Helper to detect arrow function expression bodies
-function isArrowFunctionExpressionBody(node: SyntaxNode): boolean {
-  return node.parent?.type === 'arrow_function' &&
-         node.parent.childForFieldName("body") === node &&
-         node.type !== "statement_block";
-}
-
-
-/**
- * Tree-sitter based TypeScript AST parser for generating flowcharts
- * This implementation follows the same pattern as PyAstParser but uses Tree-sitter for TypeScript
- */
 export class TsAstParserTreeSitter {
   private nodeIdCounter = 0;
   private locationMap: LocationMapEntry[] = [];
-  private shouldTerminateEarly = false;
-  private recursionDepth = 0;
-
-  // Performance limits
-  private static readonly MAX_NODES = 250;
-  private static readonly MAX_FUNCTION_SIZE = 5000;
-  private static readonly MAX_RECURSION_DEPTH = 50;
-  private static readonly HOF_NAMES = ["map", "filter", "forEach", "reduce"];
-
+  private currentFunctionIsArrowFunction = false;
+  private debug = false;
   private readonly nodeStyles = {
-    terminator: "fill:#eee,stroke:#000,stroke-width:4px,color:#000;",
-    decision: "fill:#eee,stroke:#000,stroke-width:4px,color:#000;",
-    process: "fill:#eee,stroke:#000,stroke-width:1px,color:#000;",
-    special: "fill:#eee,stroke:#000,stroke-width:4px,color:#000",
-    break: "fill:#eee,stroke:#000,stroke-width:2px,color:#000",
-    hof: "fill:#e3f2fd,stroke:#0d47a1,stroke-width:1.5px,color:#000",
+    terminator: "fill:#e8f5e8,stroke:#2e7d32,stroke-width:1.5px,color:#000",
+    decision: "fill:#fff3e0,stroke:#f57c00,stroke-width:1.5px,color:#000",
+    process: "fill:#f3e5f5,stroke:#7b1fa2,stroke-width:1.5px,color:#000",
+    special: "fill:#e3f2fd,stroke:#0d47a1,stroke-width:1.5px,color:#000",
+    break: "fill:#ffebee,stroke:#c62828,stroke-width:1.5px,color:#000",
+    hof: "fill:#e8eaf6,stroke:#3f51b5,stroke-width:1.5px,color:#000",
   };
+
+  private log(message: string, ...args: any[]) {
+    if (this.debug) console.log(`[PyAstParser] ${message}`, ...args);
+  }
 
   private generateNodeId(prefix: string): string {
     return `${prefix}_${this.nodeIdCounter++}`;
@@ -92,48 +94,347 @@ export class TsAstParserTreeSitter {
     return StringProcessor.escapeString(str);
   }
 
-  private checkPerformanceLimits(): boolean {
-    if (this.nodeIdCounter >= TsAstParserTreeSitter.MAX_NODES) {
-      this.shouldTerminateEarly = true;
-      return false;
-    }
-    if (this.recursionDepth >= TsAstParserTreeSitter.MAX_RECURSION_DEPTH) {
-      this.shouldTerminateEarly = true;
-      return false;
-    }
-    return true;
+  public listFunctions(sourceCode: string): string[] {
+    const parser = new Parser();
+    parser.setLanguage(Typescript.typescript as TypescriptLanguage);
+    const tree = parser.parse(sourceCode);
+
+    // Get function declarations
+    const funcNames = tree.rootNode
+      .descendantsOfType("function_declaration")
+      .map(
+        (f: Parser.SyntaxNode) =>
+          f.childForFieldName("name")?.text || "[anonymous]"
+      );
+
+    // Get function expressions
+    const funcExprNames = tree.rootNode
+      .descendantsOfType("function_expression")
+      .map(
+        (f: Parser.SyntaxNode) =>
+          f.childForFieldName("name")?.text || "[function expression]"
+      );
+
+    // Get arrow functions assigned to variables
+    const arrowFuncNames = tree.rootNode
+      .descendantsOfType("variable_declarator")
+      .filter((vd) => vd.childForFieldName("value")?.type === "arrow_function")
+      .map((vd) => vd.childForFieldName("name")?.text || "[arrow function]");
+
+    // Get method definitions in classes
+    const methodNames = tree.rootNode
+      .descendantsOfType("method_definition")
+      .map(
+        (m: Parser.SyntaxNode) =>
+          m.childForFieldName("name")?.text || "[method]"
+      );
+
+    return [...funcNames, ...funcExprNames, ...arrowFuncNames, ...methodNames];
   }
 
-  /**
-   * Main public method to generate a flowchart from TypeScript source code
-   * Similar to PyAstParser.generateFlowchart but uses Tree-sitter
-   */
-  public generateFlowchart(sourceCode: string, position: number): FlowchartIR {
+  public findFunctionAtPosition(
+    sourceCode: string,
+    position: number
+  ): string | undefined {
+    const parser = new Parser();
+    parser.setLanguage(Typescript.typescript as TypescriptLanguage);
+    const tree = parser.parse(sourceCode);
+
+    // Find function declarations
+    const func = tree.rootNode
+      .descendantsOfType("function_declaration")
+      .find((f) => position >= f.startIndex && position <= f.endIndex);
+    if (func) return func.childForFieldName("name")?.text || "[anonymous]";
+
+    // Find function expressions
+    const funcExpr = tree.rootNode
+      .descendantsOfType("function_expression")
+      .find((f) => position >= f.startIndex && position <= f.endIndex);
+    if (funcExpr)
+      return (
+        funcExpr.childForFieldName("name")?.text || "[function expression]"
+      );
+
+    // Find arrow functions
+    const arrowFunc = tree.rootNode
+      .descendantsOfType("variable_declarator")
+      .find(
+        (vd) =>
+          position >= vd.startIndex &&
+          position <= vd.endIndex &&
+          vd.childForFieldName("value")?.type === "arrow_function"
+      );
+    if (arrowFunc)
+      return arrowFunc.childForFieldName("name")?.text || "[arrow function]";
+
+    // Find methods
+    const method = tree.rootNode
+      .descendantsOfType("method_definition")
+      .find((m) => position >= m.startIndex && position <= m.endIndex);
+    return method?.childForFieldName("name")?.text || "[method]";
+  }
+
+  private isHofCall(node: Parser.SyntaxNode | null | undefined): boolean {
+    if (!node || node.type !== "call_expression") return false;
+    const functionNode = node.childForFieldName("function");
+    if (!functionNode) return false;
+
+    const functionName = functionNode.text?.split(".").pop();
+    if (!functionName) return false;
+
+    return [
+      "map",
+      "filter",
+      "reduce",
+      "forEach",
+      "find",
+      "some",
+      "every",
+    ].includes(functionName);
+  }
+
+  private generateHofFlowchart(
+    statementNode: Parser.SyntaxNode,
+    hofCallNode: Parser.SyntaxNode,
+    containerName?: string
+  ): FlowchartIR {
     this.nodeIdCounter = 0;
     this.locationMap = [];
-    this.shouldTerminateEarly = false;
-    this.recursionDepth = 0;
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
 
-    const parser: ParserInstance = new Parser();
-    parser.setLanguage(TypeScript);
+    const hofResult = this.processHigherOrderFunctionCall(hofCallNode);
+    if (!hofResult) return this.generateFlowchart(statementNode.text);
 
-    let tree: Tree;
-    try {
-      tree = parser.parse(sourceCode);
-    } catch (error) {
-        const message = error instanceof Error ? error.message : "Unknown parsing error";
-        return {
-            nodes: [{
-                id: "A",
-                label: `TS Parse Error: ${message}`,
-                shape: "rect"
-            }],
-            edges: [],
-            locationMap: [],
-        };
+    nodes.push(...hofResult.nodes);
+    edges.push(...hofResult.edges);
+    let entryPointId = hofResult.entryNodeId;
+    let finalExitPoints = hofResult.exitPoints;
+
+    if (
+      ["assignment_expression", "expression_statement"].includes(
+        statementNode.type
+      )
+    ) {
+      const assignment =
+        statementNode.type === "assignment_expression"
+          ? statementNode
+          : statementNode.namedChild(0);
+
+      if (assignment && assignment.type === "assignment_expression") {
+        const leftNode = assignment.childForFieldName("left");
+        if (leftNode) {
+          const assignId = this.generateNodeId("assign_hof");
+          const leftText = this.escapeString(leftNode.text);
+          nodes.unshift({
+            id: assignId,
+            label: `${leftText} = ...`,
+            shape: "rect",
+            style: this.nodeStyles.process,
+          });
+          if (entryPointId) edges.unshift({ from: assignId, to: entryPointId });
+          entryPointId = assignId;
+          this.locationMap.push({
+            start: leftNode.startIndex,
+            end: leftNode.endIndex,
+            nodeId: assignId,
+          });
+        }
+      }
     }
 
-    const targetNode = this.findFunctionAtPosition(tree.rootNode, position);
+    if (containerName) {
+      const convertId = this.generateNodeId("convert");
+      nodes.push({
+        id: convertId,
+        label: `Convert to ${containerName}`,
+        shape: "rect",
+        style: this.nodeStyles.process,
+      });
+      finalExitPoints.forEach((ep) =>
+        edges.push({ from: ep.id, to: convertId, label: ep.label })
+      );
+      finalExitPoints = [{ id: convertId }];
+    }
+
+    const startId = this.generateNodeId("start");
+    const endId = this.generateNodeId("end");
+    nodes.unshift({
+      id: startId,
+      label: "Start",
+      shape: "round",
+      style: this.nodeStyles.terminator,
+    });
+    nodes.push({
+      id: endId,
+      label: "End",
+      shape: "round",
+      style: this.nodeStyles.terminator,
+    });
+
+    edges.unshift(
+      entryPointId
+        ? { from: startId, to: entryPointId }
+        : { from: startId, to: endId }
+    );
+    finalExitPoints.forEach((ep) =>
+      edges.push({ from: ep.id, to: endId, label: ep.label })
+    );
+
+    return {
+      nodes,
+      edges,
+      locationMap: this.locationMap,
+      functionRange: {
+        start: statementNode.startIndex,
+        end: statementNode.endIndex,
+      },
+      title: `Flowchart for: ${this.escapeString(statementNode.text)}`,
+      entryNodeId: startId,
+      exitNodeId: endId,
+    };
+  }
+
+  public generateFlowchart(
+    sourceCode: string,
+    functionName?: string,
+    position?: number
+  ): FlowchartIR {
+    const parser = new Parser();
+    parser.setLanguage(Typescript.typescript as TypescriptLanguage);
+    const tree = parser.parse(sourceCode);
+
+    if (position !== undefined) {
+      const statements = tree.rootNode.descendantsOfType([
+        "assignment_expression",
+        "expression_statement",
+        "return_statement",
+      ]);
+      const smallestStatement = statements.reduce<
+        Parser.SyntaxNode | undefined
+      >((smallest, stmt) => {
+        if (
+          position >= stmt.startIndex &&
+          position <= stmt.endIndex &&
+          (!smallest ||
+            stmt.endIndex - stmt.startIndex <
+              smallest.endIndex - smallest.startIndex)
+        ) {
+          return stmt;
+        }
+        return smallest;
+      }, undefined);
+
+      if (smallestStatement) {
+        let potentialCallNode: Parser.SyntaxNode | null | undefined;
+        let baseStatement = smallestStatement;
+
+        if (smallestStatement.type === "assignment_expression") {
+          potentialCallNode = smallestStatement.childForFieldName("right");
+        } else if (smallestStatement.type === "expression_statement") {
+          const child = smallestStatement.namedChild(0);
+          if (child?.type === "assignment_expression") {
+            potentialCallNode = child.childForFieldName("right");
+            baseStatement = child;
+          } else {
+            potentialCallNode = child;
+          }
+        } else if (smallestStatement.type === "return_statement") {
+          potentialCallNode = smallestStatement.namedChild(0);
+        }
+
+        if (potentialCallNode?.type === "call_expression") {
+          const funcNode = potentialCallNode.childForFieldName("function");
+          const funcName = funcNode?.text;
+          const args =
+            potentialCallNode.childForFieldName("arguments")?.namedChildren ||
+            [];
+
+          // Check for array constructor with HOF call
+          if (
+            ["Array"].includes(funcName!) &&
+            args.length === 1 &&
+            args[0].type === "call_expression" &&
+            this.isHofCall(args[0])
+          ) {
+            return this.generateHofFlowchart(baseStatement, args[0], funcName);
+          } else if (this.isHofCall(potentialCallNode)) {
+            return this.generateHofFlowchart(baseStatement, potentialCallNode);
+          }
+        }
+      }
+    }
+
+    let targetNode: Parser.SyntaxNode | undefined;
+    let isArrowFunction = false;
+
+    if (position !== undefined) {
+      // Find function declarations
+      targetNode = tree.rootNode
+        .descendantsOfType("function_declaration")
+        .find((f) => position >= f.startIndex && position <= f.endIndex);
+
+      if (!targetNode) {
+        // Find function expressions
+        targetNode = tree.rootNode
+          .descendantsOfType("function_expression")
+          .find((f) => position >= f.startIndex && position <= f.endIndex);
+      }
+
+      if (!targetNode) {
+        // Find arrow functions in variable declarations
+        targetNode = tree.rootNode
+          .descendantsOfType("variable_declarator")
+          .find(
+            (vd) =>
+              position >= vd.startIndex &&
+              position <= vd.endIndex &&
+              vd.childForFieldName("value")?.type === "arrow_function"
+          );
+        isArrowFunction = !!targetNode;
+      }
+
+      if (!targetNode) {
+        // Find method definitions
+        targetNode = tree.rootNode
+          .descendantsOfType("method_definition")
+          .find((m) => position >= m.startIndex && position <= m.endIndex);
+      }
+    } else if (functionName) {
+      // Find by function name
+      targetNode = tree.rootNode
+        .descendantsOfType("function_declaration")
+        .find((f) => f.childForFieldName("name")?.text === functionName);
+
+      if (!targetNode) {
+        targetNode = tree.rootNode
+          .descendantsOfType("function_expression")
+          .find((f) => f.childForFieldName("name")?.text === functionName);
+      }
+
+      if (!targetNode) {
+        targetNode = tree.rootNode
+          .descendantsOfType("variable_declarator")
+          .find(
+            (vd) =>
+              vd.childForFieldName("name")?.text === functionName &&
+              vd.childForFieldName("value")?.type === "arrow_function"
+          );
+        isArrowFunction = !!targetNode;
+      }
+
+      if (!targetNode) {
+        targetNode = tree.rootNode
+          .descendantsOfType("method_definition")
+          .find((m) => m.childForFieldName("name")?.text === functionName);
+      }
+    } else {
+      // Get first function found
+      targetNode =
+        tree.rootNode.descendantsOfType("function_declaration")[0] ||
+        tree.rootNode.descendantsOfType("function_expression")[0] ||
+        tree.rootNode.descendantsOfType("method_definition")[0];
+    }
 
     if (!targetNode) {
       return {
@@ -141,7 +442,7 @@ export class TsAstParserTreeSitter {
           {
             id: "A",
             label:
-              "Place cursor inside a function or method to generate a flowchart.",
+              "Place cursor inside a function or statement to generate a flowchart.",
             shape: "rect",
           },
         ],
@@ -150,235 +451,168 @@ export class TsAstParserTreeSitter {
       };
     }
 
-    // Check function size before processing
-    const functionText = targetNode.text;
-    if (functionText.length > TsAstParserTreeSitter.MAX_FUNCTION_SIZE) {
+    this.nodeIdCounter = 0;
+    this.locationMap = [];
+    this.currentFunctionIsArrowFunction = isArrowFunction;
+
+    let bodyToProcess: Parser.SyntaxNode | null | undefined;
+
+    if (isArrowFunction) {
+      // For arrow functions, get the body from the variable declarator's value
+      const arrowFunc = targetNode.childForFieldName("value");
+      bodyToProcess = arrowFunc?.childForFieldName("body");
+    } else if (
+      targetNode.type === "method_definition" ||
+      targetNode.type === "function_declaration" ||
+      targetNode.type === "function_expression"
+    ) {
+      bodyToProcess = targetNode.childForFieldName("body");
+    }
+
+    if (!bodyToProcess) {
       return {
-        nodes: [
-          {
-            id: "A",
-            label: `Function too large (${functionText.length} chars). Limit: ${TsAstParserTreeSitter.MAX_FUNCTION_SIZE}`,
-            shape: "rect",
-          },
-        ],
+        nodes: [{ id: "A", label: "Function has no body.", shape: "rect" }],
         edges: [],
         locationMap: [],
       };
     }
 
-    const functionName = this.getFunctionName(targetNode);
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
-
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
     nodes.push({
       id: entryId,
-      label: `start: ${functionName}`,
+      label: `Start`,
       shape: "round",
       style: this.nodeStyles.terminator,
     });
     nodes.push({
       id: exitId,
-      label: "end",
+      label: "End",
       shape: "round",
       style: this.nodeStyles.terminator,
     });
 
-    const body = this.getFunctionBody(targetNode);
+    // For arrow functions with expression body, process as single statement
+    // For all others (including arrow functions with block body), process as block
+    const bodyResult =
+      isArrowFunction && bodyToProcess.type !== "statement_block"
+        ? this.processStatement(bodyToProcess, exitId)
+        : this.processBlock(bodyToProcess, exitId);
 
-    if (body) {
-      const bodyResult = this.processStatementList(body, exitId);
+    nodes.push(...bodyResult.nodes);
+    edges.push(...bodyResult.edges);
 
-      // Check if we terminated early
-      if (this.shouldTerminateEarly) {
-        nodes.push({
-          id: "truncated",
-          label: `... (truncated at ${this.nodeIdCounter} nodes)`,
-          shape: "rect",
-          style: this.nodeStyles.special,
-        });
-        edges.push({ from: entryId, to: "truncated" });
-        edges.push({ from: "truncated", to: exitId });
-      } else {
-        nodes.push(...bodyResult.nodes);
-        edges.push(...bodyResult.edges);
+    edges.push(
+      bodyResult.entryNodeId
+        ? { from: entryId, to: bodyResult.entryNodeId }
+        : { from: entryId, to: exitId }
+    );
 
-        if (bodyResult.entryNodeId) {
-          edges.push({ from: entryId, to: bodyResult.entryNodeId });
-        } else {
-          edges.push({ from: entryId, to: exitId });
-        }
-
-        bodyResult.exitPoints.forEach((exitPoint) => {
-          if (!bodyResult.nodesConnectedToExit.has(exitPoint.id)) {
-            edges.push({
-              from: exitPoint.id,
-              to: exitId,
-              label: exitPoint.label,
-            });
-          }
-        });
+    bodyResult.exitPoints.forEach((ep) => {
+      if (!bodyResult.nodesConnectedToExit.has(ep.id)) {
+        edges.push({ from: ep.id, to: exitId, label: ep.label });
       }
-    } else {
-      edges.push({ from: entryId, to: exitId });
-    }
+    });
+
+    const nodeIdSet = new Set(nodes.map((n) => n.id));
+    const validEdges = edges.filter(
+      (e) => nodeIdSet.has(e.from) && nodeIdSet.has(e.to)
+    );
+
+    const actualFunctionName = this.getFunctionName(
+      targetNode,
+      isArrowFunction
+    );
 
     return {
       nodes,
-      edges,
+      edges: validEdges,
       locationMap: this.locationMap,
-      functionRange: {
-        start: targetNode.startIndex,
-        end: targetNode.endIndex,
-      },
-      title: `Flowchart for ${functionName}`,
+      functionRange: { start: targetNode.startIndex, end: targetNode.endIndex },
+      title: `Flowchart for ${
+        isArrowFunction ? "arrow function" : "function"
+      }: ${this.escapeString(actualFunctionName || "[anonymous]")}`,
       entryNodeId: entryId,
       exitNodeId: exitId,
     };
   }
 
-  private findFunctionAtPosition(
-    rootNode: SyntaxNode,
-    position: number
-  ): SyntaxNode | null {
-    const functionTypes = [
-      "function_declaration",
-      "method_definition",
-      "arrow_function",
-      "function_expression",
-    ];
-
-    // Traverse up from the node at position to find nearest function
-    let node: SyntaxNode | null = rootNode.descendantForIndex(position);
-    while (node) {
-      if (functionTypes.includes(node.type)) {
-        return node;
-      }
-      node = node.parent;
+  private getFunctionName(
+    targetNode: Parser.SyntaxNode,
+    isArrowFunction: boolean
+  ): string {
+    if (isArrowFunction) {
+      return targetNode.childForFieldName("name")?.text || "[arrow function]";
+    } else if (targetNode.type === "method_definition") {
+      return targetNode.childForFieldName("name")?.text || "[method]";
+    } else {
+      return targetNode.childForFieldName("name")?.text || "[anonymous]";
     }
-    return null;
   }
 
-  private getFunctionName(functionNode: SyntaxNode): string {
-    const nameNode = functionNode.childForFieldName("name");
-    if (nameNode) {
-      return nameNode.text;
-    }
-
-    // For arrow functions, try to get name from variable declaration
-    if (functionNode.type === "arrow_function") {
-      let parent = functionNode.parent;
-      // Handle cases like `export default () => {}`
-      if (parent?.type === 'export_statement') {
-          parent = parent.parent;
-      }
-      if (parent?.type === "variable_declarator") {
-        const nameNode = parent.childForFieldName("name");
-        if (nameNode) {
-          return nameNode.text;
-        }
-      }
-    }
-
-    return "[anonymous]";
-  }
-
-  // Modified getFunctionBody to handle concise arrow function bodies
-  private getFunctionBody(functionNode: SyntaxNode): SyntaxNode | null {
-      if (functionNode.type === "arrow_function") {
-          return functionNode.childForFieldName("body");
-      }
-      return functionNode.childForFieldName("body");
-  }
-
-
-  private isHofCall(node: SyntaxNode | null): boolean {
-    if (!node || node.type !== "call_expression") return false;
-
-    const memberAccess = node.childForFieldName("function");
-    if (memberAccess?.type !== "member_expression") return false;
-
-    const functionName = memberAccess.childForFieldName("property")?.text;
-    return !!functionName && TsAstParserTreeSitter.HOF_NAMES.includes(functionName);
-  }
-
-  private processStatementList(
-    bodyNode: SyntaxNode,
+  private processBlock(
+    blockNode: Parser.SyntaxNode | null,
     exitId: string,
     loopContext?: LoopContext,
-    finallyContext?: FinallyContext
+    finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    this.recursionDepth++;
-
-    if (!this.checkPerformanceLimits()) {
-      this.recursionDepth--;
+    if (!blockNode)
       return {
         nodes: [],
         edges: [],
-        entryNodeId: "",
+        entryNodeId: undefined,
         exitPoints: [],
         nodesConnectedToExit: new Set<string>(),
       };
-    }
+
+    const statements = blockNode.namedChildren.filter(
+      (s) =>
+        !["pass_statement", "comment", "elif_clause", "else_clause"].includes(
+          s.type
+        )
+    );
+    if (statements.length === 0)
+      return {
+        nodes: [],
+        edges: [],
+        entryNodeId: undefined,
+        exitPoints: [],
+        nodesConnectedToExit: new Set<string>(),
+      };
 
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
-    let entryNodeId: string | undefined;
     const nodesConnectedToExit = new Set<string>();
+    let entryNodeId: string | undefined;
     let lastExitPoints: { id: string; label?: string }[] = [];
 
-    const statements = bodyNode.namedChildren;
-
-    if (statements.length === 0) {
-        // Handle empty body or single expression body
-        if (isArrowFunctionExpressionBody(bodyNode)) {
-            return this.processReturnStatementForExpression(bodyNode, exitId, finallyContext);
-        }
-
-        this.recursionDepth--;
-        return {
-            nodes: [],
-            edges: [],
-            exitPoints: [],
-            nodesConnectedToExit,
-        };
-    }
-
     for (const statement of statements) {
-      if (this.shouldTerminateEarly) break;
-
-      // Added explicit handling for expression bodies in arrow functions
-      let result;
-      if (isArrowFunctionExpressionBody(statement)) {
-          result = this.processReturnStatementForExpression(statement, exitId, finallyContext);
-      } else {
-          result = this.processStatement(statement, exitId, loopContext, finallyContext);
-      }
-
+      const result = this.processStatement(
+        statement,
+        exitId,
+        loopContext,
+        finallyContext
+      );
       nodes.push(...result.nodes);
       edges.push(...result.edges);
-
-      if (lastExitPoints.length > 0 && result.entryNodeId) {
-        // Connect the exits of the previous statement to the entry of the current one.
-        lastExitPoints.forEach((exitPoint) => {
-            edges.push({
-              from: exitPoint.id,
-              to: result.entryNodeId!,
-              label: exitPoint.label,
-            });
-        });
-      } else if (!entryNodeId) {
-        // This is the first statement in the block, so it's the entry point.
-        entryNodeId = result.entryNodeId || "";
-      }
-
-      lastExitPoints = result.exitPoints;
       result.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+
+      if (!entryNodeId) entryNodeId = result.entryNodeId;
+      if (lastExitPoints.length > 0 && result.entryNodeId) {
+        lastExitPoints.forEach((exitPoint) => {
+          edges.push({
+            from: exitPoint.id,
+            to: result.entryNodeId!,
+            label: exitPoint.label,
+          });
+        });
+      }
+      lastExitPoints = result.exitPoints;
     }
 
-    this.recursionDepth--;
     return {
       nodes,
       edges,
@@ -388,87 +622,280 @@ export class TsAstParserTreeSitter {
     };
   }
 
+  private findHofInExpression(
+    expressionNode: Parser.SyntaxNode
+  ): { hofCallNode: Parser.SyntaxNode; containerName?: string } | null {
+    if (expressionNode?.type !== "call_expression") return null;
+
+    const funcNode = expressionNode.childForFieldName("function");
+    const funcName = funcNode?.text;
+    const args =
+      expressionNode.childForFieldName("arguments")?.namedChildren || [];
+
+    if (
+      funcName &&
+      ["Array"].includes(funcName) &&
+      args.length === 1 &&
+      this.isHofCall(args[0])
+    ) {
+      return { hofCallNode: args[0], containerName: funcName };
+    } else if (this.isHofCall(expressionNode)) {
+      return { hofCallNode: expressionNode };
+    }
+    return null;
+  }
+
   private processStatement(
-    statement: SyntaxNode,
+    statement: Parser.SyntaxNode,
     exitId: string,
     loopContext?: LoopContext,
-    finallyContext?: FinallyContext
+    finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
+    if (statement.type === "ternary_expression") {
+      return this.processConditionalExpression(
+        statement,
+        exitId,
+        loopContext,
+        finallyContext
+      );
+    }
+
     switch (statement.type) {
       case "if_statement":
-        return this.processIfStatement(statement, exitId, loopContext, finallyContext);
+        return this.processIfStatement(
+          statement,
+          exitId,
+          loopContext,
+          finallyContext
+        );
       case "for_statement":
-        return this.processForStatement(statement, exitId);
-      case "for_in_statement":
-        return this.processForInStatement(statement, exitId);
+        return this.processForStatement(statement, exitId, finallyContext);
+      // case "for_in_statement": return this.processForInStatement(statement, exitId, finallyContext);
       case "while_statement":
-        return this.processWhileStatement(statement, exitId);
-      case "do_statement":
-        return this.processDoWhileStatement(statement, exitId);
+        return this.processWhileStatement(statement, exitId, finallyContext);
+      // case "do_statement": return this.processDoWhileStatement(statement, exitId, finallyContext);
       case "try_statement":
-        return this.processTryStatement(statement, exitId, loopContext);
-      case "switch_statement":
-        return this.processSwitchStatement(statement, exitId);
+        return this.processTryStatement(
+          statement,
+          exitId,
+          loopContext,
+          finallyContext
+        );
+      case "with_statement":
+        return this.processWithStatement(
+          statement,
+          exitId,
+          loopContext,
+          finallyContext
+        );
       case "return_statement":
         return this.processReturnStatement(statement, exitId, finallyContext);
       case "throw_statement":
-          return this.processThrowStatement(statement, exitId, finallyContext);
+        return this.processRaiseStatement(statement, exitId, finallyContext); // Reuse raise handler
       case "break_statement":
-        if (loopContext) {
-          return this.processBreakStatement(statement, loopContext, finallyContext);
-        }
-        break;
+        return loopContext
+          ? this.processBreakStatement(statement, loopContext)
+          : this.processDefaultStatement(statement);
       case "continue_statement":
-        if (loopContext) {
-          return this.processContinueStatement(statement, loopContext, finallyContext);
-        }
-        break;
-      case "statement_block":
-        return this.processBlock(statement, exitId, loopContext, finallyContext);
-      case "expression_statement":
-        return this.processExpressionStatement(statement);
-      case "lexical_declaration": // let, const
-      case "variable_declaration": // var
-        const declarator = statement.namedChildren[0];
-        if (declarator) {
-            return this.processVariableDeclaration(declarator);
-        }
-        break;
-    }
+        return loopContext
+          ? this.processContinueStatement(statement, loopContext)
+          : this.processDefaultStatement(statement);
+      case "switch_statement":
+        return this.processSwitchStatement(
+          statement,
+          exitId,
+          loopContext,
+          finallyContext
+        );
+      case "debugger_statement":
+        return this.processDebuggerStatement(statement);
+      case "for_in_statement":
+        return this.processForInStatement(statement, exitId, finallyContext);
+      case "do_statement":
+        return this.processDoWhileStatement(statement, exitId, finallyContext);
+      case "empty_statement":
+        return {
+          nodes: [],
+          edges: [],
+          entryNodeId: undefined,
+          exitPoints: [],
+          nodesConnectedToExit: new Set<string>(),
+        };
+      default: {
+        let expressionNode: Parser.SyntaxNode | undefined;
+        let assignmentTargetNode: Parser.SyntaxNode | undefined;
 
-    return this.processDefaultStatement(statement);
+        if (statement.type === "assignment_expression") {
+          expressionNode = statement.childForFieldName("right") ?? undefined;
+          assignmentTargetNode =
+            statement.childForFieldName("left") ?? undefined;
+        } else if (statement.type === "expression_statement") {
+          const child = statement.firstNamedChild;
+          if (child?.type === "assignment_expression")
+            return this.processStatement(
+              child,
+              exitId,
+              loopContext,
+              finallyContext
+            );
+          expressionNode = child ?? undefined;
+        }
+
+        if (expressionNode) {
+          if (
+            expressionNode.type === "ternary_expression" &&
+            assignmentTargetNode
+          ) {
+            const namedChildren = expressionNode.namedChildren;
+            if (namedChildren.length < 3)
+              return this.processDefaultStatement(statement);
+
+            const targetText = this.escapeString(assignmentTargetNode.text);
+            const [consequenceNode, conditionNode, alternativeNode] =
+              namedChildren;
+            const conditionId = this.generateNodeId("cond_expr");
+
+            const nodes: FlowchartNode[] = [
+              {
+                id: conditionId,
+                label: this.escapeString(conditionNode.text),
+                shape: "diamond",
+                style: this.nodeStyles.decision,
+              },
+            ];
+            const edges: FlowchartEdge[] = []; // FIX: Initialize edges array
+
+            this.locationMap.push({
+              start: conditionNode.startIndex,
+              end: conditionNode.endIndex,
+              nodeId: conditionId,
+            });
+
+            // True path
+            const consequenceId = this.generateNodeId("ternary_true");
+            nodes.push({
+              id: consequenceId,
+              label: `${targetText} = ${this.escapeString(
+                consequenceNode.text
+              )}`,
+              shape: "rect",
+              style: this.nodeStyles.process,
+            });
+            this.locationMap.push({
+              start: statement.startIndex,
+              end: statement.endIndex,
+              nodeId: consequenceId,
+            });
+            edges.push({ from: conditionId, to: consequenceId, label: "True" });
+
+            // False path
+            const alternativeId = this.generateNodeId("ternary_false");
+            nodes.push({
+              id: alternativeId,
+              label: `${targetText} = ${this.escapeString(
+                alternativeNode.text
+              )}`,
+              shape: "rect",
+              style: this.nodeStyles.process,
+            });
+            this.locationMap.push({
+              start: statement.startIndex,
+              end: statement.endIndex,
+              nodeId: alternativeId,
+            });
+            edges.push({
+              from: conditionId,
+              to: alternativeId,
+              label: "False",
+            });
+
+            return {
+              nodes,
+              edges,
+              entryNodeId: conditionId,
+              exitPoints: [{ id: consequenceId }, { id: alternativeId }],
+              nodesConnectedToExit: new Set<string>(),
+            };
+          }
+
+          const hofInfo = this.findHofInExpression(expressionNode);
+          if (hofInfo) {
+            const hofResult = this.processHigherOrderFunctionCall(
+              hofInfo.hofCallNode
+            );
+            if (hofResult) {
+              let currentEntry = hofResult.entryNodeId;
+              let currentExits = hofResult.exitPoints;
+              const allNodes = [...hofResult.nodes];
+              const allEdges = [...hofResult.edges];
+
+              if (hofInfo.containerName) {
+                const convertId = this.generateNodeId("convert");
+                allNodes.push({
+                  id: convertId,
+                  label: `Convert to ${hofInfo.containerName}`,
+                  shape: "rect",
+                  style: this.nodeStyles.process,
+                });
+                currentExits.forEach((ep) =>
+                  allEdges.push({ from: ep.id, to: convertId, label: ep.label })
+                );
+                currentExits = [{ id: convertId }];
+              }
+
+              if (assignmentTargetNode) {
+                const assignId = this.generateNodeId("assign_hof");
+                allNodes.unshift({
+                  id: assignId,
+                  label: `${this.escapeString(
+                    assignmentTargetNode.text
+                  )} = ...`,
+                  shape: "rect",
+                  style: this.nodeStyles.process,
+                });
+                if (currentEntry)
+                  allEdges.unshift({ from: assignId, to: currentEntry });
+                currentEntry = assignId;
+              }
+
+              return {
+                nodes: allNodes,
+                edges: allEdges,
+                entryNodeId: currentEntry,
+                exitPoints: currentExits,
+                nodesConnectedToExit: new Set<string>(),
+              };
+            }
+          }
+        }
+
+        return this.currentFunctionIsArrowFunction
+          ? this.processReturnStatementForExpression(
+              statement,
+              exitId,
+              finallyContext
+            )
+          : this.processDefaultStatement(statement);
+      }
+    }
   }
 
-  private processDefaultStatement(statement: SyntaxNode): ProcessResult {
+  private processDefaultStatement(statement: Parser.SyntaxNode): ProcessResult {
     const nodeId = this.generateNodeId("stmt");
-    let nodeText = statement.text.trim();
-
-    nodeText = nodeText
-      .replace(/\n/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    if (nodeText.length > 80) {
-      nodeText = nodeText.substring(0, 77) + "...";
-    }
-
-    const nodes: FlowchartNode[] = [
-      {
-        id: nodeId,
-        label: this.escapeString(nodeText),
-        shape: "rect",
-        style: this.nodeStyles.process,
-      },
-    ];
-
+    const nodeText = this.escapeString(statement.text);
+    const node: FlowchartNode = {
+      id: nodeId,
+      label: nodeText,
+      shape: "rect",
+      style: this.nodeStyles.process,
+    };
     this.locationMap.push({
       start: statement.startIndex,
       end: statement.endIndex,
       nodeId,
     });
-
     return {
-      nodes,
+      nodes: [node],
       edges: [],
       entryNodeId: nodeId,
       exitPoints: [{ id: nodeId }],
@@ -476,1076 +903,1514 @@ export class TsAstParserTreeSitter {
     };
   }
 
-  private processIfStatement(
-    statement: SyntaxNode,
+  private processReturnStatementForExpression(
+    exprNode: Parser.SyntaxNode,
+    exitId: string,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const nodeId = this.generateNodeId("return");
+    const labelText = `return ${this.escapeString(exprNode.text)}`;
+    const node: FlowchartNode = {
+      id: nodeId,
+      label: labelText,
+      shape: "stadium",
+      style: this.nodeStyles.special,
+    };
+    const edges: FlowchartEdge[] = [
+      {
+        from: nodeId,
+        to: finallyContext ? finallyContext.finallyEntryId : exitId,
+      },
+    ];
+    this.locationMap.push({
+      start: exprNode.startIndex,
+      end: exprNode.endIndex,
+      nodeId,
+    });
+    return {
+      nodes: [node],
+      edges,
+      entryNodeId: nodeId,
+      exitPoints: [],
+      nodesConnectedToExit: new Set<string>([nodeId]),
+    };
+  }
+
+  private processConditionalExpression(
+    condExprNode: Parser.SyntaxNode,
     exitId: string,
     loopContext?: LoopContext,
-    finallyContext?: FinallyContext
+    finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    const condition = statement.childForFieldName("condition");
+    const namedChildren = condExprNode.namedChildren;
+    if (namedChildren.length < 3)
+      return this.processDefaultStatement(condExprNode);
 
-    let conditionText = "condition";
-    if (condition) {
-      let rawText = condition.text.trim();
-      if (rawText.startsWith("(") && rawText.endsWith(")")) {
-        rawText = rawText.slice(1, -1);
-      }
-      if (rawText.length > 60) {
-        rawText = rawText.substring(0, 57) + "...";
-      }
-      rawText = rawText.replace(/\n/g, " ").replace(/\s+/g, " ").trim();
-      conditionText = rawText || "condition";
-    }
-
-    const conditionId = this.generateNodeId("if_cond");
-
-    const nodes: FlowchartNode[] = [];
-    const edges: FlowchartEdge[] = [];
-    nodes.push({
-      id: conditionId,
-      label: this.escapeString(conditionText),
-      shape: "diamond",
-      style: this.nodeStyles.decision,
-    });
-
+    const [consequenceNode, conditionNode, alternativeNode] = namedChildren;
+    const conditionId = this.generateNodeId("cond_expr");
+    const nodes: FlowchartNode[] = [
+      {
+        id: conditionId,
+        label: this.escapeString(conditionNode.text),
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+      },
+    ];
     this.locationMap.push({
-      start: statement.startIndex,
-      end: statement.endIndex,
+      start: conditionNode.startIndex,
+      end: conditionNode.endIndex,
       nodeId: conditionId,
     });
 
-    const exitPoints: { id: string; label?: string }[] = [];
-    const nodesConnectedToExit = new Set<string>();
+    const consequenceResult = this.processStatement(
+      consequenceNode,
+      exitId,
+      loopContext,
+      finallyContext
+    );
+    const alternativeResult = this.processStatement(
+      alternativeNode,
+      exitId,
+      loopContext,
+      finallyContext
+    );
 
-    const consequence = statement.childForFieldName("consequence");
-    if (consequence) {
-      const thenResult = this.processBlock(consequence, exitId, loopContext, finallyContext);
+    nodes.push(...consequenceResult.nodes, ...alternativeResult.nodes);
+    const edges: FlowchartEdge[] = [
+      ...consequenceResult.edges,
+      ...alternativeResult.edges,
+    ];
+    const nodesConnectedToExit = new Set<string>([
+      ...consequenceResult.nodesConnectedToExit,
+      ...alternativeResult.nodesConnectedToExit,
+    ]);
 
-      nodes.push(...thenResult.nodes);
-      edges.push(...thenResult.edges);
-      if (thenResult.entryNodeId) {
-        edges.push({
-          from: conditionId,
-          to: thenResult.entryNodeId,
-          label: "Yes",
-        });
-      } else {
-         exitPoints.push({id: conditionId, label: 'Yes'});
-      }
-      exitPoints.push(...thenResult.exitPoints);
-      thenResult.nodesConnectedToExit.forEach((n) =>
-        nodesConnectedToExit.add(n)
-      );
+    if (consequenceResult.entryNodeId) {
+      edges.push({
+        from: conditionId,
+        to: consequenceResult.entryNodeId,
+        label: "True",
+      });
     }
-
-    const alternative = statement.childForFieldName("alternative");
-    if (alternative) {
-      // The alternative is an `else_clause` which contains either an `if_statement` (else if) or a `statement_block` (else)
-      const elseBody = alternative.namedChildren[0];
-      if (elseBody) {
-        const elseResult = this.processStatement(elseBody, exitId, loopContext, finallyContext);
-
-        nodes.push(...elseResult.nodes);
-        edges.push(...elseResult.edges);
-        if (elseResult.entryNodeId) {
-          edges.push({
-            from: conditionId,
-            to: elseResult.entryNodeId,
-            label: "No",
-          });
-        } else {
-           exitPoints.push({id: conditionId, label: 'No'});
-        }
-        exitPoints.push(...elseResult.exitPoints);
-        elseResult.nodesConnectedToExit.forEach((n) =>
-          nodesConnectedToExit.add(n)
-        );
-      }
-    } else {
-      exitPoints.push({ id: conditionId, label: "No" });
+    if (alternativeResult.entryNodeId) {
+      edges.push({
+        from: conditionId,
+        to: alternativeResult.entryNodeId,
+        label: "False",
+      });
     }
 
     return {
       nodes,
       edges,
       entryNodeId: conditionId,
-      exitPoints,
+      exitPoints: this.currentFunctionIsArrowFunction
+        ? []
+        : [...consequenceResult.exitPoints, ...alternativeResult.exitPoints],
+      nodesConnectedToExit,
+    };
+  }
+
+  private processIfStatement(
+    ifNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const ifConditionNode = ifNode.childForFieldName("condition");
+    const ifConsequenceNode = ifNode.childForFieldName("consequence");
+    if (!ifConditionNode || !ifConsequenceNode)
+      return {
+        nodes: [],
+        edges: [],
+        entryNodeId: undefined,
+        exitPoints: [],
+        nodesConnectedToExit: new Set<string>(),
+      };
+
+    const ifConditionId = this.generateNodeId("cond");
+    const nodes: FlowchartNode[] = [
+      {
+        id: ifConditionId,
+        label: this.escapeString(ifConditionNode.text),
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+      },
+    ];
+    this.locationMap.push({
+      start: ifConditionNode.startIndex,
+      end: ifConditionNode.endIndex,
+      nodeId: ifConditionId,
+    });
+
+    const ifConsequenceResult = this.processBlock(
+      ifConsequenceNode,
+      exitId,
+      loopContext,
+      finallyContext
+    );
+    nodes.push(...ifConsequenceResult.nodes);
+    const edges: FlowchartEdge[] = [...ifConsequenceResult.edges];
+    const nodesConnectedToExit = new Set<string>(
+      ifConsequenceResult.nodesConnectedToExit
+    );
+    const allExitPoints: { id: string; label?: string }[] = [
+      ...ifConsequenceResult.exitPoints,
+    ];
+
+    if (ifConsequenceResult.entryNodeId) {
+      edges.push({
+        from: ifConditionId,
+        to: ifConsequenceResult.entryNodeId,
+        label: "True",
+      });
+    } else {
+      allExitPoints.push({ id: ifConditionId, label: "True" });
+    }
+
+    const alternativeNode = ifNode.childForFieldName("alternative");
+
+    if (alternativeNode) {
+      // Handle 'else if' by treating it as a nested if statement
+      if (alternativeNode.type === "if_statement") {
+        const elseIfResult = this.processIfStatement(
+          alternativeNode,
+          exitId,
+          loopContext,
+          finallyContext
+        );
+        nodes.push(...elseIfResult.nodes);
+        edges.push(...elseIfResult.edges);
+        elseIfResult.nodesConnectedToExit.forEach((n) =>
+          nodesConnectedToExit.add(n)
+        );
+
+        if (elseIfResult.entryNodeId) {
+          edges.push({
+            from: ifConditionId,
+            to: elseIfResult.entryNodeId,
+            label: "False",
+          });
+        }
+        allExitPoints.push(...elseIfResult.exitPoints);
+      } else {
+        // Handle 'else'
+        const elseResult = this.processBlock(
+          alternativeNode,
+          exitId,
+          loopContext,
+          finallyContext
+        );
+        nodes.push(...elseResult.nodes);
+        edges.push(...elseResult.edges);
+        elseResult.nodesConnectedToExit.forEach((n) =>
+          nodesConnectedToExit.add(n)
+        );
+
+        if (elseResult.entryNodeId) {
+          edges.push({
+            from: ifConditionId,
+            to: elseResult.entryNodeId,
+            label: "False",
+          });
+        } else {
+          allExitPoints.push({ id: ifConditionId, label: "False" });
+        }
+        allExitPoints.push(...elseResult.exitPoints);
+      }
+    } else {
+      allExitPoints.push({ id: ifConditionId, label: "False" });
+    }
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: ifConditionId,
+      exitPoints: allExitPoints,
       nodesConnectedToExit,
     };
   }
 
   private processForStatement(
-    statement: SyntaxNode,
-    exitId: string
+    forNode: Parser.SyntaxNode,
+    exitId: string,
+    finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    const loopId = this.generateNodeId("for_loop");
+    // TypeScript for statement: for (init; condition; update)
+    const initNode = forNode.childForFieldName("initializer");
+    const conditionNode = forNode.childForFieldName("condition");
+    const updateNode = forNode.childForFieldName("update");
+    const bodyNode = forNode.childForFieldName("body");
 
-    const initializer = statement.childForFieldName("initializer");
-    const condition = statement.childForFieldName("condition");
-
-    let loopText = "for loop";
-    if (condition) {
-      loopText = `for (${initializer?.text ?? ''}; ${condition.text}; ...)`
+    // Handle both C-style and for-in style loops
+    if (!bodyNode) {
+      return this.processDefaultStatement(forNode);
     }
+
+    let loopLabel = "for loop";
+    if (initNode && conditionNode && updateNode) {
+      // C-style for loop
+      loopLabel = `for (${initNode.text}; ${conditionNode.text}; ${updateNode.text})`;
+    } else {
+      // Try for-in style
+      const leftNode = forNode.childForFieldName("left");
+      const rightNode = forNode.childForFieldName("right");
+      if (leftNode && rightNode) {
+        loopLabel = `for ${leftNode.text} in ${rightNode.text}`;
+      }
+    }
+
+    const headerId = this.generateNodeId("for_header");
+    const loopExitId = this.generateNodeId("for_exit");
 
     const nodes: FlowchartNode[] = [
       {
-        id: loopId,
-        label: this.escapeString(loopText),
+        id: headerId,
+        label: this.escapeString(loopLabel),
         shape: "diamond",
         style: this.nodeStyles.decision,
       },
+      { id: loopExitId, label: "end loop", shape: "stadium" },
     ];
-
     this.locationMap.push({
-      start: statement.startIndex,
-      end: statement.endIndex,
-      nodeId: loopId,
+      start: forNode.startIndex,
+      end: forNode.endIndex,
+      nodeId: headerId,
     });
 
     const loopContext: LoopContext = {
-      breakTargetId: exitId,
-      continueTargetId: loopId,
+      breakTargetId: loopExitId,
+      continueTargetId: headerId,
     };
+    const bodyResult = this.processBlock(
+      bodyNode,
+      exitId,
+      loopContext,
+      finallyContext
+    );
+    nodes.push(...bodyResult.nodes);
+    const edges: FlowchartEdge[] = [...bodyResult.edges];
+    const nodesConnectedToExit = new Set<string>(
+      bodyResult.nodesConnectedToExit
+    );
 
-    const body = statement.childForFieldName("body");
-    if (body) {
-      const bodyResult = this.processBlock(body, exitId, loopContext);
+    if (bodyResult.entryNodeId) {
+      edges.push({ from: headerId, to: bodyResult.entryNodeId, label: "Loop" });
+    } else {
+      edges.push({ from: headerId, to: headerId, label: "Loop" });
+    }
+
+    bodyResult.exitPoints.forEach((ep) =>
+      edges.push({ from: ep.id, to: headerId })
+    );
+    edges.push({ from: headerId, to: loopExitId, label: "End Loop" });
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: headerId,
+      exitPoints: [{ id: loopExitId }],
+      nodesConnectedToExit,
+    };
+  }
+
+  private processWhileStatement(
+    whileNode: Parser.SyntaxNode,
+    exitId: string,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const conditionNode = whileNode.childForFieldName("condition");
+    const bodyNode = whileNode.childForFieldName("body");
+
+    if (!conditionNode || !bodyNode) {
+      return this.processDefaultStatement(whileNode);
+    }
+
+    const conditionText = this.escapeString(conditionNode.text);
+    const conditionId = this.generateNodeId("while_cond");
+    const loopExitId = this.generateNodeId("while_exit");
+
+    const nodes: FlowchartNode[] = [
+      {
+        id: conditionId,
+        label: conditionText,
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+      },
+      { id: loopExitId, label: "end loop", shape: "stadium" },
+    ];
+    this.locationMap.push({
+      start: whileNode.startIndex,
+      end: whileNode.endIndex,
+      nodeId: conditionId,
+    });
+
+    const loopContext: LoopContext = {
+      breakTargetId: loopExitId,
+      continueTargetId: conditionId,
+    };
+    const bodyResult = this.processBlock(
+      bodyNode,
+      exitId,
+      loopContext,
+      finallyContext
+    );
+    nodes.push(...bodyResult.nodes);
+    const edges: FlowchartEdge[] = [...bodyResult.edges];
+    const nodesConnectedToExit = new Set<string>(
+      bodyResult.nodesConnectedToExit
+    );
+
+    if (bodyResult.entryNodeId) {
+      edges.push({
+        from: conditionId,
+        to: bodyResult.entryNodeId,
+        label: "True",
+      });
+    } else {
+      edges.push({ from: conditionId, to: conditionId, label: "True" });
+    }
+
+    bodyResult.exitPoints.forEach((ep) =>
+      edges.push({ from: ep.id, to: conditionId })
+    );
+    edges.push({ from: conditionId, to: loopExitId, label: "False" });
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: conditionId,
+      exitPoints: [{ id: loopExitId }],
+      nodesConnectedToExit,
+    };
+  }
+
+  private processReturnStatement(
+    returnNode: Parser.SyntaxNode,
+    exitId: string,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const valueNode = returnNode.namedChild(0);
+    if (valueNode) {
+      const hofInfo = this.findHofInExpression(valueNode);
+      if (hofInfo) {
+        const hofResult = this.processHigherOrderFunctionCall(
+          hofInfo.hofCallNode
+        );
+        if (hofResult) {
+          const allNodes = [...hofResult.nodes];
+          const allEdges = [...hofResult.edges];
+          let currentExits = hofResult.exitPoints;
+
+          if (hofInfo.containerName) {
+            const convertId = this.generateNodeId("convert");
+            allNodes.push({
+              id: convertId,
+              label: `Convert to ${hofInfo.containerName}`,
+              shape: "rect",
+              style: this.nodeStyles.process,
+            });
+            currentExits.forEach((ep) =>
+              allEdges.push({ from: ep.id, to: convertId, label: ep.label })
+            );
+            currentExits = [{ id: convertId }];
+          }
+
+          const returnId = this.generateNodeId("return_hof");
+          allNodes.push({
+            id: returnId,
+            label: "return result",
+            shape: "stadium",
+            style: this.nodeStyles.special,
+          });
+          this.locationMap.push({
+            start: returnNode.startIndex,
+            end: returnNode.endIndex,
+            nodeId: returnId,
+          });
+
+          currentExits.forEach((ep) =>
+            allEdges.push({ from: ep.id, to: returnId, label: ep.label })
+          );
+          allEdges.push({
+            from: returnId,
+            to: finallyContext ? finallyContext.finallyEntryId : exitId,
+          });
+
+          return {
+            nodes: allNodes,
+            edges: allEdges,
+            entryNodeId: hofResult.entryNodeId,
+            exitPoints: [],
+            nodesConnectedToExit: new Set<string>([returnId]),
+          };
+        }
+      }
+    }
+
+    const nodeId = this.generateNodeId("return");
+    const labelText = valueNode
+      ? `return ${this.escapeString(valueNode.text)}`
+      : "return";
+    const node: FlowchartNode = {
+      id: nodeId,
+      label: labelText,
+      shape: "stadium",
+      style: this.nodeStyles.special,
+    };
+    const edges: FlowchartEdge[] = [
+      {
+        from: nodeId,
+        to: finallyContext ? finallyContext.finallyEntryId : exitId,
+      },
+    ];
+    this.locationMap.push({
+      start: returnNode.startIndex,
+      end: returnNode.endIndex,
+      nodeId,
+    });
+
+    return {
+      nodes: [node],
+      edges,
+      entryNodeId: nodeId,
+      exitPoints: [],
+      nodesConnectedToExit: new Set<string>([nodeId]),
+    };
+  }
+
+  private processRaiseStatement(
+    raiseNode: Parser.SyntaxNode,
+    exitId: string,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const nodeId = this.generateNodeId("raise");
+    const valueNodes = raiseNode.namedChildren;
+    const labelText =
+      valueNodes.length > 0
+        ? `raise ${this.escapeString(valueNodes.map((n) => n.text).join(", "))}`
+        : "raise";
+
+    const node: FlowchartNode = {
+      id: nodeId,
+      label: labelText,
+      shape: "stadium",
+      style: this.nodeStyles.special,
+    };
+    const edges: FlowchartEdge[] = [
+      {
+        from: nodeId,
+        to: finallyContext ? finallyContext.finallyEntryId : exitId,
+      },
+    ];
+    this.locationMap.push({
+      start: raiseNode.startIndex,
+      end: raiseNode.endIndex,
+      nodeId,
+    });
+
+    return {
+      nodes: [node],
+      edges,
+      entryNodeId: nodeId,
+      exitPoints: [],
+      nodesConnectedToExit: new Set<string>([nodeId]),
+    };
+  }
+
+  private processBreakStatement(
+    breakNode: Parser.SyntaxNode,
+    loopContext: LoopContext
+  ): ProcessResult {
+    const nodeId = this.generateNodeId("break");
+    const node: FlowchartNode = {
+      id: nodeId,
+      label: "break",
+      shape: "stadium",
+      style: this.nodeStyles.break,
+    };
+    const edges: FlowchartEdge[] = [
+      { from: nodeId, to: loopContext.breakTargetId },
+    ];
+    this.locationMap.push({
+      start: breakNode.startIndex,
+      end: breakNode.endIndex,
+      nodeId,
+    });
+
+    return {
+      nodes: [node],
+      edges,
+      entryNodeId: nodeId,
+      exitPoints: [],
+      nodesConnectedToExit: new Set<string>([nodeId]),
+    };
+  }
+
+  private processContinueStatement(
+    continueNode: Parser.SyntaxNode,
+    loopContext: LoopContext
+  ): ProcessResult {
+    const nodeId = this.generateNodeId("continue");
+    const node: FlowchartNode = {
+      id: nodeId,
+      label: "continue",
+      shape: "stadium",
+      style: this.nodeStyles.break,
+    };
+    const edges: FlowchartEdge[] = [
+      { from: nodeId, to: loopContext.continueTargetId },
+    ];
+    this.locationMap.push({
+      start: continueNode.startIndex,
+      end: continueNode.endIndex,
+      nodeId,
+    });
+
+    return {
+      nodes: [node],
+      edges,
+      entryNodeId: nodeId,
+      exitPoints: [],
+      nodesConnectedToExit: new Set<string>([nodeId]),
+    };
+  }
+
+  private processMatchStatement(
+    matchNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const subjectNode = matchNode.childForFieldName("subject");
+    if (!subjectNode) return this.processDefaultStatement(matchNode);
+
+    const subjectId = this.generateNodeId("match_subject");
+    const nodes: FlowchartNode[] = [
+      {
+        id: subjectId,
+        label: `match ${this.escapeString(subjectNode.text)}`,
+        shape: "rect",
+        style: this.nodeStyles.process,
+      },
+    ];
+    this.locationMap.push({
+      start: subjectNode.startIndex,
+      end: subjectNode.endIndex,
+      nodeId: subjectId,
+    });
+
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+    const allExitPoints: { id: string; label?: string }[] = [];
+    let lastConditionExit: { id: string; label?: string } = { id: subjectId };
+
+    const blockNode = matchNode.children.find(
+      (child) => child.type === "block"
+    );
+    const caseClauses =
+      blockNode?.children.filter((child) => child.type === "case_clause") || [];
+
+    for (const clause of caseClauses) {
+      const casePatternNode = clause.children.find(
+        (c) => c.type === "case_pattern"
+      );
+      const guardNode = clause.childForFieldName("guard");
+      const bodyNode = clause.children.find((c) => c.type === "block");
+      if (!casePatternNode || !bodyNode) continue;
+
+      let caseLabel = `case ${this.escapeString(casePatternNode.text)}`;
+      if (guardNode) caseLabel += ` if ${this.escapeString(guardNode.text)}`;
+
+      const caseConditionId = this.generateNodeId("case");
+      nodes.push({
+        id: caseConditionId,
+        label: caseLabel,
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+      });
+      this.locationMap.push({
+        start: clause.startIndex,
+        end: clause.endIndex,
+        nodeId: caseConditionId,
+      });
+
+      edges.push({
+        from: lastConditionExit.id,
+        to: caseConditionId,
+        label: lastConditionExit.label,
+      });
+
+      const bodyResult = this.processBlock(
+        bodyNode,
+        exitId,
+        loopContext,
+        finallyContext
+      );
       nodes.push(...bodyResult.nodes);
-      const edges: FlowchartEdge[] = [...bodyResult.edges];
+      edges.push(...bodyResult.edges);
+      bodyResult.nodesConnectedToExit.forEach((n) =>
+        nodesConnectedToExit.add(n)
+      );
 
       if (bodyResult.entryNodeId) {
         edges.push({
-          from: loopId,
+          from: caseConditionId,
           to: bodyResult.entryNodeId,
           label: "True",
         });
+      } else {
+        allExitPoints.push({ id: caseConditionId, label: "True" });
       }
+      allExitPoints.push(...bodyResult.exitPoints);
 
-      for (const exitPoint of bodyResult.exitPoints) {
-        edges.push({ from: exitPoint.id, to: loopId });
+      lastConditionExit = { id: caseConditionId, label: "False" };
+    }
+
+    allExitPoints.push(lastConditionExit);
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: subjectId,
+      exitPoints: allExitPoints,
+      nodesConnectedToExit,
+    };
+  }
+
+  private processSwitchStatement(
+    switchNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const discriminantNode = switchNode.childForFieldName("value");
+    if (!discriminantNode) return this.processDefaultStatement(switchNode);
+
+    const switchHeaderId = this.generateNodeId("switch_header");
+    const nodes: FlowchartNode[] = [
+      {
+        id: switchHeaderId,
+        label: `switch (${this.escapeString(discriminantNode.text)})`,
+        shape: "rect",
+        style: this.nodeStyles.process,
+      },
+    ];
+    this.locationMap.push({
+      start: discriminantNode.startIndex,
+      end: discriminantNode.endIndex,
+      nodeId: switchHeaderId,
+    });
+
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+    const allExitPoints: { id: string; label?: string }[] = [];
+    let lastConditionExit: { id: string; label?: string } = {
+      id: switchHeaderId,
+    };
+
+    const bodyNode = switchNode.childForFieldName("body");
+    const caseClauses =
+      bodyNode?.children.filter(
+        (child) =>
+          child.type === "switch_case" || child.type === "switch_default"
+      ) || [];
+
+    let hasDefault = false;
+
+    for (const clause of caseClauses) {
+      if (clause.type === "switch_default") {
+        hasDefault = true;
+        const bodyStatements = clause.children.filter((c) => c.type !== ":");
+        if (bodyStatements.length > 0) {
+          const bodyResult = this.processBlock(
+            {
+              type: "statement_block",
+              children: bodyStatements,
+              namedChildren: bodyStatements,
+            } as Parser.SyntaxNode,
+            exitId,
+            loopContext,
+            finallyContext
+          );
+          nodes.push(...bodyResult.nodes);
+          edges.push(...bodyResult.edges);
+          bodyResult.nodesConnectedToExit.forEach((n) =>
+            nodesConnectedToExit.add(n)
+          );
+
+          if (bodyResult.entryNodeId) {
+            edges.push({
+              from: lastConditionExit.id,
+              to: bodyResult.entryNodeId,
+              label: lastConditionExit.label || "default",
+            });
+          } else {
+            allExitPoints.push({ id: lastConditionExit.id, label: "default" });
+          }
+          allExitPoints.push(...bodyResult.exitPoints);
+        }
+      } else if (clause.type === "switch_case") {
+        const valueNode = clause.childForFieldName("value");
+        if (!valueNode) continue;
+
+        const caseConditionId = this.generateNodeId("case");
+        const caseLabel = `case ${this.escapeString(valueNode.text)}`;
+        nodes.push({
+          id: caseConditionId,
+          label: caseLabel,
+          shape: "diamond",
+          style: this.nodeStyles.decision,
+        });
+        this.locationMap.push({
+          start: clause.startIndex,
+          end: clause.endIndex,
+          nodeId: caseConditionId,
+        });
+
+        edges.push({
+          from: lastConditionExit.id,
+          to: caseConditionId,
+          label: lastConditionExit.label,
+        });
+
+        const bodyStatements = clause.children.filter(
+          (c) => c.type !== "case" && c.type !== ":" && c !== valueNode
+        );
+
+        if (bodyStatements.length > 0) {
+          const bodyResult = this.processBlock(
+            {
+              type: "statement_block",
+              children: bodyStatements,
+              namedChildren: bodyStatements,
+            } as Parser.SyntaxNode,
+            exitId,
+            loopContext,
+            finallyContext
+          );
+          nodes.push(...bodyResult.nodes);
+          edges.push(...bodyResult.edges);
+          bodyResult.nodesConnectedToExit.forEach((n) =>
+            nodesConnectedToExit.add(n)
+          );
+
+          if (bodyResult.entryNodeId) {
+            edges.push({
+              from: caseConditionId,
+              to: bodyResult.entryNodeId,
+              label: "match",
+            });
+          } else {
+            allExitPoints.push({ id: caseConditionId, label: "match" });
+          }
+          allExitPoints.push(...bodyResult.exitPoints);
+        }
+
+        lastConditionExit = { id: caseConditionId, label: "no match" };
       }
+    }
+
+    if (!hasDefault) {
+      allExitPoints.push(lastConditionExit);
+    }
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: switchHeaderId,
+      exitPoints: allExitPoints,
+      nodesConnectedToExit,
+    };
+  }
+
+  private processTryStatement(
+    tryNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const entryId = this.generateNodeId("try_entry");
+    const nodes: FlowchartNode[] = [
+      { id: entryId, label: "try", shape: "stadium" },
+    ];
+    this.locationMap.push({
+      start: tryNode.startIndex,
+      end: tryNode.endIndex,
+      nodeId: entryId,
+    });
+
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+    let allExitPoints: { id: string; label?: string }[] = [];
+
+    let newFinallyContext: { finallyEntryId: string } | undefined;
+    let finallyResult: ProcessResult | null = null;
+    const finallyClause = tryNode.children.find(
+      (c) => c.type === "finally_clause"
+    );
+
+    if (finallyClause) {
+      const finallyBody = finallyClause.namedChildren.find(
+        (c) => c.type === "block"
+      );
+      finallyResult = this.processBlock(
+        finallyBody!,
+        exitId,
+        loopContext,
+        finallyContext
+      );
+      if (finallyResult.entryNodeId) {
+        nodes.push(...finallyResult.nodes);
+        edges.push(...finallyResult.edges);
+        finallyResult.nodesConnectedToExit.forEach((n) =>
+          nodesConnectedToExit.add(n)
+        );
+        newFinallyContext = { finallyEntryId: finallyResult.entryNodeId };
+      }
+    }
+
+    const tryBody = tryNode.namedChildren.find((c) => c.type === "block");
+    const tryResult = this.processBlock(
+      tryBody!,
+      exitId,
+      loopContext,
+      newFinallyContext || finallyContext
+    );
+    nodes.push(...tryResult.nodes);
+    edges.push(...tryResult.edges);
+    tryResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
+
+    if (tryResult.entryNodeId) {
+      edges.push({ from: entryId, to: tryResult.entryNodeId });
+    } else if (finallyResult?.entryNodeId) {
+      edges.push({ from: entryId, to: finallyResult.entryNodeId });
+    } else {
+      allExitPoints.push({ id: entryId });
+    }
+
+    tryResult.exitPoints.forEach((ep) => {
+      if (finallyResult?.entryNodeId) {
+        edges.push({
+          from: ep.id,
+          to: finallyResult.entryNodeId,
+          label: ep.label,
+        });
+      } else {
+        allExitPoints.push(ep);
+      }
+    });
+
+    const exceptClauses = tryNode.children.filter(
+      (c) => c.type === "except_clause"
+    );
+    for (const clause of exceptClauses) {
+      const exceptBody = clause.namedChildren.find((c) => c.type === "block");
+      const exceptTypeNode = clause.namedChildren.find(
+        (c) => c.type !== "block"
+      );
+      const exceptType = exceptTypeNode
+        ? this.escapeString(exceptTypeNode.text)
+        : "exception";
+
+      const exceptResult = this.processBlock(
+        exceptBody!,
+        exitId,
+        loopContext,
+        newFinallyContext || finallyContext
+      );
+      nodes.push(...exceptResult.nodes);
+      edges.push(...exceptResult.edges);
+      exceptResult.nodesConnectedToExit.forEach((n) =>
+        nodesConnectedToExit.add(n)
+      );
+
+      if (exceptResult.entryNodeId) {
+        edges.push({
+          from: entryId,
+          to: exceptResult.entryNodeId,
+          label: `on ${exceptType}`,
+        });
+        exceptResult.exitPoints.forEach((ep) => {
+          if (finallyResult?.entryNodeId) {
+            edges.push({
+              from: ep.id,
+              to: finallyResult.entryNodeId,
+              label: ep.label,
+            });
+          } else {
+            allExitPoints.push(ep);
+          }
+        });
+      }
+    }
+
+    if (finallyResult) allExitPoints.push(...finallyResult.exitPoints);
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: entryId,
+      exitPoints: allExitPoints,
+      nodesConnectedToExit,
+    };
+  }
+
+  private processWithStatement(
+    withNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const withClauseNode = withNode.children.find(
+      (c: Parser.SyntaxNode) => c.type === "with_clause"
+    );
+    const withEntryId = this.generateNodeId("with");
+    const nodes: FlowchartNode[] = [
+      {
+        id: withEntryId,
+        label: this.escapeString(withClauseNode?.text || "with ..."),
+        shape: "rect",
+        style: this.nodeStyles.special,
+      },
+    ];
+    this.locationMap.push({
+      start: withNode.startIndex,
+      end: withNode.endIndex,
+      nodeId: withEntryId,
+    });
+
+    const edges: FlowchartEdge[] = [];
+    const body = withNode.childForFieldName("body");
+    if (body) {
+      const bodyResult = this.processBlock(
+        body,
+        exitId,
+        loopContext,
+        finallyContext
+      );
+      nodes.push(...bodyResult.nodes);
+      edges.push(...bodyResult.edges);
+
+      if (bodyResult.entryNodeId)
+        edges.push({ from: withEntryId, to: bodyResult.entryNodeId });
 
       return {
         nodes,
         edges,
-        entryNodeId: loopId,
-        exitPoints: [{ id: loopId, label: "False" }],
-        nodesConnectedToExit: new Set<string>(),
+        entryNodeId: withEntryId,
+        exitPoints:
+          bodyResult.exitPoints.length > 0
+            ? bodyResult.exitPoints
+            : [{ id: withEntryId }],
+        nodesConnectedToExit: bodyResult.nodesConnectedToExit,
       };
     }
 
     return {
       nodes,
+      edges,
+      entryNodeId: withEntryId,
+      exitPoints: [{ id: withEntryId }],
+      nodesConnectedToExit: new Set<string>(),
+    };
+  }
+
+  private processAssertStatement(
+    assertNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const conditionNode = assertNode.namedChildren[0];
+    if (!conditionNode) return this.processDefaultStatement(assertNode);
+
+    const conditionId = this.generateNodeId("assert_cond");
+    const nodes: FlowchartNode[] = [
+      {
+        id: conditionId,
+        label: `assert ${this.escapeString(conditionNode.text)}`,
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+      },
+    ];
+    this.locationMap.push({
+      start: assertNode.startIndex,
+      end: assertNode.endIndex,
+      nodeId: conditionId,
+    });
+
+    const raiseNodeId = this.generateNodeId("raise_assert");
+    let label = "raise AssertionError";
+    if (assertNode.namedChildren.length > 1) {
+      label += `: ${this.escapeString(assertNode.namedChildren[1].text)}`;
+    }
+    nodes.push({
+      id: raiseNodeId,
+      label,
+      shape: "stadium",
+      style: this.nodeStyles.special,
+    });
+
+    const edges: FlowchartEdge[] = [
+      { from: conditionId, to: raiseNodeId, label: "False" },
+      {
+        from: raiseNodeId,
+        to: finallyContext ? finallyContext.finallyEntryId : exitId,
+      },
+    ];
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: conditionId,
+      exitPoints: [{ id: conditionId, label: "True" }],
+      nodesConnectedToExit: new Set<string>([raiseNodeId]),
+    };
+  }
+
+  private processArgument(argNode: Parser.SyntaxNode): ProcessResult {
+    if (this.isHofCall(argNode)) {
+      const result = this.processHigherOrderFunctionCall(argNode);
+      if (result) return result;
+    }
+
+    const nodeId = this.generateNodeId("input");
+    const node: FlowchartNode = {
+      id: nodeId,
+      label: `Input: ${this.escapeString(argNode.text)}`,
+      shape: "rect",
+      style: this.nodeStyles.special,
+    };
+    this.locationMap.push({
+      start: argNode.startIndex,
+      end: argNode.endIndex,
+      nodeId,
+    });
+    return {
+      nodes: [node],
       edges: [],
-      entryNodeId: loopId,
-      exitPoints: [{ id: loopId, label: "False" }],
+      entryNodeId: nodeId,
+      exitPoints: [{ id: nodeId }],
+      nodesConnectedToExit: new Set<string>(),
+    };
+  }
+
+  private processHigherOrderFunctionCall(
+    callNode: Parser.SyntaxNode
+  ): ProcessResult | null {
+    const functionNode = callNode.childForFieldName("function");
+    if (!functionNode) return null;
+
+    const functionName = functionNode.text?.split(".").pop();
+    if (!functionName) return null;
+
+    switch (functionName) {
+      case "map":
+        return this.processMap(callNode);
+      case "filter":
+        return this.processFilter(callNode);
+      case "reduce":
+        return this.processReduce(callNode);
+      default:
+        return null;
+    }
+  }
+
+  private processMap(callNode: Parser.SyntaxNode): ProcessResult {
+    const args = callNode.childForFieldName("arguments")?.namedChildren || [];
+    if (args.length < 2) return this.processDefaultStatement(callNode);
+
+    const [functionArg, iterableArgNode] = args;
+    const functionText = this.escapeString(functionArg.text);
+    let lambdaBodyText = `${functionText}(item)`;
+
+    if (functionArg.type === "lambda") {
+      const bodyNode = functionArg.childForFieldName("body");
+      if (bodyNode) {
+        lambdaBodyText = this.escapeString(bodyNode.text);
+      }
+    }
+
+    const iterableResult = this.processArgument(iterableArgNode);
+    const nodes: FlowchartNode[] = [...iterableResult.nodes];
+    const edges: FlowchartEdge[] = [...iterableResult.edges];
+
+    const mapId = this.generateNodeId("map_call");
+    nodes.push({
+      id: mapId,
+      label: `map()`,
+      shape: "rect",
+      style: this.nodeStyles.hof,
+    });
+    iterableResult.exitPoints.forEach((ep) =>
+      edges.push({ from: ep.id, to: mapId, label: ep.label })
+    );
+
+    const applyId = this.generateNodeId("map_apply");
+    nodes.push({
+      id: applyId,
+      label: `Apply lambda to each element: new_item = ${lambdaBodyText}`,
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    this.locationMap.push({
+      start: functionArg.startIndex,
+      end: functionArg.endIndex,
+      nodeId: applyId,
+    });
+    edges.push({ from: mapId, to: applyId, label: "Next item" });
+
+    const collectId = this.generateNodeId("map_collect");
+    nodes.push({
+      id: collectId,
+      label: "Collect transformed element",
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    edges.push({ from: applyId, to: collectId });
+    edges.push({ from: collectId, to: mapId });
+
+    const resultId = this.generateNodeId("map_result");
+    nodes.push({
+      id: resultId,
+      label: "Collected results",
+      shape: "rect",
+      style: this.nodeStyles.special,
+    });
+    edges.push({ from: mapId, to: resultId, label: "End of list" });
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: iterableResult.entryNodeId,
+      exitPoints: [{ id: resultId }],
+      nodesConnectedToExit: new Set<string>(),
+    };
+  }
+
+  private processFilter(callNode: Parser.SyntaxNode): ProcessResult {
+    const args = callNode.childForFieldName("arguments")?.namedChildren || [];
+    if (args.length < 2) return this.processDefaultStatement(callNode);
+
+    const [functionArg, iterableArgNode] = args;
+    const iterableResult = this.processArgument(iterableArgNode);
+    const nodes: FlowchartNode[] = [...iterableResult.nodes];
+    const edges: FlowchartEdge[] = [...iterableResult.edges];
+
+    const filterId = this.generateNodeId("filter_call");
+    nodes.push({
+      id: filterId,
+      label: `filter()`,
+      shape: "rect",
+      style: this.nodeStyles.hof,
+    });
+    iterableResult.exitPoints.forEach((ep) =>
+      edges.push({ from: ep.id, to: filterId, label: ep.label })
+    );
+
+    const applyId = this.generateNodeId("filter_apply");
+    nodes.push({
+      id: applyId,
+      label: `Apply lambda to each element`,
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    this.locationMap.push({
+      start: functionArg.startIndex,
+      end: functionArg.endIndex,
+      nodeId: applyId,
+    });
+    edges.push({ from: filterId, to: applyId, label: "Next item" });
+
+    const decisionId = this.generateNodeId("filter_decision");
+    nodes.push({
+      id: decisionId,
+      label: `lambda returns True?`,
+      shape: "diamond",
+      style: this.nodeStyles.decision,
+    });
+    edges.push({ from: applyId, to: decisionId });
+
+    const keepId = this.generateNodeId("filter_keep");
+    nodes.push({
+      id: keepId,
+      label: "Keep element",
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    edges.push({ from: decisionId, to: keepId, label: "Yes" });
+    edges.push({ from: keepId, to: filterId });
+
+    const discardId = this.generateNodeId("filter_discard");
+    nodes.push({
+      id: discardId,
+      label: "Discard element",
+      shape: "rect",
+      style: this.nodeStyles.break,
+    });
+    edges.push({ from: decisionId, to: discardId, label: "No" });
+    edges.push({ from: discardId, to: filterId });
+
+    const collectedId = this.generateNodeId("filter_collected");
+    nodes.push({
+      id: collectedId,
+      label: "Collected results",
+      shape: "rect",
+      style: this.nodeStyles.special,
+    });
+    edges.push({ from: filterId, to: collectedId, label: "End of list" });
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: iterableResult.entryNodeId,
+      exitPoints: [{ id: collectedId }],
+      nodesConnectedToExit: new Set<string>(),
+    };
+  }
+
+  private processReduce(callNode: Parser.SyntaxNode): ProcessResult {
+    const args = callNode.childForFieldName("arguments")?.namedChildren || [];
+    if (args.length < 2) return this.processDefaultStatement(callNode);
+
+    const [functionArg, iterableArgNode] = args;
+    const hasInitializer = args.length > 2;
+    const initializerArgNode = hasInitializer ? args[2] : null;
+    const initializerText = initializerArgNode
+      ? this.escapeString(initializerArgNode.text)
+      : `first item from input`;
+
+    const iterableResult = this.processArgument(iterableArgNode);
+    const nodes: FlowchartNode[] = [...iterableResult.nodes];
+    const edges: FlowchartEdge[] = [...iterableResult.edges];
+
+    const initId = this.generateNodeId("reduce_init");
+    nodes.push({
+      id: initId,
+      label: `accumulator = ${initializerText}`,
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    if (initializerArgNode) {
+      this.locationMap.push({
+        start: initializerArgNode.startIndex,
+        end: initializerArgNode.endIndex,
+        nodeId: initId,
+      });
+    }
+    iterableResult.exitPoints.forEach((ep) =>
+      edges.push({ from: ep.id, to: initId, label: ep.label })
+    );
+
+    const headerId = this.generateNodeId("reduce_header");
+    nodes.push({
+      id: headerId,
+      label: hasInitializer ? `For each item` : `For each remaining item`,
+      shape: "rect",
+      style: this.nodeStyles.hof,
+    });
+    edges.push({ from: initId, to: headerId });
+
+    const applyId = this.generateNodeId("reduce_apply");
+    nodes.push({
+      id: applyId,
+      label: `accumulator = ${this.escapeString(
+        functionArg.text
+      )}(accumulator, item)`,
+      shape: "rect",
+      style: this.nodeStyles.process,
+    });
+    this.locationMap.push({
+      start: functionArg.startIndex,
+      end: functionArg.endIndex,
+      nodeId: applyId,
+    });
+    edges.push({ from: headerId, to: applyId, label: "Next" });
+    edges.push({ from: applyId, to: headerId });
+
+    const resultId = this.generateNodeId("reduce_result");
+    nodes.push({
+      id: resultId,
+      label: "Return final accumulator value",
+      shape: "rect",
+      style: this.nodeStyles.special,
+    });
+    edges.push({ from: headerId, to: resultId, label: "End" });
+
+    return {
+      nodes,
+      edges,
+      entryNodeId: iterableResult.entryNodeId,
+      exitPoints: [{ id: resultId }],
+      nodesConnectedToExit: new Set<string>(),
+    };
+  }
+
+  private processDebuggerStatement(
+    statement: Parser.SyntaxNode
+  ): ProcessResult {
+    const nodeId = this.generateNodeId("debugger");
+    const node: FlowchartNode = {
+      id: nodeId,
+      label: "debugger",
+      shape: "rect",
+      style: this.nodeStyles.special,
+    };
+    this.locationMap.push({
+      start: statement.startIndex,
+      end: statement.endIndex,
+      nodeId,
+    });
+    return {
+      nodes: [node],
+      edges: [],
+      entryNodeId: nodeId,
+      exitPoints: [{ id: nodeId }],
       nodesConnectedToExit: new Set<string>(),
     };
   }
 
   private processForInStatement(
-    statement: SyntaxNode,
-    exitId: string
+    forNode: Parser.SyntaxNode,
+    exitId: string,
+    finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    const loopId = this.generateNodeId("for_in_loop");
+    const leftNode = forNode.childForFieldName("left");
+    const rightNode = forNode.childForFieldName("right");
+    const bodyNode = forNode.childForFieldName("body");
 
-    const left = statement.childForFieldName("left");
-    const right = statement.childForFieldName("right");
-
-    // Find the 'in' or 'of' keyword
-    let keyword = 'in/of';
-    const keywordNode = statement.namedChildren.find(n => n.type === 'in' || n.type === 'of');
-    if (keywordNode) {
-        keyword = keywordNode.text;
+    if (!leftNode || !rightNode || !bodyNode) {
+      return this.processDefaultStatement(forNode);
     }
 
-
-    let loopText = "for...in/of loop";
-    if (left && right) {
-      loopText = `for (${left.text} ${keyword} ${right.text})`;
-    }
+    const left = leftNode.text;
+    const right = rightNode.text;
+    const headerId = this.generateNodeId("for_in_header");
+    const loopExitId = this.generateNodeId("for_in_exit");
 
     const nodes: FlowchartNode[] = [
       {
-        id: loopId,
-        label: this.escapeString(loopText),
+        id: headerId,
+        label: this.escapeString(`for (${left} in ${right})`),
         shape: "diamond",
         style: this.nodeStyles.decision,
       },
+      { id: loopExitId, label: "end loop", shape: "stadium" },
     ];
-
     this.locationMap.push({
-      start: statement.startIndex,
-      end: statement.endIndex,
-      nodeId: loopId,
+      start: forNode.startIndex,
+      end: forNode.endIndex,
+      nodeId: headerId,
     });
 
     const loopContext: LoopContext = {
-      breakTargetId: exitId,
-      continueTargetId: loopId,
+      breakTargetId: loopExitId,
+      continueTargetId: headerId,
     };
-
-    const body = statement.childForFieldName("body");
-    if (body) {
-      const bodyResult = this.processBlock(body, exitId, loopContext);
-      nodes.push(...bodyResult.nodes);
-      const edges: FlowchartEdge[] = [...bodyResult.edges];
-
-      if (bodyResult.entryNodeId) {
-        edges.push({ from: loopId, to: bodyResult.entryNodeId, label: "Loop" });
-      }
-
-      for (const exitPoint of bodyResult.exitPoints) {
-        edges.push({ from: exitPoint.id, to: loopId });
-      }
-
-      return {
-        nodes,
-        edges,
-        entryNodeId: loopId,
-        exitPoints: [{ id: loopId, label: "End Loop" }],
-        nodesConnectedToExit: bodyResult.nodesConnectedToExit,
-      };
-    }
-
-    return {
-      nodes,
-      edges: [],
-      entryNodeId: loopId,
-      exitPoints: [{ id: loopId, label: "End Loop" }],
-      nodesConnectedToExit: new Set<string>(),
-    };
-  }
-
-  private processWhileStatement(
-    statement: SyntaxNode,
-    exitId: string
-  ): ProcessResult {
-    const loopId = this.generateNodeId("while_loop");
-    const condition = statement.childForFieldName("condition");
-
-    let conditionText = "while condition";
-    if (condition) {
-      conditionText = `while ${condition.text}`;
-    }
-
-    const nodes: FlowchartNode[] = [
-      {
-        id: loopId,
-        label: this.escapeString(conditionText),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-    ];
-
-    this.locationMap.push({
-      start: statement.startIndex,
-      end: statement.endIndex,
-      nodeId: loopId,
-    });
-
-    const loopContext: LoopContext = {
-      breakTargetId: exitId,
-      continueTargetId: loopId,
-    };
-
-    const body = statement.childForFieldName("body");
-    if (body) {
-      const bodyResult = this.processBlock(body, exitId, loopContext);
-      nodes.push(...bodyResult.nodes);
-      const edges: FlowchartEdge[] = [...bodyResult.edges];
-
-      if (bodyResult.entryNodeId) {
-        edges.push({ from: loopId, to: bodyResult.entryNodeId, label: "True" });
-      }
-
-      for (const exitPoint of bodyResult.exitPoints) {
-        edges.push({ from: exitPoint.id, to: loopId });
-      }
-
-      return {
-        nodes,
-        edges,
-        entryNodeId: loopId,
-        exitPoints: [{ id: loopId, label: "False" }],
-        nodesConnectedToExit: bodyResult.nodesConnectedToExit,
-      };
-    }
-
-    return {
-      nodes,
-      edges: [],
-      entryNodeId: loopId,
-      exitPoints: [{ id: loopId, label: "False" }],
-      nodesConnectedToExit: new Set<string>(),
-    };
-  }
-
-    private processDoWhileStatement(
-      statement: SyntaxNode,
-      exitId: string
-    ): ProcessResult {
-        const body = statement.childForFieldName("body");
-        const condition = statement.childForFieldName("condition");
-
-        if (!body) return { nodes: [], edges: [], exitPoints: [], nodesConnectedToExit: new Set() };
-
-        const bodyResult = this.processBlock(body, exitId);
-
-        const conditionId = this.generateNodeId("do_while_cond");
-        const nodes = [...bodyResult.nodes];
-        nodes.push({
-            id: conditionId,
-            label: this.escapeString(condition?.text ?? "condition"),
-            shape: "diamond",
-            style: this.nodeStyles.decision,
-        });
-
-        const edges = [...bodyResult.edges];
-        // Connect body exits to the condition
-        for (const exitPoint of bodyResult.exitPoints) {
-            edges.push({ from: exitPoint.id, to: conditionId });
-        }
-
-        // Loop back to the body if condition is true
-        if (bodyResult.entryNodeId) {
-            edges.push({ from: conditionId, to: bodyResult.entryNodeId, label: "True" });
-        }
-
-        return {
-            nodes,
-            edges,
-            entryNodeId: bodyResult.entryNodeId,
-            exitPoints: [{ id: conditionId, label: "False" }],
-            nodesConnectedToExit: new Set<string>(),
-        };
-    }
-
-  private processBlock(
-    blockNode: SyntaxNode | null,
-    exitId: string,
-    loopContext?: LoopContext,
-    finallyContext?: FinallyContext,
-  ): ProcessResult {
-    if (!blockNode) {
-      return { nodes: [], edges: [], exitPoints: [], nodesConnectedToExit: new Set() };
-    }
-
-    if (blockNode.type !== "statement_block") {
-      return this.processStatement(blockNode, exitId, loopContext, finallyContext);
-    }
-
-    return this.processStatementList(blockNode, exitId, loopContext, finallyContext);
-  }
-
-  private processReturnStatement(
-    statement: SyntaxNode,
-    exitId: string,
-    finallyContext?: FinallyContext
-  ): ProcessResult {
-      const valueNode = statement.firstNamedChild;
-      if (valueNode) {
-          const exprResult = this.processExpression(valueNode);
-          if (exprResult) {
-              const returnId = this.generateNodeId("return");
-              exprResult.nodes.push({
-                  id: returnId,
-                  label: "return",
-                  shape: "stadium",
-                  style: this.nodeStyles.special,
-              });
-              this.locationMap.push({ start: statement.startIndex, end: statement.endIndex, nodeId: returnId });
-
-              exprResult.exitPoints.forEach(ep => {
-                  exprResult.edges.push({ from: ep.id, to: returnId, label: ep.label });
-              });
-              const targetId = finallyContext ? finallyContext.finallyEntryId : exitId;
-              exprResult.edges.push({ from: returnId, to: targetId });
-
-              return {
-                  ...exprResult,
-                  exitPoints: [],
-                  nodesConnectedToExit: new Set<string>([returnId])
-              };
-          }
-      }
-
-      const nodeId = this.generateNodeId("return_stmt");
-      const nodeText = this.escapeString(statement.text);
-      const nodes: FlowchartNode[] = [
-          { id: nodeId, label: nodeText, shape: "stadium", style: this.nodeStyles.special, }
-      ];
-      const targetId = finallyContext ? finallyContext.finallyEntryId : exitId;
-      const edges: FlowchartEdge[] = [{ from: nodeId, to: targetId }];
-
-      this.locationMap.push({ start: statement.startIndex, end: statement.endIndex, nodeId });
-
-      return {
-          nodes, edges, entryNodeId: nodeId, exitPoints: [], nodesConnectedToExit: new Set<string>().add(nodeId),
-      };
-  }
-
-    private processReturnStatementForExpression(
-      exprNode: SyntaxNode,
-      exitId: string,
-      finallyContext?: FinallyContext
-    ): ProcessResult {
-        const result = this.processExpression(exprNode);
-        if (result) {
-            const returnId = this.generateNodeId("return_expr");
-            result.nodes.push({
-                id: returnId,
-                label: 'return value',
-                shape: 'stadium',
-                style: this.nodeStyles.special,
-            });
-
-            const targetId = finallyContext ? finallyContext.finallyEntryId : exitId;
-            result.exitPoints.forEach(ep => {
-                result.edges.push({ from: ep.id, to: returnId, label: ep.label });
-            });
-            result.edges.push({ from: returnId, to: targetId });
-
-            result.exitPoints = [];
-            if(result.nodesConnectedToExit) {
-                result.nodesConnectedToExit.add(returnId);
-            }
-            return result;
-        }
-        return this.processDefaultStatement(exprNode);
-    }
-
-    private processThrowStatement(
-        statement: SyntaxNode,
-        exitId: string,
-        finallyContext?: FinallyContext
-    ): ProcessResult {
-        const nodeId = this.generateNodeId("throw_stmt");
-        const nodeText = this.escapeString(statement.text);
-        const nodes: FlowchartNode[] = [
-            { id: nodeId, label: nodeText, shape: "stadium", style: this.nodeStyles.special }
-        ];
-        const targetId = finallyContext ? finallyContext.finallyEntryId : exitId;
-        const edges: FlowchartEdge[] = [{ from: nodeId, to: targetId }];
-
-        this.locationMap.push({ start: statement.startIndex, end: statement.endIndex, nodeId });
-
-        return {
-            nodes, edges, entryNodeId: nodeId, exitPoints: [], nodesConnectedToExit: new Set<string>([nodeId])
-        };
-    }
-
-    private processBreakStatement(
-        statement: SyntaxNode,
-        loopContext: LoopContext,
-        finallyContext?: FinallyContext
-    ): ProcessResult {
-        const nodeId = this.generateNodeId("break_stmt");
-        const nodes: FlowchartNode[] = [
-            { id: nodeId, label: "break", shape: "stadium", style: this.nodeStyles.break }
-        ];
-
-        // If in a try block with a finally, must go to finally before breaking.
-        const targetId = finallyContext ? finallyContext.finallyEntryId : loopContext.breakTargetId;
-        const edges: FlowchartEdge[] = [{ from: nodeId, to: targetId }];
-
-        this.locationMap.push({ start: statement.startIndex, end: statement.endIndex, nodeId });
-        return { nodes, edges, entryNodeId: nodeId, exitPoints: [], nodesConnectedToExit: new Set<string>([nodeId]) };
-    }
-
-    private processContinueStatement(
-        statement: SyntaxNode,
-        loopContext: LoopContext,
-        finallyContext?: FinallyContext
-    ): ProcessResult {
-        const nodeId = this.generateNodeId("continue_stmt");
-        const nodes: FlowchartNode[] = [
-            { id: nodeId, label: "continue", shape: "stadium", style: this.nodeStyles.break }
-        ];
-
-        // If in a try block with a finally, must go to finally before continuing.
-        const targetId = finallyContext ? finallyContext.finallyEntryId : loopContext.continueTargetId;
-        const edges: FlowchartEdge[] = [{ from: nodeId, to: targetId }];
-
-        this.locationMap.push({ start: statement.startIndex, end: statement.endIndex, nodeId });
-        return { nodes, edges, entryNodeId: nodeId, exitPoints: [], nodesConnectedToExit: new Set<string>([nodeId]) };
-    }
-
-    private processExpression(expression: SyntaxNode): ProcessResult | null {
-        switch(expression.type) {
-            case "call_expression":
-                if (this.isHofCall(expression)) {
-                    return this.processHigherOrderFunctionCall(expression);
-                }
-                const memberAccess = expression.childForFieldName("function");
-                if (memberAccess?.type === 'member_expression' && ['then', 'catch', 'finally'].includes(memberAccess.childForFieldName('property')?.text ?? '')) {
-                    return this.processPromiseChain(expression);
-                }
-                return this.processDefaultStatement(expression);
-            case "await_expression":
-                return this.processAwaitExpression(expression);
-            default:
-                return null; // Let the caller handle it.
-        }
-    }
-
-    private processExpressionStatement(statement: SyntaxNode): ProcessResult {
-        const expression = statement.firstNamedChild;
-        if (expression) {
-            const result = this.processExpression(expression);
-            if (result) return result;
-        }
-        return this.processDefaultStatement(statement);
-    }
-
-    private processVariableDeclaration(declarator: SyntaxNode): ProcessResult {
-        const valueNode = declarator?.childForFieldName("value");
-
-        if (valueNode) {
-            const result = this.processExpression(valueNode);
-            if (result) {
-                // Prepend a node for the variable assignment
-                const varName = declarator.childForFieldName("name")?.text;
-                const assignId = this.generateNodeId("assign");
-                result.nodes.unshift({
-                    id: assignId,
-                    label: `let ${varName} = ...`,
-                    shape: 'rect',
-                    style: this.nodeStyles.process
-                });
-
-                if (result.entryNodeId) {
-                    result.edges.unshift({ from: assignId, to: result.entryNodeId });
-                }
-                result.entryNodeId = assignId;
-                return result;
-            }
-        }
-        return this.processDefaultStatement(declarator);
-    }
-
-    private processAwaitExpression(awaitNode: SyntaxNode): ProcessResult {
-      const nodeId = this.generateNodeId("await");
-      const nodes: FlowchartNode[] = [
-        {
-          id: nodeId,
-          // Improved labeling
-          label: `await ${this.escapeString(awaitNode.firstNamedChild?.text || 'promise')}`,
-          shape: "rect",
-          style: this.nodeStyles.process,
-        },
-      ];
-      // Added location mapping
-      this.locationMap.push({ start: awaitNode.startIndex, end: awaitNode.endIndex, nodeId });
-
-      return {
-        nodes,
-        edges: [],
-        entryNodeId: nodeId,
-        exitPoints: [{ id: nodeId }],
-        nodesConnectedToExit: new Set<string>()
-      };
-    }
-
-    // in class TsAstParserTreeSitter
-
-private processPromiseChain(callNode: SyntaxNode): ProcessResult {
-    const allNodes: FlowchartNode[] = [];
-    const allEdges: FlowchartEdge[] = [];
-    const nodesConnectedToExit = new Set<string>();
-
-    let currentNode: SyntaxNode | null = callNode;
-    let chain: SyntaxNode[] = [];
-
-    // Corrected loop to walk up the promise chain
-    while (currentNode?.type === 'call_expression') {
-        const member = currentNode.childForFieldName('function');
-        if (member?.type === 'member_expression') {
-            chain.unshift(currentNode);
-            currentNode = member.childForFieldName('object');
-        } else {
-            // Reached the initial call (e.g., fetch()), which is not a member expression.
-            break;
-        }
-    }
-
-    // Add the initial call (which is the final currentNode) to the front of the chain.
-    if (currentNode) {
-        chain.unshift(currentNode);
-    }
-
-    // Add limit for promise chain nodes
-    if (chain.length > 5) {
-      const truncatedId = this.generateNodeId("prom_trunc");
-      return {
-        nodes: [{
-          id: truncatedId,
-          label: "Promise chain too long",
-          shape: "rect",
-          style: this.nodeStyles.special
-        }],
-        edges: [],
-        entryNodeId: truncatedId,
-        exitPoints: [{ id: truncatedId }],
-        nodesConnectedToExit: new Set()
-      };
-    }
-
-    const initialCall = chain[0];
-    if (!initialCall) return this.processDefaultStatement(callNode);
-
-    const initialResult = this.processExpression(initialCall) ?? this.processDefaultStatement(initialCall);
-    allNodes.push(...initialResult.nodes);
-    allEdges.push(...initialResult.edges);
-
-    let lastSuccessExit = initialResult.exitPoints[0]?.id;
-    let potentialRejectionSources: string[] = lastSuccessExit ? [lastSuccessExit] : [];
-    const entryNodeId = initialResult.entryNodeId;
-
-    // Process the .then, .catch, .finally chain (starts from the second link)
-    for (let i = 1; i < chain.length; i++) {
-        const chainLink = chain[i];
-        const member = chainLink.childForFieldName('function');
-        const propName = member?.childForFieldName('property')?.text;
-
-        const nodeId = this.generateNodeId(propName ?? 'promise');
-        const argText = chainLink.childForFieldName('arguments')?.text ?? '()';
-        allNodes.push({
-            id: nodeId,
-            label: `.${propName}${this.escapeString(argText)}`,
-            shape: 'rect',
-            style: this.nodeStyles.process,
-        });
-        this.locationMap.push({ start: chainLink.startIndex, end: chainLink.endIndex, nodeId });
-
-        if (propName === 'then') {
-            if (lastSuccessExit) {
-                allEdges.push({ from: lastSuccessExit, to: nodeId, label: 'onFulfilled' });
-            }
-            lastSuccessExit = nodeId;
-            potentialRejectionSources.push(lastSuccessExit);
-        } else if (propName === 'catch') {
-            potentialRejectionSources.forEach(sourceId => {
-                allEdges.push({ from: sourceId, to: nodeId, label: 'onRejected' });
-            });
-            lastSuccessExit = nodeId;
-            potentialRejectionSources = [lastSuccessExit];
-        } else if (propName === 'finally') {
-            if (lastSuccessExit) {
-                allEdges.push({ from: lastSuccessExit, to: nodeId });
-            }
-            potentialRejectionSources.forEach(sourceId => {
-                allEdges.push({ from: sourceId, to: nodeId });
-            });
-            lastSuccessExit = nodeId;
-            potentialRejectionSources = [lastSuccessExit];
-        }
-    }
-
-    const exitPoints = lastSuccessExit ? [{ id: lastSuccessExit }] : [];
-
-    return {
-        nodes: allNodes,
-        edges: allEdges,
-        entryNodeId,
-        exitPoints,
-        nodesConnectedToExit
-    };
-}
-
-    private processTryStatement(
-        statement: SyntaxNode,
-        exitId: string,
-        loopContext?: LoopContext
-    ): ProcessResult {
-        const allNodes: FlowchartNode[] = [];
-        const allEdges: FlowchartEdge[] = [];
-        const nodesConnectedToExit = new Set<string>();
-        let allExitPoints: { id: string; label?: string }[] = [];
-
-        const tryBlock = statement.childForFieldName("body");
-        const catchClause = statement.childForFieldName("catch_clause");
-        const finallyClause = statement.childForFieldName("finally_clause");
-
-        const entryId = this.generateNodeId("try_entry");
-        allNodes.push({ id: entryId, label: "try", shape: "stadium" });
-
-        let finallyResult: ProcessResult | undefined;
-        let finallyContext: FinallyContext | undefined;
-
-        if (finallyClause) {
-            const finallyBlock = finallyClause.namedChildren[0];
-            if (finallyBlock) {
-                finallyResult = this.processBlock(finallyBlock, exitId, loopContext);
-                if (finallyResult.entryNodeId) {
-                    allNodes.push(...finallyResult.nodes);
-                    allEdges.push(...finallyResult.edges);
-                    finallyResult.nodesConnectedToExit.forEach(n => nodesConnectedToExit.add(n));
-                    finallyContext = { finallyEntryId: finallyResult.entryNodeId };
-                    allExitPoints.push(...finallyResult.exitPoints);
-                }
-            }
-        }
-
-        if (tryBlock) {
-            const tryResult = this.processBlock(tryBlock, exitId, loopContext, finallyContext);
-            allNodes.push(...tryResult.nodes);
-            allEdges.push(...tryResult.edges);
-            tryResult.nodesConnectedToExit.forEach(n => nodesConnectedToExit.add(n));
-
-            if (tryResult.entryNodeId) {
-                allEdges.push({ from: entryId, to: tryResult.entryNodeId });
-            } else if (finallyContext) {
-                allEdges.push({ from: entryId, to: finallyContext.finallyEntryId });
-            } else {
-                allExitPoints.push({ id: entryId });
-            }
-
-            tryResult.exitPoints.forEach(ep => {
-                if (finallyContext) {
-                    allEdges.push({ from: ep.id, to: finallyContext.finallyEntryId, label: ep.label });
-                } else {
-                    allExitPoints.push(ep);
-                }
-            });
-        }
-
-
-        if (catchClause) {
-            const catchBlock = catchClause.childForFieldName("body");
-            if (catchBlock) {
-                const catchResult = this.processBlock(catchBlock, exitId, loopContext, finallyContext);
-                allNodes.push(...catchResult.nodes);
-                allEdges.push(...catchResult.edges);
-                catchResult.nodesConnectedToExit.forEach(n => nodesConnectedToExit.add(n));
-
-                if (catchResult.entryNodeId) {
-                    const paramNode = catchClause.firstNamedChild;
-                    const param = paramNode?.type === 'variable_declarator' ? `on ${paramNode.text}` : 'on error';
-                    allEdges.push({ from: entryId, to: catchResult.entryNodeId, label: param });
-
-                    catchResult.exitPoints.forEach(ep => {
-                        if (finallyContext) {
-                            allEdges.push({ from: ep.id, to: finallyContext.finallyEntryId, label: ep.label });
-                        } else {
-                            allExitPoints.push(ep);
-                        }
-                    });
-                }
-            }
-        }
-
-        return {
-            nodes: allNodes, edges: allEdges, entryNodeId: entryId, exitPoints: allExitPoints, nodesConnectedToExit,
-        };
-    }
-
-  private processSwitchStatement(
-    statement: SyntaxNode,
-    exitId: string,
-  ): ProcessResult {
-    const valueNode = statement.childForFieldName('value');
-    const bodyNode = statement.childForFieldName('body');
-    if (!valueNode || !bodyNode) return this.processDefaultStatement(statement);
-
-    const switchEntryId = this.generateNodeId("switch_entry");
-    const nodes: FlowchartNode[] = [{
-        id: switchEntryId,
-        label: `switch (${this.escapeString(valueNode.text)})`,
-        shape: 'rect',
-        style: this.nodeStyles.process,
-    }];
-    const edges: FlowchartEdge[] = [];
-    const nodesConnectedToExit = new Set<string>();
-    const allExitPoints: {id: string, label?: string}[] = [];
-    let lastConditionExitId = switchEntryId;
-
-    const caseClauses = bodyNode.namedChildren.filter(c => c.type === 'switch_case');
-
-    for (const clause of caseClauses) {
-        const caseValueNode = clause.childForFieldName('value');
-        if (!caseValueNode) continue; // default case
-
-        const caseConditionId = this.generateNodeId('case_cond');
-        nodes.push({
-            id: caseConditionId,
-            label: `case ${this.escapeString(caseValueNode.text)}`,
-            shape: 'diamond',
-            style: this.nodeStyles.decision,
-        });
-        edges.push({ from: lastConditionExitId, to: caseConditionId });
-
-        const caseBodyResult = this.processStatementList(clause, exitId, {breakTargetId: exitId, continueTargetId: ''});
-        nodes.push(...caseBodyResult.nodes);
-        edges.push(...caseBodyResult.edges);
-        caseBodyResult.nodesConnectedToExit.forEach(n => nodesConnectedToExit.add(n));
-
-        if (caseBodyResult.entryNodeId) {
-            edges.push({ from: caseConditionId, to: caseBodyResult.entryNodeId, label: 'True'});
-        }
-        allExitPoints.push(...caseBodyResult.exitPoints);
-
-        lastConditionExitId = caseConditionId; // Next case comes from the 'False' path of this one
-    }
-
-    const defaultClause = bodyNode.namedChildren.find(c => c.type === 'switch_default');
-    if (defaultClause) {
-        const defaultResult = this.processStatementList(defaultClause, exitId, {breakTargetId: exitId, continueTargetId: ''});
-        nodes.push(...defaultResult.nodes);
-        edges.push(...defaultResult.edges);
-        defaultResult.nodesConnectedToExit.forEach(n => nodesConnectedToExit.add(n));
-        if (defaultResult.entryNodeId) {
-            edges.push({ from: lastConditionExitId, to: defaultResult.entryNodeId, label: 'default'});
-        }
-        allExitPoints.push(...defaultResult.exitPoints);
+    const bodyResult = this.processBlock(
+      bodyNode,
+      exitId,
+      loopContext,
+      finallyContext
+    );
+    nodes.push(...bodyResult.nodes);
+    const edges: FlowchartEdge[] = [...bodyResult.edges];
+    const nodesConnectedToExit = new Set<string>(
+      bodyResult.nodesConnectedToExit
+    );
+
+    if (bodyResult.entryNodeId) {
+      edges.push({ from: headerId, to: bodyResult.entryNodeId, label: "Loop" });
     } else {
-        allExitPoints.push({id: lastConditionExitId, label: 'False'});
+      edges.push({ from: headerId, to: headerId, label: "Loop" });
     }
 
+    bodyResult.exitPoints.forEach((ep) =>
+      edges.push({ from: ep.id, to: headerId })
+    );
+    edges.push({ from: headerId, to: loopExitId, label: "End Loop" });
 
     return {
-        nodes,
-        edges,
-        entryNodeId: switchEntryId,
-        exitPoints: allExitPoints,
-        nodesConnectedToExit,
+      nodes,
+      edges,
+      entryNodeId: headerId,
+      exitPoints: [{ id: loopExitId }],
+      nodesConnectedToExit,
     };
   }
 
-    private processHigherOrderFunctionCall(callNode: SyntaxNode): ProcessResult | null {
-        const memberExpr = callNode.childForFieldName("function");
-        const functionName = memberExpr?.childForFieldName("property")?.text;
+  private processDoWhileStatement(
+    doNode: Parser.SyntaxNode,
+    exitId: string,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const bodyNode = doNode.childForFieldName("body");
+    const conditionNode = doNode.childForFieldName("condition");
 
-        switch (functionName) {
-            case "map":
-              return this.processMap(callNode);
-            case "filter":
-              return this.processFilter(callNode);
-            case "forEach":
-              return this.processForEach(callNode);
-            case "reduce":
-              return this.processReduce(callNode);
-            default:
-              return null;
-        }
+    if (!bodyNode || !conditionNode) {
+      return this.processDefaultStatement(doNode);
     }
 
-    private processMap(callNode: SyntaxNode): ProcessResult {
-        const args = callNode.childForFieldName("arguments")?.namedChildren || [];
-        if (args.length < 1) return this.processDefaultStatement(callNode);
+    const entryId = this.generateNodeId("do_entry");
+    const conditionId = this.generateNodeId("do_condition");
+    const loopExitId = this.generateNodeId("do_exit");
 
-        const [functionArg] = args;
-        const memberExpr = callNode.childForFieldName("function");
-        const iterableNode = memberExpr?.childForFieldName("object");
+    const nodes: FlowchartNode[] = [
+      {
+        id: entryId,
+        label: "do",
+        shape: "rect",
+        style: this.nodeStyles.process,
+      },
+      {
+        id: conditionId,
+        label: this.escapeString(conditionNode.text),
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+      },
+      { id: loopExitId, label: "end loop", shape: "stadium" },
+    ];
+    this.locationMap.push({
+      start: doNode.startIndex,
+      end: doNode.endIndex,
+      nodeId: entryId,
+    });
 
-        const functionText = this.escapeString(functionArg.text);
-        const lambdaBodyText = functionArg.type === "arrow_function" && functionArg.childForFieldName("body")
-            ? this.escapeString(functionArg.childForFieldName("body")!.text)
-            : `${functionText}(item)`;
+    const loopContext: LoopContext = {
+      breakTargetId: loopExitId,
+      continueTargetId: conditionId,
+    };
+    const bodyResult = this.processBlock(
+      bodyNode,
+      exitId,
+      loopContext,
+      finallyContext
+    );
+    nodes.push(...bodyResult.nodes);
+    const edges: FlowchartEdge[] = [...bodyResult.edges];
+    const nodesConnectedToExit = new Set<string>(
+      bodyResult.nodesConnectedToExit
+    );
 
-        const nodes: FlowchartNode[] = [];
-        const edges: FlowchartEdge[] = [];
-
-        const mapHeaderId = this.generateNodeId("map_header");
-        nodes.push({
-            id: mapHeaderId,
-            label: `For each item in ${this.escapeString(iterableNode?.text ?? 'array')}`,
-            shape: "diamond",
-            style: this.nodeStyles.hof,
-        });
-        this.locationMap.push({ start: callNode.startIndex, end: callNode.endIndex, nodeId: mapHeaderId });
-
-        const applyId = this.generateNodeId("map_apply");
-        nodes.push({
-            id: applyId,
-            label: `Apply: ${lambdaBodyText}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
-        });
-        this.locationMap.push({ start: functionArg.startIndex, end: functionArg.endIndex, nodeId: applyId });
-        edges.push({ from: mapHeaderId, to: applyId, label: "Loop" });
-
-        const collectId = this.generateNodeId("map_collect");
-        nodes.push({
-            id: collectId,
-            label: "Collect result",
-            shape: "rect",
-            style: this.nodeStyles.process,
-        });
-        edges.push({ from: applyId, to: collectId });
-        edges.push({ from: collectId, to: mapHeaderId });
-
-        return {
-            nodes,
-            edges,
-            entryNodeId: mapHeaderId,
-            exitPoints: [{ id: mapHeaderId, label: "End Loop" }],
-            nodesConnectedToExit: new Set<string>(),
-        };
+    if (bodyResult.entryNodeId) {
+      edges.push({ from: entryId, to: bodyResult.entryNodeId });
+    } else {
+      edges.push({ from: entryId, to: conditionId });
     }
 
-    private processFilter(callNode: SyntaxNode): ProcessResult {
-        const args = callNode.childForFieldName("arguments")?.namedChildren || [];
-        if (args.length < 1) return this.processDefaultStatement(callNode);
+    bodyResult.exitPoints.forEach((ep) =>
+      edges.push({ from: ep.id, to: conditionId })
+    );
+    edges.push({ from: conditionId, to: entryId, label: "True" });
+    edges.push({ from: conditionId, to: loopExitId, label: "False" });
 
-        const [functionArg] = args;
-        const memberExpr = callNode.childForFieldName("function");
-        const iterableNode = memberExpr?.childForFieldName("object");
-
-        const functionText = this.escapeString(functionArg.text);
-        const conditionText = functionArg.type === "arrow_function" && functionArg.childForFieldName("body")
-            ? this.escapeString(functionArg.childForFieldName("body")!.text)
-            : `${functionText}(item)`;
-
-        const nodes: FlowchartNode[] = [];
-        const edges: FlowchartEdge[] = [];
-
-        const filterHeaderId = this.generateNodeId("filter_header");
-        nodes.push({
-            id: filterHeaderId,
-            label: `For each item in ${this.escapeString(iterableNode?.text ?? 'array')}`,
-            shape: "diamond",
-            style: this.nodeStyles.hof,
-        });
-        this.locationMap.push({ start: callNode.startIndex, end: callNode.endIndex, nodeId: filterHeaderId });
-
-        const conditionId = this.generateNodeId("filter_cond");
-        nodes.push({
-            id: conditionId,
-            label: `If ${conditionText}`,
-            shape: "diamond",
-            style: this.nodeStyles.decision,
-        });
-        this.locationMap.push({ start: functionArg.startIndex, end: functionArg.endIndex, nodeId: conditionId });
-        edges.push({ from: filterHeaderId, to: conditionId, label: "Loop" });
-
-        const collectId = this.generateNodeId("filter_collect");
-        nodes.push({
-            id: collectId,
-            label: "Keep item",
-            shape: "rect",
-            style: this.nodeStyles.process,
-        });
-        edges.push({ from: conditionId, to: collectId, label: "True" });
-        edges.push({ from: collectId, to: filterHeaderId });
-        edges.push({ from: conditionId, to: filterHeaderId, label: "False" });
-
-
-        return {
-            nodes,
-            edges,
-            entryNodeId: filterHeaderId,
-            exitPoints: [{ id: filterHeaderId, label: "End Loop" }],
-            nodesConnectedToExit: new Set<string>(),
-        };
-    }
-    
-    private processForEach(callNode: SyntaxNode): ProcessResult {
-        const args = callNode.childForFieldName("arguments")?.namedChildren || [];
-        if (args.length < 1) return this.processDefaultStatement(callNode);
-
-        const [functionArg] = args;
-        const memberExpr = callNode.childForFieldName("function");
-        const iterableNode = memberExpr?.childForFieldName("object");
-
-        const functionText = this.escapeString(functionArg.text);
-        const actionText = functionArg.type === "arrow_function" && functionArg.childForFieldName("body")
-            ? this.escapeString(functionArg.childForFieldName("body")!.text)
-            : `${functionText}(item)`;
-
-        const nodes: FlowchartNode[] = [];
-        const edges: FlowchartEdge[] = [];
-
-        const forEachHeaderId = this.generateNodeId("forEach_header");
-        nodes.push({
-            id: forEachHeaderId,
-            label: `For each item in ${this.escapeString(iterableNode?.text ?? 'array')}`,
-            shape: "diamond",
-            style: this.nodeStyles.hof,
-        });
-        this.locationMap.push({ start: callNode.startIndex, end: callNode.endIndex, nodeId: forEachHeaderId });
-
-        const applyId = this.generateNodeId("forEach_apply");
-        nodes.push({
-            id: applyId,
-            label: `Execute: ${actionText}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
-        });
-        this.locationMap.push({ start: functionArg.startIndex, end: functionArg.endIndex, nodeId: applyId });
-        edges.push({ from: forEachHeaderId, to: applyId, label: "Loop" });
-        edges.push({ from: applyId, to: forEachHeaderId });
-
-        return {
-            nodes,
-            edges,
-            entryNodeId: forEachHeaderId,
-            exitPoints: [{ id: forEachHeaderId, label: "End Loop" }],
-            nodesConnectedToExit: new Set<string>(),
-        };
-    }
-    
-    private processReduce(callNode: SyntaxNode): ProcessResult {
-        const args = callNode.childForFieldName("arguments")?.namedChildren || [];
-        if (args.length < 1) return this.processDefaultStatement(callNode);
-
-        const [functionArg, initialValueNode] = args;
-        const memberExpr = callNode.childForFieldName("function");
-        const iterableNode = memberExpr?.childForFieldName("object");
-
-        const functionText = this.escapeString(functionArg.text);
-        const reduceLogicText = functionArg.type === "arrow_function" && functionArg.childForFieldName("body")
-            ? this.escapeString(functionArg.childForFieldName("body")!.text)
-            : `${functionText}(acc, item)`;
-
-        const nodes: FlowchartNode[] = [];
-        const edges: FlowchartEdge[] = [];
-        let lastNodeId: string | undefined;
-
-        if (initialValueNode) {
-            const initId = this.generateNodeId("reduce_init");
-            nodes.push({
-                id: initId,
-                label: `acc = ${this.escapeString(initialValueNode.text)}`,
-                shape: "rect",
-                style: this.nodeStyles.process,
-            });
-            lastNodeId = initId;
-        }
-
-        const reduceHeaderId = this.generateNodeId("reduce_header");
-        nodes.push({
-            id: reduceHeaderId,
-            label: `For each item in ${this.escapeString(iterableNode?.text ?? 'array')}`,
-            shape: "diamond",
-            style: this.nodeStyles.hof,
-        });
-        this.locationMap.push({ start: callNode.startIndex, end: callNode.endIndex, nodeId: reduceHeaderId });
-
-        if(lastNodeId) {
-            edges.push({ from: lastNodeId, to: reduceHeaderId });
-        }
-
-        const applyId = this.generateNodeId("reduce_apply");
-        nodes.push({
-            id: applyId,
-            label: `acc = ${reduceLogicText}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
-        });
-        this.locationMap.push({ start: functionArg.startIndex, end: functionArg.endIndex, nodeId: applyId });
-        edges.push({ from: reduceHeaderId, to: applyId, label: "Loop" });
-        edges.push({ from: applyId, to: reduceHeaderId });
-
-        const entryNodeId = lastNodeId ? lastNodeId : reduceHeaderId;
-
-        return {
-            nodes,
-            edges,
-            entryNodeId: entryNodeId,
-            exitPoints: [{ id: reduceHeaderId, label: "End Loop" }],
-            nodesConnectedToExit: new Set<string>(),
-        };
-    }
+    return {
+      nodes,
+      edges,
+      entryNodeId: entryId,
+      exitPoints: [{ id: loopExitId }],
+      nodesConnectedToExit,
+    };
+  }
 }
