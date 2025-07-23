@@ -207,7 +207,11 @@ ${flowchartSyntax}
                 rect.setAttribute('fill', backgroundColor);
                 svgClone.insertBefore(rect, svgClone.firstChild);
                 
-                return svgClone;
+                return {
+                    svgElement: svgClone,
+                    width: totalWidth,
+                    height: totalHeight
+                };
             }
 
             function exportFlowchart(fileType) {
@@ -221,7 +225,7 @@ ${flowchartSyntax}
                 }
 
                 try {
-                    const svgClone = cleanSvgForExport(svgElement);
+                    const { svgElement: svgClone, width, height } = cleanSvgForExport(svgElement);
                     const svgData = new XMLSerializer().serializeToString(svgClone);
 
                     if (fileType === 'svg') {
@@ -237,19 +241,7 @@ ${flowchartSyntax}
                             throw new Error("Could not get canvas 2D context");
                         }
                         
-                        // Get dimensions from the cleaned SVG
-                        const tempDiv = document.createElement('div');
-                        tempDiv.innerHTML = svgData;
-                        const tempSvg = tempDiv.querySelector('svg');
-                        
-                        if (!tempSvg) {
-                            throw new Error("Could not parse cleaned SVG");
-                        }
-                        
-                        const width = parseFloat(tempSvg.getAttribute('width')) || 800;
-                        const height = parseFloat(tempSvg.getAttribute('height')) || 600;
-                        
-                        // Set canvas size
+                        // Use the dimensions directly from cleanSvgForExport
                         const scale = 2; // Higher DPI
                         canvas.width = width * scale;
                         canvas.height = height * scale;
