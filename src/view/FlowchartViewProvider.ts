@@ -522,6 +522,31 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
     return text;
   }
 
+  public updateFlowchart(
+    sourceCode: string,
+    languageId: string,
+    position?: number
+  ) {
+    if (!this._view) {
+      return;
+    }
+
+    this._view.webview.html = this.getLoadingHtml("Generating flowchart...");
+
+    console.time("analyzeCode");
+    const { flowchart, locationMap, functionRange } = analyzeCode(
+      sourceCode,
+      position || 0,
+      languageId
+    );
+    console.timeEnd("analyzeCode");
+
+    this._locationMap = locationMap;
+    this._currentFunctionRange = undefined; // Reset function range for manual generation
+
+    this._view.webview.html = getWebviewContent(flowchart, this.getNonce());
+  }
+
   public dispose() {
     while (this._disposables.length) {
       const x = this._disposables.pop();

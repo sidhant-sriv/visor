@@ -3,7 +3,7 @@
   "displayName": "visor",
   "publisher": "sidhantsriv",
   "description": "Makes a flowchart on the side for your code for better visualization.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "engines": {
     "vscode": "^1.102.0"
   },
@@ -78,6 +78,7 @@
     "@typescript-eslint/parser": "^8.31.1",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
+    "copy-webpack-plugin": "^13.0.0",
     "eslint": "^9.25.1",
     "node-loader": "^2.1.0",
     "ts-loader": "^9.5.2",

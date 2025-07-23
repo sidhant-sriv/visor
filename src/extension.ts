@@ -14,6 +14,38 @@ export function activate(context: vscode.ExtensionContext) {
       provider
     )
   );
+
+  // Register the generate flowchart command
+  const generateFlowchartCommand = vscode.commands.registerCommand(
+    "visor.generateFlowchart",
+    () => {
+      // Get the active editor
+      const editor = vscode.window.activeTextEditor;
+      if (!editor) {
+        vscode.window.showErrorMessage("No active editor found");
+        return;
+      }
+
+      // Get the selected text or the entire document
+      const document = editor.document;
+      const selection = editor.selection;
+      const text = selection.isEmpty
+        ? document.getText()
+        : document.getText(selection);
+
+      const position = selection.isEmpty
+        ? 0
+        : document.offsetAt(selection.start);
+
+      // Update the flowchart view
+      provider.updateFlowchart(text, document.languageId, position);
+
+      // Show the visor view
+      vscode.commands.executeCommand("visor.flowchartView.focus");
+    }
+  );
+
+  context.subscriptions.push(generateFlowchartCommand);
 }
 
 /**
