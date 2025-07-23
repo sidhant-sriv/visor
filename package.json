@@ -3,7 +3,12 @@
   "displayName": "visor",
   "publisher": "sidhantsriv",
   "description": "Makes a flowchart on the side for your code for better visualization.",
-  "version": "0.0.4",
+  "version": "0.0.6",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sidhant-sriv/sidvis.git"
+  },
+  "license": "MIT",
   "engines": {
     "vscode": "^1.102.0"
   },
@@ -64,7 +69,7 @@
     "perf:compare": "tsc -p . --outDir out && node out/src/performance-test.js --compare"
   },
   "dependencies": {
-    "tree-sitter": "^0.25.0",
+    "tree-sitter": "^0.21.1",
     "tree-sitter-cpp": "^0.23.4",
     "tree-sitter-java": "^0.23.5",
     "tree-sitter-python": "^0.23.6",

@@ -9,7 +9,13 @@ import {
 import { AbstractParser } from "../../common/AbstractParser";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 
-type CppLanguage = Parser.Language;
+interface TreeSitterLanguage {
+  name: string;
+  language: unknown;
+  nodeTypeInfo?: unknown;
+}
+
+type CppLanguage = TreeSitterLanguage;
 
 export class CppAstParser extends AbstractParser {
   protected log(message: string, ...args: any[]) {

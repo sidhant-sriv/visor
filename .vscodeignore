@@ -1,3 +1,4 @@
+# Exclude node_modules but include necessary tree-sitter binaries
 node_modules
 !node_modules/tree-sitter/build/**/*.node
 !node_modules/tree-sitter-*/prebuilds/darwin-arm64/*.node
@@ -9,9 +10,13 @@ node_modules
 !node_modules/tree-sitter/index.js
 !node_modules/tree-sitter-*/index.js
 !node_modules/tree-sitter/tree-sitter.d.ts
+
+# Exclude source and output directories (we include dist/ via webpack bundle)
 out/
 src/
 test.cpp
+
+# Exclude development and config files
 .vscode-test/
 .vscode/
 .gitignore
@@ -22,3 +27,16 @@ vsc-extension-quickstart.md
 **/eslint.config.mjs
 **/*.map
 **/.vscode-test.*
+
+# Exclude yarn/npm files
+yarn.lock
+package-lock.json
+
+# Exclude old VSIX files
+*.vsix
+
+# Exclude git
+.git/
+
+# Exclude scripts directory (if not needed at runtime)
+scripts/

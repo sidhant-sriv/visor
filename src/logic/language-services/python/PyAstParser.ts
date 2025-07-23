@@ -9,7 +9,13 @@ import {
 import { AbstractParser } from "../../common/AbstractParser";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 
-type PythonLanguage = Parser.Language;
+interface TreeSitterLanguage {
+  name: string;
+  language: unknown;
+  nodeTypeInfo?: unknown;
+}
+
+type PythonLanguage = TreeSitterLanguage;
 
 export class PyAstParser extends AbstractParser {
   private currentFunctionIsLambda = false;

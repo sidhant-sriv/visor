@@ -9,7 +9,13 @@ import {
 import { AbstractParser } from "../../common/AbstractParser";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 
-type TypescriptLanguage = Parser.Language;
+interface TreeSitterLanguage {
+  name: string;
+  language: unknown;
+  nodeTypeInfo?: unknown;
+}
+
+type TypescriptLanguage = TreeSitterLanguage;
 
 export class TsAstParserTreeSitter extends AbstractParser {
   private currentFunctionIsArrowFunction = false;

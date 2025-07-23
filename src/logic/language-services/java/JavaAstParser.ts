@@ -9,7 +9,13 @@ import {
 import { AbstractParser } from "../../common/AbstractParser";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 
-type JavaLanguage = Parser.Language;
+interface TreeSitterLanguage {
+  name: string;
+  language: unknown;
+  nodeTypeInfo?: unknown;
+}
+
+type JavaLanguage = TreeSitterLanguage;
 
 export class JavaAstParser extends AbstractParser {
   protected log(message: string, ...args: any[]) {
