@@ -6,6 +6,7 @@ export class StringProcessor {
 
   // Precompiled regex for better performance
   private static readonly escapeRegex = /"|\\|\n/g;
+  private static readonly colonRegex = /:$/;
   private static readonly escapeMap: Record<string, string> = {
     '"': "#quot;",
     "\\": "\\\\",
@@ -17,18 +18,26 @@ export class StringProcessor {
 
     // Check cache first
     const cached = this.escapeCache.get(str);
-    if (cached !== undefined) return cached;
+    if (cached !== undefined) {
+      // Move to end for LRU behavior
+      this.escapeCache.delete(str);
+      this.escapeCache.set(str, cached);
+      return cached;
+    }
 
-    // Clear cache if too large
+    // Use LRU eviction instead of clearing entire cache
     if (this.escapeCache.size >= this.MAX_CACHE_SIZE) {
-      this.escapeCache.clear();
+      const firstKey = this.escapeCache.keys().next().value;
+      if (firstKey !== undefined) {
+        this.escapeCache.delete(firstKey);
+      }
     }
 
     let escaped = str.replace(
       this.escapeRegex,
       (match) => this.escapeMap[match]
     );
-    escaped = escaped.replace(/:$/, "").trim();
+    escaped = escaped.replace(this.colonRegex, "").trim();
 
     // Length limiting for readability
     const MAX_LABEL_LENGTH = 80;

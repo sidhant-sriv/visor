@@ -55,7 +55,10 @@
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "perf": "tsc -p . --outDir out && node out/src/performance-test.js",
+    "perf:quick": "tsc -p . --outDir out && node out/src/performance-test.js --quick",
+    "perf:compare": "tsc -p . --outDir out && node out/src/performance-test.js --compare"
   },
   "dependencies": {
     "tree-sitter": "^0.25.0",

@@ -18,24 +18,33 @@ export class PyAstParser extends AbstractParser {
     if (this.debug) console.log(`[PyAstParser] ${message}`, ...args);
   }
 
+  protected getParser(): Parser {
+    return this.getCachedParser("python", () => {
+      const parser = new Parser();
+      parser.setLanguage(Python as PythonLanguage);
+      return parser;
+    });
+  }
+
   public listFunctions(sourceCode: string): string[] {
-    const parser = new Parser();
-    parser.setLanguage(Python as PythonLanguage);
-    const tree = parser.parse(sourceCode);
+    return this.measurePerformance("listFunctions", () => {
+      const parser = this.getParser();
+      const tree = parser.parse(sourceCode);
 
-    const funcNames = tree.rootNode
-      .descendantsOfType("function_definition")
-      .map(
-        (f: Parser.SyntaxNode) =>
-          f.childForFieldName("name")?.text || "[anonymous]"
-      );
+      const funcNames = tree.rootNode
+        .descendantsOfType("function_definition")
+        .map(
+          (f: Parser.SyntaxNode) =>
+            f.childForFieldName("name")?.text || "[anonymous]"
+        );
 
-    const lambdaNames = tree.rootNode
-      .descendantsOfType("assignment")
-      .filter((a) => a.childForFieldName("right")?.type === "lambda")
-      .map((a) => a.childForFieldName("left")?.text || "[anonymous lambda]");
+      const lambdaNames = tree.rootNode
+        .descendantsOfType("assignment")
+        .filter((a) => a.childForFieldName("right")?.type === "lambda")
+        .map((a) => a.childForFieldName("left")?.text || "[anonymous lambda]");
 
-    return [...funcNames, ...lambdaNames];
+      return [...funcNames, ...lambdaNames];
+    });
   }
 
   public findFunctionAtPosition(

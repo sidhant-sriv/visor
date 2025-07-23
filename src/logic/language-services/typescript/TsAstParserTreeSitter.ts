@@ -18,50 +18,65 @@ export class TsAstParserTreeSitter extends AbstractParser {
     if (this.debug) console.log(`[TsAstParser] ${message}`, ...args);
   }
 
+  protected getParser(): Parser {
+    return this.getCachedParser("typescript", () => {
+      const parser = new Parser();
+      parser.setLanguage(Typescript.typescript as TypescriptLanguage);
+      return parser;
+    });
+  }
+
   public listFunctions(sourceCode: string): string[] {
-    const parser = new Parser();
-    parser.setLanguage(Typescript.typescript as TypescriptLanguage);
-    const tree = parser.parse(sourceCode);
+    return this.measurePerformance("listFunctions", () => {
+      const parser = this.getParser();
+      const tree = parser.parse(sourceCode);
 
-    // Get function declarations
-    const funcNames = tree.rootNode
-      .descendantsOfType("function_declaration")
-      .map(
-        (f: Parser.SyntaxNode) =>
-          f.childForFieldName("name")?.text || "[anonymous]"
-      );
+      // Get function declarations
+      const funcNames = tree.rootNode
+        .descendantsOfType("function_declaration")
+        .map(
+          (f: Parser.SyntaxNode) =>
+            f.childForFieldName("name")?.text || "[anonymous]"
+        );
 
-    // Get function expressions
-    const funcExprNames = tree.rootNode
-      .descendantsOfType("function_expression")
-      .map(
-        (f: Parser.SyntaxNode) =>
-          f.childForFieldName("name")?.text || "[function expression]"
-      );
+      // Get function expressions
+      const funcExprNames = tree.rootNode
+        .descendantsOfType("function_expression")
+        .map(
+          (f: Parser.SyntaxNode) =>
+            f.childForFieldName("name")?.text || "[function expression]"
+        );
 
-    // Get arrow functions assigned to variables
-    const arrowFuncNames = tree.rootNode
-      .descendantsOfType("variable_declarator")
-      .filter((vd) => vd.childForFieldName("value")?.type === "arrow_function")
-      .map((vd) => vd.childForFieldName("name")?.text || "[arrow function]");
+      // Get arrow functions assigned to variables
+      const arrowFuncNames = tree.rootNode
+        .descendantsOfType("variable_declarator")
+        .filter(
+          (vd) => vd.childForFieldName("value")?.type === "arrow_function"
+        )
+        .map((vd) => vd.childForFieldName("name")?.text || "[arrow function]");
 
-    // Get method definitions in classes
-    const methodNames = tree.rootNode
-      .descendantsOfType("method_definition")
-      .map(
-        (m: Parser.SyntaxNode) =>
-          m.childForFieldName("name")?.text || "[method]"
-      );
+      // Get method definitions in classes
+      const methodNames = tree.rootNode
+        .descendantsOfType("method_definition")
+        .map(
+          (m: Parser.SyntaxNode) =>
+            m.childForFieldName("name")?.text || "[method]"
+        );
 
-    return [...funcNames, ...funcExprNames, ...arrowFuncNames, ...methodNames];
+      return [
+        ...funcNames,
+        ...funcExprNames,
+        ...arrowFuncNames,
+        ...methodNames,
+      ];
+    });
   }
 
   public findFunctionAtPosition(
     sourceCode: string,
     position: number
   ): string | undefined {
-    const parser = new Parser();
-    parser.setLanguage(Typescript.typescript as TypescriptLanguage);
+    const parser = this.getParser();
     const tree = parser.parse(sourceCode);
 
     // Find function declarations
@@ -224,244 +239,258 @@ export class TsAstParserTreeSitter extends AbstractParser {
     functionName?: string,
     position?: number
   ): FlowchartIR {
-    const parser = new Parser();
-    parser.setLanguage(Typescript.typescript as TypescriptLanguage);
-    const tree = parser.parse(sourceCode);
+    return this.measurePerformance("generateFlowchart", () => {
+      // Reset state for fresh generation
+      this.resetState();
 
-    if (position !== undefined) {
-      const statements = tree.rootNode.descendantsOfType([
-        "assignment_expression",
-        "expression_statement",
-        "return_statement",
-      ]);
-      const smallestStatement = statements.reduce<
-        Parser.SyntaxNode | undefined
-      >((smallest, stmt) => {
-        if (
-          position >= stmt.startIndex &&
-          position <= stmt.endIndex &&
-          (!smallest ||
-            stmt.endIndex - stmt.startIndex <
-              smallest.endIndex - smallest.startIndex)
-        ) {
-          return stmt;
-        }
-        return smallest;
-      }, undefined);
+      const parser = this.getParser();
+      const tree = parser.parse(sourceCode);
 
-      if (smallestStatement) {
-        let potentialCallNode: Parser.SyntaxNode | null | undefined;
-        let baseStatement = smallestStatement;
-
-        if (smallestStatement.type === "assignment_expression") {
-          potentialCallNode = smallestStatement.childForFieldName("right");
-        } else if (smallestStatement.type === "expression_statement") {
-          const child = smallestStatement.namedChild(0);
-          if (child?.type === "assignment_expression") {
-            potentialCallNode = child.childForFieldName("right");
-            baseStatement = child;
-          } else {
-            potentialCallNode = child;
-          }
-        } else if (smallestStatement.type === "return_statement") {
-          potentialCallNode = smallestStatement.namedChild(0);
-        }
-
-        if (potentialCallNode?.type === "call_expression") {
-          const funcNode = potentialCallNode.childForFieldName("function");
-          const funcName = funcNode?.text;
-          const args =
-            potentialCallNode.childForFieldName("arguments")?.namedChildren ||
-            [];
-
-          // Check for array constructor with HOF call
+      if (position !== undefined) {
+        const statements = tree.rootNode.descendantsOfType([
+          "assignment_expression",
+          "expression_statement",
+          "return_statement",
+        ]);
+        const smallestStatement = statements.reduce<
+          Parser.SyntaxNode | undefined
+        >((smallest, stmt) => {
           if (
-            ["Array"].includes(funcName!) &&
-            args.length === 1 &&
-            args[0].type === "call_expression" &&
-            this.isHofCall(args[0])
+            position >= stmt.startIndex &&
+            position <= stmt.endIndex &&
+            (!smallest ||
+              stmt.endIndex - stmt.startIndex <
+                smallest.endIndex - smallest.startIndex)
           ) {
-            return this.generateHofFlowchart(baseStatement, args[0], funcName);
-          } else if (this.isHofCall(potentialCallNode)) {
-            return this.generateHofFlowchart(baseStatement, potentialCallNode);
+            return stmt;
+          }
+          return smallest;
+        }, undefined);
+
+        if (smallestStatement) {
+          let potentialCallNode: Parser.SyntaxNode | null | undefined;
+          let baseStatement = smallestStatement;
+
+          if (smallestStatement.type === "assignment_expression") {
+            potentialCallNode = smallestStatement.childForFieldName("right");
+          } else if (smallestStatement.type === "expression_statement") {
+            const child = smallestStatement.namedChild(0);
+            if (child?.type === "assignment_expression") {
+              potentialCallNode = child.childForFieldName("right");
+              baseStatement = child;
+            } else {
+              potentialCallNode = child;
+            }
+          } else if (smallestStatement.type === "return_statement") {
+            potentialCallNode = smallestStatement.namedChild(0);
+          }
+
+          if (potentialCallNode?.type === "call_expression") {
+            const funcNode = potentialCallNode.childForFieldName("function");
+            const funcName = funcNode?.text;
+            const args =
+              potentialCallNode.childForFieldName("arguments")?.namedChildren ||
+              [];
+
+            // Check for array constructor with HOF call
+            if (
+              ["Array"].includes(funcName!) &&
+              args.length === 1 &&
+              args[0].type === "call_expression" &&
+              this.isHofCall(args[0])
+            ) {
+              return this.generateHofFlowchart(
+                baseStatement,
+                args[0],
+                funcName
+              );
+            } else if (this.isHofCall(potentialCallNode)) {
+              return this.generateHofFlowchart(
+                baseStatement,
+                potentialCallNode
+              );
+            }
           }
         }
       }
-    }
 
-    let targetNode: Parser.SyntaxNode | undefined;
-    let isArrowFunction = false;
+      let targetNode: Parser.SyntaxNode | undefined;
+      let isArrowFunction = false;
 
-    if (position !== undefined) {
-      // Find function declarations
-      targetNode = tree.rootNode
-        .descendantsOfType("function_declaration")
-        .find((f) => position >= f.startIndex && position <= f.endIndex);
-
-      if (!targetNode) {
-        // Find function expressions
+      if (position !== undefined) {
+        // Find function declarations
         targetNode = tree.rootNode
-          .descendantsOfType("function_expression")
+          .descendantsOfType("function_declaration")
           .find((f) => position >= f.startIndex && position <= f.endIndex);
-      }
 
-      if (!targetNode) {
-        // Find arrow functions in variable declarations
-        targetNode = tree.rootNode
-          .descendantsOfType("variable_declarator")
-          .find(
-            (vd) =>
-              position >= vd.startIndex &&
-              position <= vd.endIndex &&
-              vd.childForFieldName("value")?.type === "arrow_function"
-          );
-        isArrowFunction = !!targetNode;
-      }
+        if (!targetNode) {
+          // Find function expressions
+          targetNode = tree.rootNode
+            .descendantsOfType("function_expression")
+            .find((f) => position >= f.startIndex && position <= f.endIndex);
+        }
 
-      if (!targetNode) {
-        // Find method definitions
-        targetNode = tree.rootNode
-          .descendantsOfType("method_definition")
-          .find((m) => position >= m.startIndex && position <= m.endIndex);
-      }
-    } else if (functionName) {
-      // Find by function name
-      targetNode = tree.rootNode
-        .descendantsOfType("function_declaration")
-        .find((f) => f.childForFieldName("name")?.text === functionName);
+        if (!targetNode) {
+          // Find arrow functions in variable declarations
+          targetNode = tree.rootNode
+            .descendantsOfType("variable_declarator")
+            .find(
+              (vd) =>
+                position >= vd.startIndex &&
+                position <= vd.endIndex &&
+                vd.childForFieldName("value")?.type === "arrow_function"
+            );
+          isArrowFunction = !!targetNode;
+        }
 
-      if (!targetNode) {
+        if (!targetNode) {
+          // Find method definitions
+          targetNode = tree.rootNode
+            .descendantsOfType("method_definition")
+            .find((m) => position >= m.startIndex && position <= m.endIndex);
+        }
+      } else if (functionName) {
+        // Find by function name
         targetNode = tree.rootNode
-          .descendantsOfType("function_expression")
+          .descendantsOfType("function_declaration")
           .find((f) => f.childForFieldName("name")?.text === functionName);
+
+        if (!targetNode) {
+          targetNode = tree.rootNode
+            .descendantsOfType("function_expression")
+            .find((f) => f.childForFieldName("name")?.text === functionName);
+        }
+
+        if (!targetNode) {
+          targetNode = tree.rootNode
+            .descendantsOfType("variable_declarator")
+            .find(
+              (vd) =>
+                vd.childForFieldName("name")?.text === functionName &&
+                vd.childForFieldName("value")?.type === "arrow_function"
+            );
+          isArrowFunction = !!targetNode;
+        }
+
+        if (!targetNode) {
+          targetNode = tree.rootNode
+            .descendantsOfType("method_definition")
+            .find((m) => m.childForFieldName("name")?.text === functionName);
+        }
+      } else {
+        // Get first function found
+        targetNode =
+          tree.rootNode.descendantsOfType("function_declaration")[0] ||
+          tree.rootNode.descendantsOfType("function_expression")[0] ||
+          tree.rootNode.descendantsOfType("method_definition")[0];
       }
 
       if (!targetNode) {
-        targetNode = tree.rootNode
-          .descendantsOfType("variable_declarator")
-          .find(
-            (vd) =>
-              vd.childForFieldName("name")?.text === functionName &&
-              vd.childForFieldName("value")?.type === "arrow_function"
-          );
-        isArrowFunction = !!targetNode;
+        return {
+          nodes: [
+            {
+              id: "A",
+              label:
+                "Place cursor inside a function or statement to generate a flowchart.",
+              shape: "rect",
+            },
+          ],
+          edges: [],
+          locationMap: [],
+        };
       }
 
-      if (!targetNode) {
-        targetNode = tree.rootNode
-          .descendantsOfType("method_definition")
-          .find((m) => m.childForFieldName("name")?.text === functionName);
-      }
-    } else {
-      // Get first function found
-      targetNode =
-        tree.rootNode.descendantsOfType("function_declaration")[0] ||
-        tree.rootNode.descendantsOfType("function_expression")[0] ||
-        tree.rootNode.descendantsOfType("method_definition")[0];
-    }
+      this.nodeIdCounter = 0;
+      this.locationMap = [];
+      this.currentFunctionIsArrowFunction = isArrowFunction;
 
-    if (!targetNode) {
+      let bodyToProcess: Parser.SyntaxNode | null | undefined;
+
+      if (isArrowFunction) {
+        // For arrow functions, get the body from the variable declarator's value
+        const arrowFunc = targetNode.childForFieldName("value");
+        bodyToProcess = arrowFunc?.childForFieldName("body");
+      } else if (
+        targetNode.type === "method_definition" ||
+        targetNode.type === "function_declaration" ||
+        targetNode.type === "function_expression"
+      ) {
+        bodyToProcess = targetNode.childForFieldName("body");
+      }
+
+      if (!bodyToProcess) {
+        return {
+          nodes: [{ id: "A", label: "Function has no body.", shape: "rect" }],
+          edges: [],
+          locationMap: [],
+        };
+      }
+
+      const nodes: FlowchartNode[] = [];
+      const edges: FlowchartEdge[] = [];
+      const entryId = this.generateNodeId("start");
+      const exitId = this.generateNodeId("end");
+
+      nodes.push({
+        id: entryId,
+        label: `Start`,
+        shape: "round",
+        style: this.nodeStyles.terminator,
+      });
+      nodes.push({
+        id: exitId,
+        label: "End",
+        shape: "round",
+        style: this.nodeStyles.terminator,
+      });
+
+      // For arrow functions with expression body, process as single statement
+      // For all others (including arrow functions with block body), process as block
+      const bodyResult =
+        isArrowFunction && bodyToProcess.type !== "statement_block"
+          ? this.processStatement(bodyToProcess, exitId)
+          : this.processBlock(bodyToProcess, exitId);
+
+      nodes.push(...bodyResult.nodes);
+      edges.push(...bodyResult.edges);
+
+      edges.push(
+        bodyResult.entryNodeId
+          ? { from: entryId, to: bodyResult.entryNodeId }
+          : { from: entryId, to: exitId }
+      );
+
+      bodyResult.exitPoints.forEach((ep) => {
+        if (!bodyResult.nodesConnectedToExit.has(ep.id)) {
+          edges.push({ from: ep.id, to: exitId, label: ep.label });
+        }
+      });
+
+      const nodeIdSet = new Set(nodes.map((n) => n.id));
+      const validEdges = edges.filter(
+        (e) => nodeIdSet.has(e.from) && nodeIdSet.has(e.to)
+      );
+
+      const actualFunctionName = this.getFunctionName(
+        targetNode,
+        isArrowFunction
+      );
+
       return {
-        nodes: [
-          {
-            id: "A",
-            label:
-              "Place cursor inside a function or statement to generate a flowchart.",
-            shape: "rect",
-          },
-        ],
-        edges: [],
-        locationMap: [],
+        nodes,
+        edges: validEdges,
+        locationMap: this.locationMap,
+        functionRange: {
+          start: targetNode.startIndex,
+          end: targetNode.endIndex,
+        },
+        title: `Flowchart for ${
+          isArrowFunction ? "arrow function" : "function"
+        }: ${this.escapeString(actualFunctionName || "[anonymous]")}`,
+        entryNodeId: entryId,
+        exitNodeId: exitId,
       };
-    }
-
-    this.nodeIdCounter = 0;
-    this.locationMap = [];
-    this.currentFunctionIsArrowFunction = isArrowFunction;
-
-    let bodyToProcess: Parser.SyntaxNode | null | undefined;
-
-    if (isArrowFunction) {
-      // For arrow functions, get the body from the variable declarator's value
-      const arrowFunc = targetNode.childForFieldName("value");
-      bodyToProcess = arrowFunc?.childForFieldName("body");
-    } else if (
-      targetNode.type === "method_definition" ||
-      targetNode.type === "function_declaration" ||
-      targetNode.type === "function_expression"
-    ) {
-      bodyToProcess = targetNode.childForFieldName("body");
-    }
-
-    if (!bodyToProcess) {
-      return {
-        nodes: [{ id: "A", label: "Function has no body.", shape: "rect" }],
-        edges: [],
-        locationMap: [],
-      };
-    }
-
-    const nodes: FlowchartNode[] = [];
-    const edges: FlowchartEdge[] = [];
-    const entryId = this.generateNodeId("start");
-    const exitId = this.generateNodeId("end");
-
-    nodes.push({
-      id: entryId,
-      label: `Start`,
-      shape: "round",
-      style: this.nodeStyles.terminator,
     });
-    nodes.push({
-      id: exitId,
-      label: "End",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
-
-    // For arrow functions with expression body, process as single statement
-    // For all others (including arrow functions with block body), process as block
-    const bodyResult =
-      isArrowFunction && bodyToProcess.type !== "statement_block"
-        ? this.processStatement(bodyToProcess, exitId)
-        : this.processBlock(bodyToProcess, exitId);
-
-    nodes.push(...bodyResult.nodes);
-    edges.push(...bodyResult.edges);
-
-    edges.push(
-      bodyResult.entryNodeId
-        ? { from: entryId, to: bodyResult.entryNodeId }
-        : { from: entryId, to: exitId }
-    );
-
-    bodyResult.exitPoints.forEach((ep) => {
-      if (!bodyResult.nodesConnectedToExit.has(ep.id)) {
-        edges.push({ from: ep.id, to: exitId, label: ep.label });
-      }
-    });
-
-    const nodeIdSet = new Set(nodes.map((n) => n.id));
-    const validEdges = edges.filter(
-      (e) => nodeIdSet.has(e.from) && nodeIdSet.has(e.to)
-    );
-
-    const actualFunctionName = this.getFunctionName(
-      targetNode,
-      isArrowFunction
-    );
-
-    return {
-      nodes,
-      edges: validEdges,
-      locationMap: this.locationMap,
-      functionRange: { start: targetNode.startIndex, end: targetNode.endIndex },
-      title: `Flowchart for ${
-        isArrowFunction ? "arrow function" : "function"
-      }: ${this.escapeString(actualFunctionName || "[anonymous]")}`,
-      entryNodeId: entryId,
-      exitNodeId: exitId,
-    };
   }
 
   private getFunctionName(
