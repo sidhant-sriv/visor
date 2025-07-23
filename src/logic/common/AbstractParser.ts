@@ -200,26 +200,20 @@ export abstract class AbstractParser {
     statement: Parser.SyntaxNode
   ): ProcessResult {
     const nodeId = this.generateNodeId("stmt");
-    const nodeText = this.escapeString(statement.text);
     const node: FlowchartNode = {
       id: nodeId,
-      label: nodeText,
+      label: this.escapeString(statement.text),
       shape: "rect",
       style: this.nodeStyles.process,
     };
+
     this.locationMap.push({
       start: statement.startIndex,
       end: statement.endIndex,
       nodeId,
     });
 
-    return this.createProcessResult(
-      [node],
-      [],
-      nodeId,
-      [{ id: nodeId }],
-      new Set()
-    );
+    return this.createProcessResult([node], [], nodeId, [{ id: nodeId }]);
   }
 
   // Memory management utilities

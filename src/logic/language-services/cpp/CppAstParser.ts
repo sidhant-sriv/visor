@@ -267,6 +267,7 @@ export class CppAstParser extends AbstractParser {
         return this.processWhileStatement(statement, exitId, loopContext);
       case "for_statement":
       case "for_range_loop":
+      case "range_based_for_statement":
         return this.processForStatement(statement, exitId, loopContext);
       case "do_statement":
         return this.processDoWhileStatement(statement, exitId, loopContext);
@@ -287,6 +288,53 @@ export class CppAstParser extends AbstractParser {
       case "expression_statement":
       case "declaration":
       case "assignment_expression":
+      // C++ specific declaration types that can be statements
+      case "simple_declaration":
+      case "init_declarator":
+      case "type_definition":
+      case "alias_declaration":
+      case "using_declaration":
+      case "namespace_definition":
+      case "linkage_specification":
+      case "static_assert_declaration":
+      case "template_declaration":
+      case "template_instantiation":
+      case "function_definition":
+      case "constructor_definition":
+      case "destructor_definition":
+      case "friend_declaration":
+      // C++ specific statement types
+      case "labeled_statement":
+      case "goto_statement":
+      case "co_return_statement":
+      case "co_yield_statement":
+      case "co_await_expression":
+      // Expression types that can be statements
+      case "call_expression":
+      case "update_expression":
+      case "unary_expression":
+      case "binary_expression":
+      case "conditional_expression":
+      case "cast_expression":
+      case "new_expression":
+      case "delete_expression":
+      case "lambda_expression":
+      case "subscript_expression":
+      case "field_expression":
+      case "pointer_expression":
+      case "sizeof_expression":
+      case "alignof_expression":
+      case "offsetof_expression":
+      case "typeid_expression":
+      // Other statement types
+      case "empty_statement":
+      case "asm_statement":
+      // Modern C++ statements
+      case "if_statement_with_initializer":
+      case "switch_statement_with_initializer":
+      case "structured_binding_declaration":
+      case "decomposition_declaration":
+      case "co_yield_expression":
       default:
         return this.processDefaultStatement(statement);
     }
@@ -443,7 +491,10 @@ export class CppAstParser extends AbstractParser {
   ): ProcessResult {
     let loopText = "for";
 
-    if (statement.type === "for_range_loop") {
+    if (
+      statement.type === "for_range_loop" ||
+      statement.type === "range_based_for_statement"
+    ) {
       // Range-based for loop (C++11)
       const declarator = statement.childForFieldName("declarator");
       const right = statement.childForFieldName("right");
@@ -700,6 +751,7 @@ export class CppAstParser extends AbstractParser {
       allExitPoints.push({ id: entryId });
     }
 
+    // Normal exit points from try block (no exception)
     allExitPoints.push(...tryResult.exitPoints);
 
     // Process catch clauses
@@ -714,12 +766,38 @@ export class CppAstParser extends AbstractParser {
       // Extract exception type from parameter
       let exceptionType = "...";
       if (parameter) {
+        // Try different ways to extract the type from C++ catch parameter
         const typeNode = parameter.namedChildren.find(
           (child) =>
-            child.type === "type_identifier" || child.type === "primitive_type"
+            child.type === "type_identifier" ||
+            child.type === "primitive_type" ||
+            child.type === "qualified_identifier" ||
+            child.type === "parameter_declaration"
         );
+
         if (typeNode) {
-          exceptionType = typeNode.text;
+          if (typeNode.type === "parameter_declaration") {
+            // For parameter_declaration, look for the type within it
+            const innerType = typeNode.namedChildren.find(
+              (child) =>
+                child.type === "type_identifier" ||
+                child.type === "primitive_type" ||
+                child.type === "qualified_identifier"
+            );
+            exceptionType = innerType ? innerType.text : typeNode.text;
+          } else {
+            exceptionType = typeNode.text;
+          }
+        } else {
+          // Fallback: try to get a meaningful name from the parameter text
+          const paramText = parameter.text;
+          // Extract type from patterns like "const std::exception& e" or "int x"
+          const typeMatch = paramText.match(
+            /(?:const\s+)?([a-zA-Z_:][a-zA-Z0-9_:]*)/
+          );
+          if (typeMatch) {
+            exceptionType = typeMatch[1];
+          }
         }
       }
 
@@ -746,7 +824,7 @@ export class CppAstParser extends AbstractParser {
           nodesConnectedToExit.add(n)
         );
 
-        // Connect entry to catch entry node (represents exception path)
+        // Connect try entry to catch entry node (represents exception path from try block)
         edges.push({
           from: entryId,
           to: catchEntryId,
@@ -907,7 +985,7 @@ export class CppAstParser extends AbstractParser {
       return this.createProcessResult();
     }
 
-    // Filter out comments and preprocessor directives for C++
+    // Filter out comments, preprocessor directives, and non-executable constructs for C++
     const statements = blockNode.namedChildren.filter(
       (s) =>
         ![
@@ -920,6 +998,82 @@ export class CppAstParser extends AbstractParser {
           "preproc_endif",
           "preproc_else",
           "preproc_elif",
+          "preproc_undef",
+          "preproc_function_def",
+          "preproc_call",
+          // C++ specific non-executable constructs
+          "access_specifier", // public:, private:, protected:
+          "field_declaration", // class member declarations
+          "type_definition", // typedef
+          "alias_declaration", // using alias = type;
+          "using_declaration", // using namespace std;
+          "namespace_definition", // namespace blocks
+          "template_declaration", // template<...> declarations
+          "static_assert_declaration", // static_assert(...)
+          "friend_declaration", // friend class/function declarations
+          "linkage_specification", // extern "C" blocks
+          "}", // closing braces
+          "{", // opening braces
+          ";", // empty statements
+          // Additional modern C++ constructs to filter out
+          "template_parameter_list",
+          "template_argument_list",
+          "concept_definition",
+          "requires_clause",
+          "requires_expression",
+          "constraint_logical_and",
+          "constraint_logical_or",
+          "type_constraint",
+          "placeholder_type_specifier",
+          "attribute_declaration",
+          "ms_declspec_modifier",
+          "storage_class_specifier",
+          "type_qualifier",
+          "function_specifier",
+          "virtual_specifier",
+          "explicit_function_specifier",
+          "class_specifier",
+          "struct_specifier",
+          "union_specifier",
+          "enum_specifier",
+          "scoped_enum_specifier",
+          "base_class_clause",
+          "virtual_function_specifier",
+          "pure_virtual_clause",
+          "member_initializer_list",
+          "member_initializer",
+          "field_declaration_list",
+          "bitfield_clause",
+          "operator_name",
+          "destructor_name",
+          "qualified_operator_cast_identifier",
+          "operator_cast",
+          // Additional non-executable elements
+          "pragma",
+          "asm_statement", // inline assembly - could be executable but complex
+          "empty_statement",
+          // Template and generic constructs
+          "template_instantiation",
+          "template_type",
+          "auto",
+          "decltype",
+          // Modern C++ specifiers
+          "override",
+          "final",
+          "noexcept",
+          "constexpr",
+          "consteval",
+          "constinit",
+          "inline",
+          "thread_local",
+          // Filter out type identifiers that are part of declarations
+          "type_identifier",
+          "primitive_type",
+          "qualified_identifier",
+          "this",
+          "nullptr",
+          "true",
+          "false",
         ].includes(s.type)
     );
 
