@@ -1,9 +1,10 @@
 import { analyzeTypeScriptCode } from "./language-services/typescript";
 import { analyzePythonCode } from "./language-services/python";
+import { analyzeJavaCode } from "./language-services/java";
+import { analyzeCppCode } from "./language-services/cpp/index";
 import { FlowchartIR, LocationMapEntry } from "../ir/ir";
 import { MermaidGenerator } from "./MermaidGenerator";
 
-// Performance monitoring
 interface PerformanceMetrics {
   analysisTime: number;
   nodeCount: number;
@@ -39,11 +40,15 @@ class PerformanceMonitor {
 
   static logPerformanceSummary(): void {
     if (this.metrics.length === 0) return;
-    
+
     const avgTime = this.getAverageAnalysisTime();
-    const avgNodes = this.metrics.reduce((acc, m) => acc + m.nodeCount, 0) / this.metrics.length;
-    const avgEdges = this.metrics.reduce((acc, m) => acc + m.edgeCount, 0) / this.metrics.length;
-    
+    const avgNodes =
+      this.metrics.reduce((acc, m) => acc + m.nodeCount, 0) /
+      this.metrics.length;
+    const avgEdges =
+      this.metrics.reduce((acc, m) => acc + m.edgeCount, 0) /
+      this.metrics.length;
+
     console.log(`[Performance] Analyzed ${this.metrics.length} functions`);
     console.log(`[Performance] Average time: ${avgTime.toFixed(2)}ms`);
     console.log(`[Performance] Average nodes: ${avgNodes.toFixed(1)}`);
@@ -70,16 +75,26 @@ export function analyzeCode(
   let ir: FlowchartIR;
 
   // Language selection logic
-  if (language === 'typescript' || language === 'javascript') {
+  if (language === "typescript" || language === "javascript") {
     ir = analyzeTypeScriptCode(code, position);
-  } else if (language === 'python') {
+  } else if (language === "python") {
     ir = analyzePythonCode(code, position);
+  } else if (language === "java") {
+    ir = analyzeJavaCode(code, position);
+  } else if (language === "cpp" || language === "c++") {
+    ir = analyzeCppCode(code, undefined, position);
   } else {
     // Default or unsupported language
     ir = {
-      nodes: [{ id: 'A', label: `Error: Unsupported language: ${language}`, shape: 'rect' }],
+      nodes: [
+        {
+          id: "A",
+          label: `Error: Unsupported language: ${language}`,
+          shape: "rect",
+        },
+      ],
       edges: [],
-      locationMap: []
+      locationMap: [],
     };
   }
 
@@ -89,20 +104,26 @@ export function analyzeCode(
   // Extract metrics from IR
   const nodeCount = ir.nodes.length;
   const edgeCount = ir.edges.length;
-  const functionSize = ir.functionRange ? ir.functionRange.end - ir.functionRange.start : 0;
+  const functionSize = ir.functionRange
+    ? ir.functionRange.end - ir.functionRange.start
+    : 0;
 
   const metrics: PerformanceMetrics = {
     analysisTime,
     nodeCount,
     edgeCount,
-    functionSize
+    functionSize,
   };
 
   PerformanceMonitor.recordMetrics(metrics);
 
   // Log slow analysis
   if (analysisTime > 100) {
-    console.warn(`[Performance] Slow analysis: ${analysisTime.toFixed(2)}ms for ${functionSize} chars`);
+    console.warn(
+      `[Performance] Slow analysis: ${analysisTime.toFixed(
+        2
+      )}ms for ${functionSize} chars`
+    );
   }
 
   const mermaidGenerator = new MermaidGenerator();
@@ -112,9 +133,8 @@ export function analyzeCode(
     flowchart,
     locationMap: ir.locationMap,
     functionRange: ir.functionRange,
-    performanceMetrics: metrics
+    performanceMetrics: metrics,
   };
 }
 
-// Export performance utilities
 export { PerformanceMonitor, PerformanceMetrics };
