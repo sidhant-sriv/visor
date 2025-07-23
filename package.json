@@ -10,7 +10,6 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": ["onView:sidvis.flowchartView"],
   "main": "./dist/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -27,7 +26,8 @@
         {
           "id": "sidvis.flowchartView",
           "name": "Flowchart",
-          "type": "webview"
+          "type": "webview",
+          "icon": "media/icon.png"
         }
       ]
     },
