@@ -26,7 +26,8 @@
         {
           "id": "sidvis.flowchartView",
           "name": "Flowchart",
-          "type": "webview"
+          "type": "webview",
+          "icon": "media/icon.png"
         }
       ]
     },
