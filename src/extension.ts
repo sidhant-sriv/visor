@@ -6,8 +6,6 @@ import { FlowchartViewProvider } from "./view/FlowchartViewProvider";
  * the extension is activated (e.g., on first command use).
  */
 export function activate(context: vscode.ExtensionContext) {
-  console.log("visor extension is now active!");
-
   const provider = new FlowchartViewProvider(context.extensionUri);
 
   context.subscriptions.push(
