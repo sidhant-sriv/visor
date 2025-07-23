@@ -6,92 +6,16 @@ import {
   FlowchartEdge,
   LocationMapEntry,
 } from "../../../ir/ir";
+import { AbstractParser } from "../../common/AbstractParser";
+import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 
 type TypescriptLanguage = Parser.Language;
 
-// Optimized string handling (shared with TypeScript parser)
-class StringProcessor {
-  private static escapeCache = new Map<string, string>();
-  private static readonly MAX_CACHE_SIZE = 1000;
-
-  // Precompiled regex for better performance
-  private static readonly escapeRegex = /"|\\|\n/g;
-  private static readonly escapeMap: Record<string, string> = {
-    '"': "#quot;",
-    "\\": "\\\\",
-    "\n": " ",
-  };
-
-  static escapeString(str: string): string {
-    if (!str) return "";
-
-    // Check cache first
-    const cached = this.escapeCache.get(str);
-    if (cached !== undefined) return cached;
-
-    // Clear cache if too large
-    if (this.escapeCache.size >= this.MAX_CACHE_SIZE) {
-      this.escapeCache.clear();
-    }
-
-    let escaped = str.replace(
-      this.escapeRegex,
-      (match) => this.escapeMap[match]
-    );
-    escaped = escaped.replace(/:$/, "").trim();
-
-    // Length limiting for readability
-    const MAX_LABEL_LENGTH = 80;
-    if (escaped.length > MAX_LABEL_LENGTH) {
-      escaped = escaped.substring(0, MAX_LABEL_LENGTH - 3) + "...";
-    }
-
-    this.escapeCache.set(str, escaped);
-    return escaped;
-  }
-
-  static clearCache(): void {
-    this.escapeCache.clear();
-  }
-}
-
-interface ProcessResult {
-  nodes: FlowchartNode[];
-  edges: FlowchartEdge[];
-  entryNodeId?: string;
-  exitPoints: { id: string; label?: string }[];
-  nodesConnectedToExit: Set<string>;
-}
-
-interface LoopContext {
-  breakTargetId: string;
-  continueTargetId: string;
-}
-
-export class TsAstParserTreeSitter {
-  private nodeIdCounter = 0;
-  private locationMap: LocationMapEntry[] = [];
+export class TsAstParserTreeSitter extends AbstractParser {
   private currentFunctionIsArrowFunction = false;
-  private debug = false;
-  private readonly nodeStyles = {
-    terminator: "fill:#e8f5e8,stroke:#2e7d32,stroke-width:1.5px,color:#000",
-    decision: "fill:#fff3e0,stroke:#f57c00,stroke-width:1.5px,color:#000",
-    process: "fill:#f3e5f5,stroke:#7b1fa2,stroke-width:1.5px,color:#000",
-    special: "fill:#e3f2fd,stroke:#0d47a1,stroke-width:1.5px,color:#000",
-    break: "fill:#ffebee,stroke:#c62828,stroke-width:1.5px,color:#000",
-    hof: "fill:#e8eaf6,stroke:#3f51b5,stroke-width:1.5px,color:#000",
-  };
 
-  private log(message: string, ...args: any[]) {
-    if (this.debug) console.log(`[PyAstParser] ${message}`, ...args);
-  }
-
-  private generateNodeId(prefix: string): string {
-    return `${prefix}_${this.nodeIdCounter++}`;
-  }
-
-  private escapeString(str: string): string {
-    return StringProcessor.escapeString(str);
+  protected log(message: string, ...args: any[]) {
+    if (this.debug) console.log(`[TsAstParser] ${message}`, ...args);
   }
 
   public listFunctions(sourceCode: string): string[] {
@@ -553,75 +477,6 @@ export class TsAstParserTreeSitter {
     }
   }
 
-  private processBlock(
-    blockNode: Parser.SyntaxNode | null,
-    exitId: string,
-    loopContext?: LoopContext,
-    finallyContext?: { finallyEntryId: string }
-  ): ProcessResult {
-    if (!blockNode)
-      return {
-        nodes: [],
-        edges: [],
-        entryNodeId: undefined,
-        exitPoints: [],
-        nodesConnectedToExit: new Set<string>(),
-      };
-
-    const statements = blockNode.namedChildren.filter(
-      (s) =>
-        !["pass_statement", "comment", "elif_clause", "else_clause"].includes(
-          s.type
-        )
-    );
-    if (statements.length === 0)
-      return {
-        nodes: [],
-        edges: [],
-        entryNodeId: undefined,
-        exitPoints: [],
-        nodesConnectedToExit: new Set<string>(),
-      };
-
-    const nodes: FlowchartNode[] = [];
-    const edges: FlowchartEdge[] = [];
-    const nodesConnectedToExit = new Set<string>();
-    let entryNodeId: string | undefined;
-    let lastExitPoints: { id: string; label?: string }[] = [];
-
-    for (const statement of statements) {
-      const result = this.processStatement(
-        statement,
-        exitId,
-        loopContext,
-        finallyContext
-      );
-      nodes.push(...result.nodes);
-      edges.push(...result.edges);
-      result.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
-
-      if (!entryNodeId) entryNodeId = result.entryNodeId;
-      if (lastExitPoints.length > 0 && result.entryNodeId) {
-        lastExitPoints.forEach((exitPoint) => {
-          edges.push({
-            from: exitPoint.id,
-            to: result.entryNodeId!,
-            label: exitPoint.label,
-          });
-        });
-      }
-      lastExitPoints = result.exitPoints;
-    }
-
-    return {
-      nodes,
-      edges,
-      entryNodeId,
-      exitPoints: lastExitPoints,
-      nodesConnectedToExit,
-    };
-  }
-
   private findHofInExpression(
     expressionNode: Parser.SyntaxNode
   ): { hofCallNode: Parser.SyntaxNode; containerName?: string } | null {
@@ -645,7 +500,7 @@ export class TsAstParserTreeSitter {
     return null;
   }
 
-  private processStatement(
+  protected processStatement(
     statement: Parser.SyntaxNode,
     exitId: string,
     loopContext?: LoopContext,
@@ -878,29 +733,6 @@ export class TsAstParserTreeSitter {
           : this.processDefaultStatement(statement);
       }
     }
-  }
-
-  private processDefaultStatement(statement: Parser.SyntaxNode): ProcessResult {
-    const nodeId = this.generateNodeId("stmt");
-    const nodeText = this.escapeString(statement.text);
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: nodeText,
-      shape: "rect",
-      style: this.nodeStyles.process,
-    };
-    this.locationMap.push({
-      start: statement.startIndex,
-      end: statement.endIndex,
-      nodeId,
-    });
-    return {
-      nodes: [node],
-      edges: [],
-      entryNodeId: nodeId,
-      exitPoints: [{ id: nodeId }],
-      nodesConnectedToExit: new Set<string>(),
-    };
   }
 
   private processReturnStatementForExpression(
