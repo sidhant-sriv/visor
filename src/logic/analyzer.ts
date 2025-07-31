@@ -1,27 +1,22 @@
-import { analyzeTypeScriptCode } from "./language-services/typescript";
 import { analyzePythonCode } from "./language-services/python";
 import { LocationMapEntry } from "../ir/ir";
 
 /**
  * Orchestrates the analysis of a code string.
- * It creates an in-memory ts-morph project to parse the code.
  */
-export function analyzeCode(
+export async function analyzeCode(
   code: string,
   position: number,
   language: string
-): {
+): Promise<{
   flowchart: string;
   locationMap: LocationMapEntry[];
   functionRange?: { start: number; end: number };
-} {
+}> {
   // Language selection logic
-  if (language === 'typescript' || language === 'javascript') {
-    return analyzeTypeScriptCode(code, position);
-  }
   
   if (language === 'python') {
-    return analyzePythonCode(code, position);
+    return await analyzePythonCode(code, position);
   }
   
   // Default or unsupported language

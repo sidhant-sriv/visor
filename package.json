@@ -48,9 +48,10 @@
   },
   "scripts": {
     "vscode:prepublish": "yarn run package",
-    "compile": "webpack",
+    "clean": "rm -rf dist",
+    "compile": "yarn run clean && webpack",
     "watch": "webpack --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
+    "package": "yarn run clean && webpack --mode production --devtool hidden-source-map",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
@@ -58,9 +59,7 @@
     "test": "vscode-test"
   },
   "dependencies": {
-    "tree-sitter": "^0.25.0",
-    "tree-sitter-python": "^0.23.6",
-    "ts-morph": "^26.0.0"
+    "web-tree-sitter": "^0.22.2"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -70,8 +69,8 @@
     "@typescript-eslint/parser": "^8.31.1",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
+    "copy-webpack-plugin": "^12.0.2",
     "eslint": "^9.25.1",
-    "node-loader": "^2.1.0",
     "ts-loader": "^9.5.2",
     "typescript": "^5.8.3",
     "webpack": "^5.99.7",

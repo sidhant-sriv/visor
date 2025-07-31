@@ -146,15 +146,15 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
     this.updateView(vscode.window.activeTextEditor);
 
     vscode.window.onDidChangeActiveTextEditor(
-      (editor) => {
-        this.updateView(editor);
+      async (editor) => {
+        await this.updateView(editor);
       },
       null,
       this._disposables
     );
 
     vscode.window.onDidChangeTextEditorSelection(
-      (event) => {
+      async (event) => {
         if (event.textEditor === vscode.window.activeTextEditor && this._view) {
           const selection = event.selections[0];
           if (
@@ -170,7 +170,7 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
               payload: { nodeId: entry ? entry.nodeId : null },
             });
           } else {
-            this.updateView(event.textEditor);
+            await this.updateView(event.textEditor);
           }
         }
       },
@@ -200,7 +200,7 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
-  private updateView(editor: vscode.TextEditor | undefined) {
+  private async updateView(editor: vscode.TextEditor | undefined) {
     if (!this._view) {
       return;
     }
@@ -217,36 +217,41 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
     const position = editor.document.offsetAt(editor.selection.active);
     const document = editor.document;
 
-    console.time("analyzeCode");
-    const { flowchart, locationMap, functionRange } = analyzeCode(
-      document.getText(),
-      position,
-      document.languageId
-    );
-    console.timeEnd("analyzeCode");
+    try {
+        console.time("analyzeCode");
+        const { flowchart, locationMap, functionRange } = await analyzeCode(
+          document.getText(),
+          position,
+          document.languageId
+        );
+        console.timeEnd("analyzeCode");
 
-    this._locationMap = locationMap;
-    if (functionRange) {
-      this._currentFunctionRange = new vscode.Range(
-        document.positionAt(functionRange.start),
-        document.positionAt(functionRange.end)
-      );
-    } else {
-      this._currentFunctionRange = undefined;
-    }
+        this._locationMap = locationMap;
+        if (functionRange) {
+          this._currentFunctionRange = new vscode.Range(
+            document.positionAt(functionRange.start),
+            document.positionAt(functionRange.end)
+          );
+        } else {
+          this._currentFunctionRange = undefined;
+        }
 
-    this._view.webview.html = getWebviewContent(flowchart, this.getNonce());
+        this._view.webview.html = getWebviewContent(flowchart, this.getNonce());
 
-    // After updating the view, immediately highlight the node for the current cursor
-    const offset = editor.document.offsetAt(editor.selection.active);
-    const entry = this._locationMap.find(
-      (e) => offset >= e.start && offset <= e.end
-    );
-    if (this._view) {
-      this._view.webview.postMessage({
-        command: "highlightNode",
-        payload: { nodeId: entry ? entry.nodeId : null },
-      });
+        // After updating the view, immediately highlight the node for the current cursor
+        const offset = editor.document.offsetAt(editor.selection.active);
+        const entry = this._locationMap.find(
+          (e) => offset >= e.start && offset <= e.end
+        );
+        if (this._view) {
+          this._view.webview.postMessage({
+            command: "highlightNode",
+            payload: { nodeId: entry ? entry.nodeId : null },
+          });
+        }
+    } catch (error) {
+        console.error("Failed to update view:", error);
+        this._view.webview.html = this.getLoadingHtml("Error generating flowchart. See console for details.");
     }
   }
 
