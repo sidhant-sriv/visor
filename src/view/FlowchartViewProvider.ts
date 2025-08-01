@@ -7,7 +7,7 @@ const SVG_PAN_ZOOM_VERSION = "3.6.1";
 
 /**
  * Generates the complete HTML content for the webview panel.
- * This includes the Mermaid.js library and the generated flowchart syntax.
+ * This includes the Mermaid.js library, export controls, and the generated flowchart syntax.
  */
 function getWebviewContent(flowchartSyntax: string, nonce: string): string {
   const theme =
@@ -57,14 +57,43 @@ function getWebviewContent(flowchartSyntax: string, nonce: string): string {
                 stroke: var(--vscode-editor-selectionBackground) !important;
                 stroke-width: 4px !important;
             }
+            #export-controls {
+                position: absolute;
+                top: 10px;
+                right: 10px;
+                z-index: 1000;
+                display: flex;
+                gap: 10px;
+            }
+            #export-controls button {
+                background-color: var(--vscode-button-background);
+                color: var(--vscode-button-foreground);
+                border: 1px solid var(--vscode-button-border, transparent);
+                padding: 5px 10px;
+                cursor: pointer;
+                border-radius: 4px;
+            }
+            #export-controls button:hover {
+                background-color: var(--vscode-button-hoverBackground);
+            }
+            /* Hidden element to store original mermaid source */
+            #mermaid-source {
+                display: none;
+            }
         </style>
     </head>
     <body>
+        <div id="export-controls">
+            <button id="export-svg">Export as SVG</button>
+            <button id="export-png">Export as PNG</button>
+        </div>
         <div id="container">
             <div class="mermaid">
 ${flowchartSyntax}
             </div>
         </div>
+        <!-- Store the original mermaid source for export -->
+        <div id="mermaid-source">${flowchartSyntax.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
         <script nonce="${nonce}">
             const vscode = acquireVsCodeApi();
 
@@ -93,6 +122,9 @@ ${flowchartSyntax}
                         }
                         highlightedNodeId = newId;
                         break;
+                    case 'exportError':
+                        // VSC will show the error message
+                        break;
                 }
             });
 
@@ -107,8 +139,7 @@ ${flowchartSyntax}
                 }
             });
 
-            // Add a slight delay to ensure Mermaid has rendered the SVG before we try to attach pan/zoom
-            setTimeout(() => {
+            window.addEventListener('load', () => {
                 const svgElement = document.querySelector('.mermaid svg');
                 if (svgElement) {
                     svgPanZoom(svgElement, {
@@ -118,7 +149,305 @@ ${flowchartSyntax}
                         center: true,
                     });
                 }
-            }, 100);
+            });
+
+            function cleanSvgForExport(svgElement) {
+                const svgClone = svgElement.cloneNode(true);
+                
+                // Remove pan-zoom controls
+                const controls = svgClone.querySelector('.svg-pan-zoom-controls');
+                if (controls) {
+                    controls.remove();
+                }
+                svgClone.removeAttribute('data-svg-pan-zoom');
+                
+                // Reset pan-zoom transform and restore original dimensions
+                const viewport = svgClone.querySelector('.svg-pan-zoom_viewport');
+                if (viewport) {
+                    viewport.removeAttribute('transform');
+                }
+                
+                // Remove any width/height constraints that might be set by pan-zoom
+                svgClone.removeAttribute('width');
+                svgClone.removeAttribute('height');
+                svgClone.removeAttribute('viewBox');
+                svgClone.removeAttribute('style');
+                
+                // Create a temporary container with no styling constraints
+                const tempDiv = document.createElement('div');
+                tempDiv.style.position = 'absolute';
+                tempDiv.style.visibility = 'hidden';
+                tempDiv.style.top = '-9999px';
+                tempDiv.style.width = 'auto';
+                tempDiv.style.height = 'auto';
+                tempDiv.style.overflow = 'visible';
+                document.body.appendChild(tempDiv);
+                tempDiv.appendChild(svgClone);
+                
+                // Force a reflow to ensure the SVG is rendered without constraints
+                svgClone.style.width = 'auto';
+                svgClone.style.height = 'auto';
+                svgClone.style.maxWidth = 'none';
+                svgClone.style.maxHeight = 'none';
+                
+                // Get the bounding box of all content
+                let bbox;
+                try {
+                    bbox = svgClone.getBBox();
+                } catch (e) {
+                    // Fallback: try to get dimensions from the root g element
+                    const rootG = svgClone.querySelector('g');
+                    if (rootG) {
+                        bbox = rootG.getBBox();
+                    } else {
+                        // Ultimate fallback
+                        bbox = { x: 0, y: 0, width: 800, height: 600 };
+                    }
+                }
+                
+                document.body.removeChild(tempDiv);
+                
+                const padding = 20;
+                const totalWidth = bbox.width + (padding * 2);
+                const totalHeight = bbox.height + (padding * 2);
+                const viewBoxX = bbox.x - padding;
+                const viewBoxY = bbox.y - padding;
+                
+                // Set proper dimensions and viewBox to capture the entire flowchart
+                svgClone.setAttribute('width', totalWidth.toString());
+                svgClone.setAttribute('height', totalHeight.toString());
+                svgClone.setAttribute('viewBox', \`\${viewBoxX} \${viewBoxY} \${totalWidth} \${totalHeight}\`);
+                
+                // Add a background rect
+                const backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', viewBoxX.toString());
+                rect.setAttribute('y', viewBoxY.toString());
+                rect.setAttribute('width', totalWidth.toString());
+                rect.setAttribute('height', totalHeight.toString());
+                rect.setAttribute('fill', backgroundColor);
+                svgClone.insertBefore(rect, svgClone.firstChild);
+                
+                return {
+                    svgElement: svgClone,
+                    width: totalWidth,
+                    height: totalHeight
+                };
+            }
+
+            // Helper function for fallback SVG export
+            function fallbackSvgExport(svgElement) {
+                try {
+                    const { svgElement: svgClone } = cleanSvgForExport(svgElement);
+                    const svgData = new XMLSerializer().serializeToString(svgClone);
+                    vscode.postMessage({
+                        command: 'export',
+                        payload: { fileType: 'svg', data: svgData }
+                    });
+                } catch (fallbackError) {
+                    vscode.postMessage({
+                        command: 'exportError',
+                        payload: { error: 'SVG export failed: ' + fallbackError.message }
+                    });
+                }
+            }
+
+            function exportFlowchart(fileType) {
+                const svgElement = document.querySelector('.mermaid svg');
+                if (!svgElement) {
+                    vscode.postMessage({
+                        command: 'exportError',
+                        payload: { error: "Mermaid SVG element not found." }
+                    });
+                    return;
+                }
+
+                try {
+                    if (fileType === 'svg') {
+                        // Get the original mermaid source from the hidden element
+                        const mermaidSourceElement = document.getElementById('mermaid-source');
+                        if (!mermaidSourceElement) {
+                            console.warn('Mermaid source element not found, falling back to text extraction');
+                            fallbackSvgExport(svgElement);
+                            return;
+                        }
+                        
+                        let mermaidSource = mermaidSourceElement.innerHTML
+                            .replace(/&lt;/g, '<')
+                            .replace(/&gt;/g, '>')
+                            .replace(/&amp;/g, '&');
+                        
+                        // Clean up the mermaid source - remove extra whitespace and ensure proper format
+                        mermaidSource = mermaidSource.trim();
+                        
+                        // Validate that we have valid mermaid syntax
+                        if (!mermaidSource || mermaidSource.length === 0) {
+                            console.warn('Empty mermaid source, falling back to existing SVG');
+                            fallbackSvgExport(svgElement);
+                            return;
+                        }
+                        
+                        // Create a unique ID for this export
+                        const exportId = 'export-svg-' + Date.now();
+                        
+                        // Create a temporary container for clean rendering
+                        const tempContainer = document.createElement('div');
+                        tempContainer.style.position = 'absolute';
+                        tempContainer.style.visibility = 'hidden';
+                        tempContainer.style.top = '-9999px';
+                        tempContainer.style.left = '-9999px';
+                        tempContainer.style.width = 'auto';
+                        tempContainer.style.height = 'auto';
+                        tempContainer.style.overflow = 'visible';
+                        tempContainer.className = 'mermaid-export-temp';
+                        document.body.appendChild(tempContainer);
+                        
+                        // Use mermaid.render with proper error handling
+                        mermaid.render(exportId, mermaidSource)
+                            .then((result) => {
+                                // Clean up temp container
+                                if (document.body.contains(tempContainer)) {
+                                    document.body.removeChild(tempContainer);
+                                }
+                                
+                                try {
+                                    // Parse the SVG and add background
+                                    const parser = new DOMParser();
+                                    const svgDoc = parser.parseFromString(result.svg, 'image/svg+xml');
+                                    const cleanSvg = svgDoc.documentElement;
+                                    
+                                    if (!cleanSvg || cleanSvg.tagName !== 'svg') {
+                                        throw new Error('Invalid SVG generated by Mermaid render');
+                                    }
+                                    
+                                    // Get the viewBox or calculate dimensions
+                                    const viewBox = cleanSvg.getAttribute('viewBox');
+                                    let bbox;
+                                    
+                                    if (viewBox) {
+                                        const parts = viewBox.split(' ').map(Number);
+                                        bbox = {
+                                            x: parts[0] || 0,
+                                            y: parts[1] || 0,
+                                            width: parts[2] || 800,
+                                            height: parts[3] || 600
+                                        };
+                                    } else {
+                                        // Try to get bounding box
+                                        try {
+                                            bbox = cleanSvg.getBBox();
+                                        } catch (e) {
+                                            // Fallback dimensions
+                                            bbox = { x: 0, y: 0, width: 800, height: 600 };
+                                        }
+                                    }
+                                    
+                                    // Add padding
+                                    const padding = 20;
+                                    const finalX = bbox.x - padding;
+                                    const finalY = bbox.y - padding;
+                                    const finalWidth = bbox.width + (padding * 2);
+                                    const finalHeight = bbox.height + (padding * 2);
+                                    
+                                    // Set proper dimensions
+                                    cleanSvg.setAttribute('width', finalWidth.toString());
+                                    cleanSvg.setAttribute('height', finalHeight.toString());
+                                    cleanSvg.setAttribute('viewBox', \`\${finalX} \${finalY} \${finalWidth} \${finalHeight}\`);
+                                    
+                                    // Add background rectangle
+                                    const backgroundColor = getComputedStyle(document.documentElement)
+                                        .getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
+                                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                                    rect.setAttribute('x', finalX.toString());
+                                    rect.setAttribute('y', finalY.toString());
+                                    rect.setAttribute('width', finalWidth.toString());
+                                    rect.setAttribute('height', finalHeight.toString());
+                                    rect.setAttribute('fill', backgroundColor);
+                                    cleanSvg.insertBefore(rect, cleanSvg.firstChild);
+                                    
+                                    // Serialize and send
+                                    const svgData = new XMLSerializer().serializeToString(cleanSvg);
+                                    vscode.postMessage({
+                                        command: 'export',
+                                        payload: { fileType: 'svg', data: svgData }
+                                    });
+                                    
+                                } catch (parseError) {
+                                    console.error('SVG parsing error:', parseError);
+                                    // Fallback to the cleaned pan-zoom method
+                                    fallbackSvgExport(svgElement);
+                                }
+                            })
+                            .catch((renderError) => {
+                                console.error('Mermaid render error:', renderError);
+                                // Clean up temp container
+                                if (document.body.contains(tempContainer)) {
+                                    document.body.removeChild(tempContainer);
+                                }
+                                // Fallback to the cleaned pan-zoom method
+                                fallbackSvgExport(svgElement);
+                            });
+                        
+                        return; // Early return for SVG
+                    }
+                    
+                    // PNG export (unchanged)
+                    const { svgElement: svgClone, width, height } = cleanSvgForExport(svgElement);
+                    const svgData = new XMLSerializer().serializeToString(svgClone);
+
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    if (!ctx) {
+                        throw new Error("Could not get canvas 2D context.");
+                    }
+                    
+                    const scale = 2; // For higher DPI
+                    canvas.width = width * scale;
+                    canvas.height = height * scale;
+                    ctx.scale(scale, scale);
+                    
+                    const img = new Image();
+                    img.onload = function() {
+                        try {
+                            ctx.drawImage(img, 0, 0, width, height);
+                            const pngData = canvas.toDataURL('image/png');
+                            const base64Data = pngData.split(',')[1];
+                            
+                            vscode.postMessage({
+                                command: 'export',
+                                payload: { 
+                                    fileType: 'png', 
+                                    data: base64Data
+                                }
+                            });
+                        } catch (e) {
+                            vscode.postMessage({
+                                command: 'exportError',
+                                payload: { error: 'Canvas error: ' + e.message }
+                            });
+                        }
+                    };
+                    
+                    img.onerror = function() {
+                        vscode.postMessage({
+                            command: 'exportError',
+                            payload: { error: "SVG to PNG conversion failed (image load error)." }
+                        });
+                    };
+                    
+                    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
+                    
+                } catch (error) {
+                    vscode.postMessage({
+                        command: 'exportError',
+                        payload: { error: 'Export failed: ' + error.message }
+                    });
+                }
+            }
+
+            document.getElementById('export-svg').addEventListener('click', () => exportFlowchart('svg'));
+            document.getElementById('export-png').addEventListener('click', () => exportFlowchart('png'));
         </script>
     </body>
     </html>`;
@@ -184,9 +513,9 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
       this._disposables
     );
 
-    // Handle messages from the webview (e.g., when a node is clicked)
+    // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(
-      (message) => {
+      async (message) => {
         switch (message.command) {
           case "highlightCode":
             const { start, end } = message.payload;
@@ -199,6 +528,49 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
               editor.selection = new vscode.Selection(range.start, range.end);
               editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
             }
+            break;
+          
+          case "export":
+            const activeEditor = vscode.window.activeTextEditor;
+            if (!activeEditor) {
+              vscode.window.showErrorMessage("Cannot export: No active text editor found.");
+              return;
+            }
+
+            const { fileType, data } = message.payload;
+            const documentUri = activeEditor.document.uri;
+
+            const path = require("path");
+            const defaultDirectory = vscode.Uri.file(path.dirname(documentUri.fsPath));
+            const defaultFileUri = vscode.Uri.file(path.join(defaultDirectory.fsPath, `flowchart.${fileType}`));
+
+            const filters: { [name: string]: string[] } =
+              fileType === "svg"
+                ? { "SVG Images": ["svg"] }
+                : { "PNG Images": ["png"] };
+
+            const uri = await vscode.window.showSaveDialog({
+              filters,
+              defaultUri: defaultFileUri,
+            });
+
+            if (uri) {
+              const buffer = Buffer.from(
+                data,
+                fileType === "png" ? "base64" : "utf-8"
+              );
+              try {
+                await vscode.workspace.fs.writeFile(uri, buffer);
+                vscode.window.showInformationMessage(`Successfully exported flowchart to ${uri.fsPath}`);
+              } catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(`Failed to export flowchart: ${message}`);
+              }
+            }
+            break;
+
+          case "exportError":
+            vscode.window.showErrorMessage(`Export failed: ${message.payload.error}`);
             break;
         }
       },
