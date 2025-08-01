@@ -1,4 +1,4 @@
-import Parser from "tree-sitter";
+import Parser from "web-tree-sitter"; // Changed from "tree-sitter"
 import {
   FlowchartIR,
   FlowchartNode,
@@ -12,13 +12,17 @@ export abstract class AbstractParser {
   protected nodeIdCounter = 0;
   protected locationMap: LocationMapEntry[] = [];
   protected debug = false;
-
-  // Cache parser instances to avoid recreation overhead
-  protected static parserCache = new Map<string, Parser>();
+  
+  // The parser instance is now required by the constructor
+  protected parser: Parser;
 
   // Object pool for ProcessResult to reduce GC pressure
   private static processResultPool: ProcessResult[] = [];
   private static readonly MAX_POOL_SIZE = 50;
+  
+  protected constructor(parser: Parser) {
+      this.parser = parser;
+  }
 
   protected readonly nodeStyles = {
     terminator: "fill:#e8f5e8,stroke:#2e7d32,stroke-width:1.5px,color:#000",
@@ -39,22 +43,6 @@ export abstract class AbstractParser {
 
   protected escapeString(str: string): string {
     return StringProcessor.escapeString(str);
-  }
-
-  // Abstract method to get language-specific parser
-  protected abstract getParser(): Parser;
-
-  // Helper method to get cached parser instance
-  protected getCachedParser(
-    languageKey: string,
-    setupFn: () => Parser
-  ): Parser {
-    let parser = AbstractParser.parserCache.get(languageKey);
-    if (!parser) {
-      parser = setupFn();
-      AbstractParser.parserCache.set(languageKey, parser);
-    }
-    return parser;
   }
 
   // Object pooling for ProcessResult
@@ -91,26 +79,17 @@ export abstract class AbstractParser {
 
     return result;
   }
-
+  
   // Return ProcessResult to pool for reuse
   protected recycleProcessResult(result: ProcessResult): void {
-    if (
-      AbstractParser.processResultPool.length < AbstractParser.MAX_POOL_SIZE
-    ) {
+    if (AbstractParser.processResultPool.length < AbstractParser.MAX_POOL_SIZE) {
       AbstractParser.processResultPool.push(result);
     }
   }
 
   abstract listFunctions(sourceCode: string): string[];
-  abstract findFunctionAtPosition(
-    sourceCode: string,
-    position: number
-  ): string | undefined;
-  abstract generateFlowchart(
-    sourceCode: string,
-    functionName?: string,
-    position?: number
-  ): FlowchartIR;
+  abstract findFunctionAtPosition(sourceCode: string, position: number): string | undefined;
+  abstract generateFlowchart(sourceCode: string, functionName?: string, position?: number): FlowchartIR;
 
   protected processBlock(
     blockNode: Parser.SyntaxNode | null,
@@ -138,12 +117,8 @@ export abstract class AbstractParser {
       return this.createProcessResult();
     }
 
-    // Pre-allocate arrays with estimated size to reduce reallocations
     const nodes: FlowchartNode[] = [];
     const edges: FlowchartEdge[] = [];
-    nodes.length = 0; // Ensure length is 0 but capacity is reserved
-    edges.length = 0;
-
     const nodesConnectedToExit = new Set<string>();
     let entryNodeId: string | undefined;
     let lastExitPoints: { id: string; label?: string }[] = [];
@@ -158,13 +133,8 @@ export abstract class AbstractParser {
         finallyContext
       );
 
-      for (const node of result.nodes) {
-        nodes.push(node);
-      }
-      for (const edge of result.edges) {
-        edges.push(edge);
-      }
-
+      nodes.push(...result.nodes);
+      edges.push(...result.edges);
       result.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
 
       if (!entryNodeId) entryNodeId = result.entryNodeId;
@@ -236,7 +206,6 @@ export abstract class AbstractParser {
 
   // Cleanup method to be called when parser is no longer needed
   static cleanup(): void {
-    AbstractParser.parserCache.clear();
     AbstractParser.processResultPool.length = 0;
     StringProcessor.clearCache();
   }
