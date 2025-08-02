@@ -26,9 +26,9 @@ function getWebviewContent(flowchartSyntax: string, nonce: string): string {
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js"></script>
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@${SVG_PAN_ZOOM_VERSION}/dist/svg-pan-zoom.min.js"></script>
         <style>
-            body, html { 
-                background-color: var(--vscode-editor-background); 
-                color: var(--vscode-editor-foreground); 
+            body, html {
+                background-color: var(--vscode-editor-background);
+                color: var(--vscode-editor-foreground);
                 font-family: var(--vscode-font-family);
                 margin: 0;
                 padding: 0;
@@ -131,8 +131,8 @@ ${flowchartSyntax}
                 }
             });
 
-            mermaid.initialize({ 
-                startOnLoad: true, 
+            mermaid.initialize({
+                startOnLoad: true,
                 theme: '${theme}',
                 securityLevel: 'loose',
                 flowchart: {
@@ -156,26 +156,26 @@ ${flowchartSyntax}
 
             function cleanSvgForExport(svgElement) {
                 const svgClone = svgElement.cloneNode(true);
-                
+
                 // Remove pan-zoom controls
                 const controls = svgClone.querySelector('.svg-pan-zoom-controls');
                 if (controls) {
                     controls.remove();
                 }
                 svgClone.removeAttribute('data-svg-pan-zoom');
-                
+
                 // Reset pan-zoom transform and restore original dimensions
                 const viewport = svgClone.querySelector('.svg-pan-zoom_viewport');
                 if (viewport) {
                     viewport.removeAttribute('transform');
                 }
-                
+
                 // Remove any width/height constraints that might be set by pan-zoom
                 svgClone.removeAttribute('width');
                 svgClone.removeAttribute('height');
                 svgClone.removeAttribute('viewBox');
                 svgClone.removeAttribute('style');
-                
+
                 // Create a temporary container with no styling constraints
                 const tempDiv = document.createElement('div');
                 tempDiv.style.position = 'absolute';
@@ -186,13 +186,13 @@ ${flowchartSyntax}
                 tempDiv.style.overflow = 'visible';
                 document.body.appendChild(tempDiv);
                 tempDiv.appendChild(svgClone);
-                
+
                 // Force a reflow to ensure the SVG is rendered without constraints
                 svgClone.style.width = 'auto';
                 svgClone.style.height = 'auto';
                 svgClone.style.maxWidth = 'none';
                 svgClone.style.maxHeight = 'none';
-                
+
                 // Get the bounding box of all content
                 let bbox;
                 try {
@@ -207,20 +207,20 @@ ${flowchartSyntax}
                         bbox = { x: 0, y: 0, width: 800, height: 600 };
                     }
                 }
-                
+
                 document.body.removeChild(tempDiv);
-                
+
                 const padding = 20;
                 const totalWidth = bbox.width + (padding * 2);
                 const totalHeight = bbox.height + (padding * 2);
                 const viewBoxX = bbox.x - padding;
                 const viewBoxY = bbox.y - padding;
-                
+
                 // Set proper dimensions and viewBox to capture the entire flowchart
                 svgClone.setAttribute('width', totalWidth.toString());
                 svgClone.setAttribute('height', totalHeight.toString());
                 svgClone.setAttribute('viewBox', \`\${viewBoxX} \${viewBoxY} \${totalWidth} \${totalHeight}\`);
-                
+
                 // Add a background rect
                 const backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
                 const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -230,7 +230,7 @@ ${flowchartSyntax}
                 rect.setAttribute('height', totalHeight.toString());
                 rect.setAttribute('fill', backgroundColor);
                 svgClone.insertBefore(rect, svgClone.firstChild);
-                
+
                 return {
                     svgElement: svgClone,
                     width: totalWidth,
@@ -274,25 +274,25 @@ ${flowchartSyntax}
                             fallbackSvgExport(svgElement);
                             return;
                         }
-                        
+
                         let mermaidSource = mermaidSourceElement.innerHTML
                             .replace(/&lt;/g, '<')
                             .replace(/&gt;/g, '>')
                             .replace(/&amp;/g, '&');
-                        
+
                         // Clean up the mermaid source - remove extra whitespace and ensure proper format
                         mermaidSource = mermaidSource.trim();
-                        
+
                         // Validate that we have valid mermaid syntax
                         if (!mermaidSource || mermaidSource.length === 0) {
                             console.warn('Empty mermaid source, falling back to existing SVG');
                             fallbackSvgExport(svgElement);
                             return;
                         }
-                        
+
                         // Create a unique ID for this export
                         const exportId = 'export-svg-' + Date.now();
-                        
+
                         // Create a temporary container for clean rendering
                         const tempContainer = document.createElement('div');
                         tempContainer.style.position = 'absolute';
@@ -304,7 +304,7 @@ ${flowchartSyntax}
                         tempContainer.style.overflow = 'visible';
                         tempContainer.className = 'mermaid-export-temp';
                         document.body.appendChild(tempContainer);
-                        
+
                         // Use mermaid.render with proper error handling
                         mermaid.render(exportId, mermaidSource)
                             .then((result) => {
@@ -312,21 +312,21 @@ ${flowchartSyntax}
                                 if (document.body.contains(tempContainer)) {
                                     document.body.removeChild(tempContainer);
                                 }
-                                
+
                                 try {
                                     // Parse the SVG and add background
                                     const parser = new DOMParser();
                                     const svgDoc = parser.parseFromString(result.svg, 'image/svg+xml');
                                     const cleanSvg = svgDoc.documentElement;
-                                    
+
                                     if (!cleanSvg || cleanSvg.tagName !== 'svg') {
                                         throw new Error('Invalid SVG generated by Mermaid render');
                                     }
-                                    
+
                                     // Get the viewBox or calculate dimensions
                                     const viewBox = cleanSvg.getAttribute('viewBox');
                                     let bbox;
-                                    
+
                                     if (viewBox) {
                                         const parts = viewBox.split(' ').map(Number);
                                         bbox = {
@@ -344,19 +344,19 @@ ${flowchartSyntax}
                                             bbox = { x: 0, y: 0, width: 800, height: 600 };
                                         }
                                     }
-                                    
+
                                     // Add padding
                                     const padding = 20;
                                     const finalX = bbox.x - padding;
                                     const finalY = bbox.y - padding;
                                     const finalWidth = bbox.width + (padding * 2);
                                     const finalHeight = bbox.height + (padding * 2);
-                                    
+
                                     // Set proper dimensions
                                     cleanSvg.setAttribute('width', finalWidth.toString());
                                     cleanSvg.setAttribute('height', finalHeight.toString());
                                     cleanSvg.setAttribute('viewBox', \`\${finalX} \${finalY} \${finalWidth} \${finalHeight}\`);
-                                    
+
                                     // Add background rectangle
                                     const backgroundColor = getComputedStyle(document.documentElement)
                                         .getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
@@ -367,14 +367,14 @@ ${flowchartSyntax}
                                     rect.setAttribute('height', finalHeight.toString());
                                     rect.setAttribute('fill', backgroundColor);
                                     cleanSvg.insertBefore(rect, cleanSvg.firstChild);
-                                    
+
                                     // Serialize and send
                                     const svgData = new XMLSerializer().serializeToString(cleanSvg);
                                     vscode.postMessage({
                                         command: 'export',
                                         payload: { fileType: 'svg', data: svgData }
                                     });
-                                    
+
                                 } catch (parseError) {
                                     console.error('SVG parsing error:', parseError);
                                     // Fallback to the cleaned pan-zoom method
@@ -390,37 +390,37 @@ ${flowchartSyntax}
                                 // Fallback to the cleaned pan-zoom method
                                 fallbackSvgExport(svgElement);
                             });
-                        
+
                         return; // Early return for SVG
                     }
-                    
+
                     // PNG export (unchanged)
                     const { svgElement: svgClone, width, height } = cleanSvgForExport(svgElement);
                     const svgData = new XMLSerializer().serializeToString(svgClone);
 
                     const canvas = document.createElement('canvas');
                     const ctx = canvas.getContext('2d');
-                    
+
                     if (!ctx) {
                         throw new Error("Could not get canvas 2D context.");
                     }
-                    
+
                     const scale = 2; // For higher DPI
                     canvas.width = width * scale;
                     canvas.height = height * scale;
                     ctx.scale(scale, scale);
-                    
+
                     const img = new Image();
                     img.onload = function() {
                         try {
                             ctx.drawImage(img, 0, 0, width, height);
                             const pngData = canvas.toDataURL('image/png');
                             const base64Data = pngData.split(',')[1];
-                            
+
                             vscode.postMessage({
                                 command: 'export',
-                                payload: { 
-                                    fileType: 'png', 
+                                payload: {
+                                    fileType: 'png',
                                     data: base64Data
                                 }
                             });
@@ -431,16 +431,16 @@ ${flowchartSyntax}
                             });
                         }
                     };
-                    
+
                     img.onerror = function() {
                         vscode.postMessage({
                             command: 'exportError',
                             payload: { error: "SVG to PNG conversion failed (image load error)." }
                         });
                     };
-                    
+
                     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
-                    
+
                 } catch (error) {
                     vscode.postMessage({
                         command: 'exportError',
@@ -462,6 +462,7 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
   private _disposables: vscode.Disposable[] = [];
   private _locationMap: LocationMapEntry[] = [];
   private _currentFunctionRange: vscode.Range | undefined;
+  private _debounceTimer?: NodeJS.Timeout; // For live updates
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
@@ -515,6 +516,26 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
       null,
       this._disposables
     );
+
+    // *** ADDED FOR LIVE UPDATES ***
+    // Listen for changes to the document text
+    vscode.workspace.onDidChangeTextDocument(
+      (event) => {
+        if (event.document === vscode.window.activeTextEditor?.document) {
+          // Clear the previous timer if it exists
+          if (this._debounceTimer) {
+            clearTimeout(this._debounceTimer);
+          }
+          // Set a new timer to update the view after a short delay (e.g., 500ms)
+          this._debounceTimer = setTimeout(() => {
+            this.updateView(vscode.window.activeTextEditor);
+          }, 500);
+        }
+      },
+      null,
+      this._disposables
+    );
+
 
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(
@@ -667,9 +688,9 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-                body, html { 
-                    background-color: var(--vscode-editor-background); 
-                    color: var(--vscode-editor-foreground); 
+                body, html {
+                    background-color: var(--vscode-editor-background);
+                    color: var(--vscode-editor-foreground);
                     font-family: var(--vscode-font-family);
                     display: flex;
                     justify-content: center;
@@ -704,6 +725,10 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
    * Cleans up disposables when the view is closed.
    */
   public dispose() {
+    // Clear the timer when the provider is disposed
+    if (this._debounceTimer) {
+        clearTimeout(this._debounceTimer);
+    }
     while (this._disposables.length) {
       const x = this._disposables.pop();
       if (x) {
