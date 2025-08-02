@@ -67,6 +67,7 @@
     "test": "vscode-test"
   },
   "dependencies": {
+    "@vscode/tree-sitter-wasm": "^0.1.4",
     "web-tree-sitter": "^0.22.2"
   },
   "devDependencies": {
