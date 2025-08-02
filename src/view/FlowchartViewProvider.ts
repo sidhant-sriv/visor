@@ -1,10 +1,30 @@
 import * as vscode from "vscode";
+import * as path from "path";
 import { analyzeCode } from "../logic/analyzer";
 import { LocationMapEntry } from "../ir/ir";
 import { MermaidGenerator } from "../logic/MermaidGenerator";
 
 const MERMAID_VERSION = "11.8.0";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
+
+// Define specific types for messages from the webview to avoid `any`
+type HighlightCodeMessage = {
+  command: 'highlightCode';
+  payload: { start: number; end: number };
+};
+
+type ExportMessage = {
+  command: 'export';
+  payload: { fileType: 'svg' | 'png'; data: string };
+};
+
+type ExportErrorMessage = {
+  command: 'exportError';
+  payload: { error: string };
+};
+
+type WebviewMessage = HighlightCodeMessage | ExportMessage | ExportErrorMessage;
+
 
 /**
  * Generates the complete HTML content for the webview panel.
@@ -248,9 +268,10 @@ ${flowchartSyntax}
                         payload: { fileType: 'svg', data: svgData }
                     });
                 } catch (fallbackError) {
+                    const errorMessage = fallbackError instanceof Error ? fallbackError.message : 'Unknown fallback error';
                     vscode.postMessage({
                         command: 'exportError',
-                        payload: { error: 'SVG export failed: ' + fallbackError.message }
+                        payload: { error: 'SVG export failed: ' + errorMessage }
                     });
                 }
             }
@@ -425,9 +446,10 @@ ${flowchartSyntax}
                                 }
                             });
                         } catch (e) {
+                             const errorMessage = e instanceof Error ? e.message : 'Unknown canvas error';
                             vscode.postMessage({
                                 command: 'exportError',
-                                payload: { error: 'Canvas error: ' + e.message }
+                                payload: { error: 'Canvas error: ' + errorMessage }
                             });
                         }
                     };
@@ -442,9 +464,10 @@ ${flowchartSyntax}
                     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
 
                 } catch (error) {
+                    const errorMessage = error instanceof Error ? error.message : 'Unknown export error';
                     vscode.postMessage({
                         command: 'exportError',
-                        payload: { error: 'Export failed: ' + error.message }
+                        payload: { error: 'Export failed: ' + errorMessage }
                     });
                 }
             }
@@ -539,9 +562,9 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
 
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(
-      async (message) => {
+      async (message: WebviewMessage) => {
         switch (message.command) {
-          case "highlightCode":
+          case "highlightCode": {
             const { start, end } = message.payload;
             const editor = vscode.window.activeTextEditor;
             if (editor) {
@@ -553,8 +576,9 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
               editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
             }
             break;
+          }
 
-          case "export":
+          case "export": {
             const activeEditor = vscode.window.activeTextEditor;
             if (!activeEditor) {
               vscode.window.showErrorMessage(
@@ -566,7 +590,6 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
             const { fileType, data } = message.payload;
             const documentUri = activeEditor.document.uri;
 
-            const path = require("path");
             const defaultDirectory = vscode.Uri.file(
               path.dirname(documentUri.fsPath)
             );
@@ -603,12 +626,14 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
               }
             }
             break;
+          }
 
-          case "exportError":
+          case "exportError": {
             vscode.window.showErrorMessage(
               `Export failed: ${message.payload.error}`
             );
             break;
+          }
         }
       },
       null,
@@ -672,9 +697,10 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
           payload: { nodeId: entry ? entry.nodeId : null },
         });
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error("Failed to update view:", error);
-      this._view.webview.html = this.getLoadingHtml(`Error: ${error.message}`);
+      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
+      this._view.webview.html = this.getLoadingHtml(`Error: ${errorMessage}`);
     }
   }
 

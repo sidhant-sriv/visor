@@ -33,7 +33,7 @@ export abstract class AbstractParser {
     hof: "fill:#e8eaf6,stroke:#3f51b5,stroke-width:1.5px,color:#000",
   };
 
-  protected log(message: string, ...args: any[]) {
+  protected log(message: string, ...args: unknown[]) {
     if (this.debug) console.log(`[ASTParser] ${message}`, ...args);
   }
 
