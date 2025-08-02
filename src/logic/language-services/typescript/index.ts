@@ -1,29 +1,28 @@
-// import { TsAstParserTreeSitter } from "./TsAstParserTreeSitter";
-// import { FlowchartIR } from "../../../ir/ir";
+import { TsAstParser } from "./TsAstParser";
+import { FlowchartIR } from "../../../ir/ir";
 
-// /**
-//  * Orchestrates the analysis of a TypeScript code string.
-//  * Now uses Tree-sitter instead of ts-morph for better performance and simpler API.
-//  */
-// export function analyzeTypeScriptCode(
-//   code: string,
-//   position: number
-// ): FlowchartIR {
-//   try {
-//     const parser = new TsAstParserTreeSitter();
-//     return parser.generateFlowchart(code, undefined, position);
-//   } catch (error: any) {
-//     console.error("Error analyzing TypeScript code:", error);
-//     return {
-//       nodes: [
-//         {
-//           id: "A",
-//           label: `Error: Unable to parse code. ${error.message || error}`,
-//           shape: "rect",
-//         },
-//       ],
-//       edges: [],
-//       locationMap: [],
-//     };
-//   }
-// }
+let parserPromise: Promise<TsAstParser> | null = null;
+
+/**
+ * Initializes the TypeScript language service.
+ * @param wasmPath The absolute path to the tree-sitter-typescript.wasm file.
+ */
+export function initTypeScriptLanguageService(wasmPath: string) {
+  parserPromise = TsAstParser.create(wasmPath);
+}
+
+/**
+ * Analyzes TypeScript code.
+ */
+export async function analyzeTypeScriptCode(
+  code: string,
+  position: number
+): Promise<FlowchartIR> {
+  if (!parserPromise) {
+    throw new Error("TypeScript language service not initialized.");
+  }
+  const parser = await parserPromise;
+  return parser.generateFlowchart(code, undefined, position);
+}
+
+export { TsAstParser };

@@ -1,4 +1,5 @@
 import { analyzePythonCode } from "./language-services/python";
+import { analyzeTypeScriptCode } from "./language-services/typescript";
 import { FlowchartIR, LocationMapEntry } from "../ir/ir";
 import { MermaidGenerator } from "./MermaidGenerator";
 
@@ -19,6 +20,8 @@ export async function analyzeCode(
   // Language selection logic
   if (language === "python") {
     ir = await analyzePythonCode(code, position);
+  } else if (language === "typescript" || language === "javascript") {
+    ir = await analyzeTypeScriptCode(code, position);
   } else {
     // Default or unsupported language
     ir = {

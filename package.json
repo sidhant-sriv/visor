@@ -3,7 +3,7 @@
   "displayName": "visor",
   "publisher": "sidhantsriv",
   "description": "Makes a flowchart on the side for your code for better visualization.",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "repository": {
     "type": "git",
     "url": "https://github.com/sidhant-sriv/sidvis.git"

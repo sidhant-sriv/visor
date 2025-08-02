@@ -1,15 +1,28 @@
-import * as vscode from 'vscode';
-import { initPythonLanguageService } from './python';
+import * as vscode from "vscode";
+import { initPythonLanguageService } from "./python";
+import { initTypeScriptLanguageService } from "./typescript";
 
 /**
  * Initializes all language services for the extension.
  */
 export async function initLanguageServices(context: vscode.ExtensionContext) {
-    // Construct the path to the python wasm file and initialize the service
-    const pythonWasmPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'tree-sitter-python.wasm').fsPath;
-    initPythonLanguageService(pythonWasmPath);
+  // Construct the path to the python wasm file and initialize the service
+  const pythonWasmPath = vscode.Uri.joinPath(
+    context.extensionUri,
+    "dist",
+    "tree-sitter-python.wasm"
+  ).fsPath;
+  initPythonLanguageService(pythonWasmPath);
 
-    // Future languages can be initialized here
-    // const javaWasmPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'tree-sitter-java.wasm').fsPath;
-    // initJavaLanguageService(javaWasmPath);
+  // Initialize TypeScript language service
+  const typescriptWasmPath = vscode.Uri.joinPath(
+    context.extensionUri,
+    "dist",
+    "tree-sitter-typescript.wasm"
+  ).fsPath;
+  initTypeScriptLanguageService(typescriptWasmPath);
+
+  // Future languages can be initialized here
+  // const javaWasmPath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'tree-sitter-java.wasm').fsPath;
+  // initJavaLanguageService(javaWasmPath);
 }
