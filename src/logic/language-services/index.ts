@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import { initPythonLanguageService } from "./python";
 import { initTypeScriptLanguageService } from "./typescript";
 import { initJavaLanguageService } from "./java";
+import { initCppLanguageService } from "./cpp";
 
 /**
  * Initializes all language services for the extension.
@@ -30,4 +31,12 @@ export async function initLanguageServices(context: vscode.ExtensionContext) {
     "tree-sitter-java.wasm"
   ).fsPath;
   initJavaLanguageService(javaWasmPath);
+
+  // Initialize C++ language service
+  const cppWasmPath = vscode.Uri.joinPath(
+    context.extensionUri,
+    "dist",
+    "tree-sitter-cpp.wasm"
+  ).fsPath;
+  initCppLanguageService(cppWasmPath);
 }

@@ -1,51 +1,36 @@
+import * as vscode from "vscode";
+import { FlowchartIR } from "../ir/ir";
 import { analyzePythonCode } from "./language-services/python";
 import { analyzeTypeScriptCode } from "./language-services/typescript";
 import { analyzeJavaCode } from "./language-services/java";
-import { FlowchartIR, LocationMapEntry } from "../ir/ir";
-import { MermaidGenerator } from "./MermaidGenerator";
+import { analyzeCppCode } from "./language-services/cpp";
 
 /**
- * Orchestrates the analysis of a code string.
+ * Analyzes the given source code and generates a flowchart.
+ * @param sourceCode - The source code to analyze.
+ * @param languageId - The language identifier (e.g., 'python', 'typescript', etc.).
+ * @param functionName - Optional function name to analyze specifically.
+ * @param position - Optional position in the source code to analyze.
+ * @returns A FlowchartIR representation of the code.
  */
 export async function analyzeCode(
-  code: string,
-  position: number,
-  language: string
-): Promise<{
-  flowchart: string;
-  locationMap: LocationMapEntry[];
-  functionRange?: { start: number; end: number };
-}> {
-  let ir: FlowchartIR;
-
-  // Language selection logic
-  if (language === "python") {
-    ir = await analyzePythonCode(code, position);
-  } else if (language === "typescript" || language === "javascript") {
-    ir = await analyzeTypeScriptCode(code, position);
-  } else if (language === "java") {
-    ir = await analyzeJavaCode(code, position);
-  } else {
-    // Default or unsupported language
-    ir = {
-      nodes: [
-        {
-          id: "A",
-          label: `Error: Unsupported language: ${language}`,
-          shape: "rect",
-        },
-      ],
-      edges: [],
-      locationMap: [],
-    };
+  sourceCode: string,
+  languageId: string,
+  functionName?: string,
+  position?: number
+): Promise<FlowchartIR> {
+  switch (languageId) {
+    case "python":
+      return await analyzePythonCode(sourceCode, position || 0);
+    case "typescript":
+    case "javascript":
+      return await analyzeTypeScriptCode(sourceCode, position || 0);
+    case "java":
+      return await analyzeJavaCode(sourceCode, position || 0);
+    case "cpp":
+    case "c":
+      return analyzeCppCode(sourceCode, functionName, position);
+    default:
+      throw new Error(`Unsupported language: ${languageId}`);
   }
-
-  const mermaidGenerator = new MermaidGenerator();
-  const flowchart = mermaidGenerator.generate(ir);
-
-  return {
-    flowchart,
-    locationMap: ir.locationMap,
-    functionRange: ir.functionRange,
-  };
 }

@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { analyzeCode } from "../logic/analyzer";
 import { LocationMapEntry } from "../ir/ir";
+import { MermaidGenerator } from "../logic/MermaidGenerator";
 
 const MERMAID_VERSION = "11.8.0";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
@@ -93,7 +94,9 @@ ${flowchartSyntax}
             </div>
         </div>
         <!-- Store the original mermaid source for export -->
-        <div id="mermaid-source">${flowchartSyntax.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
+        <div id="mermaid-source">${flowchartSyntax
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")}</div>
         <script nonce="${nonce}">
             const vscode = acquireVsCodeApi();
 
@@ -529,11 +532,13 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
               editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
             }
             break;
-          
+
           case "export":
             const activeEditor = vscode.window.activeTextEditor;
             if (!activeEditor) {
-              vscode.window.showErrorMessage("Cannot export: No active text editor found.");
+              vscode.window.showErrorMessage(
+                "Cannot export: No active text editor found."
+              );
               return;
             }
 
@@ -541,8 +546,12 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
             const documentUri = activeEditor.document.uri;
 
             const path = require("path");
-            const defaultDirectory = vscode.Uri.file(path.dirname(documentUri.fsPath));
-            const defaultFileUri = vscode.Uri.file(path.join(defaultDirectory.fsPath, `flowchart.${fileType}`));
+            const defaultDirectory = vscode.Uri.file(
+              path.dirname(documentUri.fsPath)
+            );
+            const defaultFileUri = vscode.Uri.file(
+              path.join(defaultDirectory.fsPath, `flowchart.${fileType}`)
+            );
 
             const filters: { [name: string]: string[] } =
               fileType === "svg"
@@ -561,16 +570,23 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
               );
               try {
                 await vscode.workspace.fs.writeFile(uri, buffer);
-                vscode.window.showInformationMessage(`Successfully exported flowchart to ${uri.fsPath}`);
+                vscode.window.showInformationMessage(
+                  `Successfully exported flowchart to ${uri.fsPath}`
+                );
               } catch (err) {
-                const message = err instanceof Error ? err.message : String(err);
-                vscode.window.showErrorMessage(`Failed to export flowchart: ${message}`);
+                const message =
+                  err instanceof Error ? err.message : String(err);
+                vscode.window.showErrorMessage(
+                  `Failed to export flowchart: ${message}`
+                );
               }
             }
             break;
 
           case "exportError":
-            vscode.window.showErrorMessage(`Export failed: ${message.payload.error}`);
+            vscode.window.showErrorMessage(
+              `Export failed: ${message.payload.error}`
+            );
             break;
         }
       },
@@ -588,7 +604,9 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
     }
 
     if (!editor) {
-      this._view.webview.html = this.getLoadingHtml("Please open a file to see the flowchart.");
+      this._view.webview.html = this.getLoadingHtml(
+        "Please open a file to see the flowchart."
+      );
       return;
     }
 
@@ -598,40 +616,44 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
     const document = editor.document;
 
     try {
-        console.time("analyzeCode");
-        const { flowchart, locationMap, functionRange } = await analyzeCode(
-          document.getText(),
-          position,
-          document.languageId
+      console.time("analyzeCode");
+      const flowchartIR = await analyzeCode(
+        document.getText(),
+        document.languageId,
+        undefined,
+        position
+      );
+      console.timeEnd("analyzeCode");
+
+      this._locationMap = flowchartIR.locationMap;
+      if (flowchartIR.functionRange) {
+        this._currentFunctionRange = new vscode.Range(
+          document.positionAt(flowchartIR.functionRange.start),
+          document.positionAt(flowchartIR.functionRange.end)
         );
-        console.timeEnd("analyzeCode");
+      } else {
+        this._currentFunctionRange = undefined;
+      }
 
-        this._locationMap = locationMap;
-        if (functionRange) {
-          this._currentFunctionRange = new vscode.Range(
-            document.positionAt(functionRange.start),
-            document.positionAt(functionRange.end)
-          );
-        } else {
-          this._currentFunctionRange = undefined;
-        }
+      // Generate Mermaid diagram from FlowchartIR
+      const mermaidGenerator = new MermaidGenerator();
+      const mermaidCode = mermaidGenerator.generate(flowchartIR);
+      this._view.webview.html = getWebviewContent(mermaidCode, this.getNonce());
 
-        this._view.webview.html = getWebviewContent(flowchart, this.getNonce());
-
-        // After updating the view, immediately highlight the node for the current cursor
-        const offset = editor.document.offsetAt(editor.selection.active);
-        const entry = this._locationMap.find(
-          (e) => offset >= e.start && offset <= e.end
-        );
-        if (this._view) {
-          this._view.webview.postMessage({
-            command: "highlightNode",
-            payload: { nodeId: entry ? entry.nodeId : null },
-          });
-        }
+      // After updating the view, immediately highlight the node for the current cursor
+      const offset = editor.document.offsetAt(editor.selection.active);
+      const entry = this._locationMap.find(
+        (e) => offset >= e.start && offset <= e.end
+      );
+      if (this._view) {
+        this._view.webview.postMessage({
+          command: "highlightNode",
+          payload: { nodeId: entry ? entry.nodeId : null },
+        });
+      }
     } catch (error: any) {
-        console.error("Failed to update view:", error);
-        this._view.webview.html = this.getLoadingHtml(`Error: ${error.message}`);
+      console.error("Failed to update view:", error);
+      this._view.webview.html = this.getLoadingHtml(`Error: ${error.message}`);
     }
   }
 
