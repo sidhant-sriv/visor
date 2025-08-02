@@ -1,20 +1,29 @@
 export interface Location {
-    start: number;
-    end: number;
+  start: number;
+  end: number;
+}
+
+export interface CodeSnippet {
+  text: string;
+  startIndex: number;
+  endIndex: number;
+  language: string;
+  nodeType: string;
 }
 
 export interface FlowchartNode {
-    id: string;
-    label: string;
-    location?: Location;
-    shape?: 'rect' | 'diamond' | 'round' | 'stadium';
-    style?: string;
+  id: string;
+  label: string;
+  location?: Location;
+  shape?: "rect" | "diamond" | "round" | "stadium";
+  style?: string;
+  sourceCode?: CodeSnippet;
 }
 
 export interface FlowchartEdge {
-    from: string; // nodeId
-    to: string; // nodeId
-    label?: string;
+  from: string; // nodeId
+  to: string; // nodeId
+  label?: string;
 }
 
 export interface LocationMapEntry {
@@ -24,11 +33,11 @@ export interface LocationMapEntry {
 }
 
 export interface FlowchartIR {
-    nodes: FlowchartNode[];
-    edges: FlowchartEdge[];
-    entryNodeId?: string;
-    exitNodeId?: string;
-    locationMap: LocationMapEntry[];
-    functionRange?: { start: number, end: number };
-    title?: string;
-} 
+  nodes: FlowchartNode[];
+  edges: FlowchartEdge[];
+  entryNodeId?: string;
+  exitNodeId?: string;
+  locationMap: LocationMapEntry[];
+  functionRange?: { start: number; end: number };
+  title?: string;
+}

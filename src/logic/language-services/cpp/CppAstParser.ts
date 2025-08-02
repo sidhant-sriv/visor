@@ -7,6 +7,13 @@ export class CppAstParser extends AbstractParser {
   private currentFunctionIsLambda = false;
 
   /**
+   * Get the language identifier for this parser
+   */
+  protected getLanguageIdentifier(): string {
+    return "cpp";
+  }
+
+  /**
    * Asynchronously creates and initializes an instance of CppAstParser.
    * This is the required entry point for creating a parser instance.
    * @param wasmPath The file path to the tree-sitter-cpp.wasm file.

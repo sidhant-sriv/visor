@@ -7,6 +7,13 @@ export class JavaAstParser extends AbstractParser {
   private currentMethodIsLambda = false;
 
   /**
+   * Get the language identifier for this parser
+   */
+  protected getLanguageIdentifier(): string {
+    return "java";
+  }
+
+  /**
    * Asynchronously creates and initializes an instance of JavaAstParser.
    * This is the required entry point for creating a parser instance.
    * @param wasmPath The file path to the tree-sitter-java.wasm file.

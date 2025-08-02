@@ -51,6 +51,38 @@ export class StringProcessor {
     return escaped;
   }
 
+  /**
+   * Prepare HTML content for Mermaid compatibility
+   * Handles special HTML characters and formatting for Mermaid's htmlLabels
+   */
+  static prepareHTMLContent(html: string): string {
+    if (!html) return "";
+
+    // Remove extra whitespace and newlines that could break Mermaid
+    let prepared = html.replace(/\n\s*/g, " ").replace(/\s+/g, " ").trim();
+
+    // Escape quotes that aren't part of HTML attributes
+    // This is a simplified approach - in production might need more sophisticated parsing
+    prepared = prepared.replace(/"/g, "&quot;");
+
+    return prepared;
+  }
+
+  /**
+   * Enhanced escaping for mixed HTML/text content in Mermaid
+   */
+  static escapeForMermaidHTML(content: string): string {
+    if (!content) return "";
+
+    return content
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;")
+      .replace(/\n/g, " ");
+  }
+
   static clearCache(): void {
     this.escapeCache.clear();
   }

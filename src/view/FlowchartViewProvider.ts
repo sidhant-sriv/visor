@@ -9,28 +9,31 @@ const SVG_PAN_ZOOM_VERSION = "3.6.1";
 
 // Define specific types for messages from the webview to avoid `any`
 type HighlightCodeMessage = {
-  command: 'highlightCode';
+  command: "highlightCode";
   payload: { start: number; end: number };
 };
 
 type ExportMessage = {
-  command: 'export';
-  payload: { fileType: 'svg' | 'png'; data: string };
+  command: "export";
+  payload: { fileType: "svg" | "png"; data: string };
 };
 
 type ExportErrorMessage = {
-  command: 'exportError';
+  command: "exportError";
   payload: { error: string };
 };
 
 type WebviewMessage = HighlightCodeMessage | ExportMessage | ExportErrorMessage;
 
-
 /**
  * Generates the complete HTML content for the webview panel.
  * This includes the Mermaid.js library, export controls, and the generated flowchart syntax.
  */
-function getWebviewContent(flowchartSyntax: string, nonce: string): string {
+function getWebviewContent(
+  flowchartSyntax: string,
+  nonce: string,
+  syntaxCSS: string = ""
+): string {
   const theme =
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
       ? "dark"
@@ -45,6 +48,7 @@ function getWebviewContent(flowchartSyntax: string, nonce: string): string {
         <title>Code Flowchart</title>
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js"></script>
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@${SVG_PAN_ZOOM_VERSION}/dist/svg-pan-zoom.min.js"></script>
+        ${syntaxCSS}
         <style>
             body, html {
                 background-color: var(--vscode-editor-background);
@@ -559,7 +563,6 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
       this._disposables
     );
 
-
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(
       async (message: WebviewMessage) => {
@@ -684,7 +687,12 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
       // Generate Mermaid diagram from FlowchartIR
       const mermaidGenerator = new MermaidGenerator();
       const mermaidCode = mermaidGenerator.generate(flowchartIR);
-      this._view.webview.html = getWebviewContent(mermaidCode, this.getNonce());
+      const syntaxCSS = mermaidGenerator.getSyntaxHighlightCSS();
+      this._view.webview.html = getWebviewContent(
+        mermaidCode,
+        this.getNonce(),
+        syntaxCSS
+      );
 
       // After updating the view, immediately highlight the node for the current cursor
       const offset = editor.document.offsetAt(editor.selection.active);
@@ -699,7 +707,8 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
       }
     } catch (error) {
       console.error("Failed to update view:", error);
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
+      const errorMessage =
+        error instanceof Error ? error.message : "An unknown error occurred";
       this._view.webview.html = this.getLoadingHtml(`Error: ${errorMessage}`);
     }
   }
@@ -753,7 +762,7 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
   public dispose() {
     // Clear the timer when the provider is disposed
     if (this._debounceTimer) {
-        clearTimeout(this._debounceTimer);
+      clearTimeout(this._debounceTimer);
     }
     while (this._disposables.length) {
       const x = this._disposables.pop();

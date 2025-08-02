@@ -42,6 +42,10 @@
       {
         "command": "visor.generateFlowchart",
         "title": "Generate Flowchart"
+      },
+      {
+        "command": "visor.toggleSyntaxHighlighting",
+        "title": "Toggle Syntax Highlighting"
       }
     ],
     "menus": {
@@ -52,6 +56,41 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Visor",
+      "properties": {
+        "visor.syntaxHighlighting.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable syntax highlighting in flowchart nodes"
+        },
+        "visor.syntaxHighlighting.maxCharacters": {
+          "type": "number",
+          "default": 200,
+          "description": "Maximum characters to highlight per node"
+        },
+        "visor.syntaxHighlighting.maxLines": {
+          "type": "number",
+          "default": 10,
+          "description": "Maximum lines to show per node"
+        },
+        "visor.syntaxHighlighting.theme": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "light",
+            "dark"
+          ],
+          "default": "auto",
+          "description": "Syntax highlighting theme"
+        },
+        "visor.syntaxHighlighting.showLineNumbers": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show line numbers in syntax highlighted code"
+        }
+      }
     }
   },
   "scripts": {

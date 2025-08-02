@@ -7,6 +7,13 @@ export class TsAstParser extends AbstractParser {
   private currentFunctionIsArrow = false;
 
   /**
+   * Get the language identifier for this parser
+   */
+  protected getLanguageIdentifier(): string {
+    return "typescript";
+  }
+
+  /**
    * Asynchronously creates and initializes an instance of TsAstParser.
    * This is the required entry point for creating a parser instance.
    * @param wasmPath The file path to the tree-sitter-typescript.wasm file.

@@ -4,6 +4,7 @@ import {
   FlowchartNode,
   FlowchartEdge,
   LocationMapEntry,
+  CodeSnippet,
 } from "../../ir/ir";
 import { StringProcessor } from "../utils/StringProcessor";
 import { ProcessResult, LoopContext } from "./AstParserTypes";
@@ -12,16 +13,17 @@ export abstract class AbstractParser {
   protected nodeIdCounter = 0;
   protected locationMap: LocationMapEntry[] = [];
   protected debug = false;
-  
+  protected sourceCode = "";
+
   // The parser instance is now required by the constructor
   protected parser: Parser;
 
   // Object pool for ProcessResult to reduce GC pressure
   private static processResultPool: ProcessResult[] = [];
   private static readonly MAX_POOL_SIZE = 50;
-  
+
   protected constructor(parser: Parser) {
-      this.parser = parser;
+    this.parser = parser;
   }
 
   protected readonly nodeStyles = {
@@ -43,6 +45,54 @@ export abstract class AbstractParser {
 
   protected escapeString(str: string): string {
     return StringProcessor.escapeString(str);
+  }
+
+  /**
+   * Extract source code snippet from a tree-sitter node
+   */
+  protected extractSourceCodeForNode(node: Parser.SyntaxNode): CodeSnippet {
+    return {
+      text: this.sourceCode.substring(node.startIndex, node.endIndex),
+      startIndex: node.startIndex,
+      endIndex: node.endIndex,
+      language: this.getLanguageIdentifier(),
+      nodeType: node.type,
+    };
+  }
+
+  /**
+   * Create a flowchart node with optional source code for syntax highlighting
+   */
+  protected createFlowchartNode(
+    id: string,
+    label: string,
+    shape: "rect" | "diamond" | "round" | "stadium" = "rect",
+    style?: string,
+    syntaxNode?: Parser.SyntaxNode
+  ): FlowchartNode {
+    const node: FlowchartNode = {
+      id,
+      label,
+      shape,
+      style,
+    };
+
+    if (syntaxNode && this.sourceCode) {
+      node.sourceCode = this.extractSourceCodeForNode(syntaxNode);
+    }
+
+    return node;
+  }
+
+  /**
+   * Get the language identifier for this parser
+   */
+  protected abstract getLanguageIdentifier(): string;
+
+  // Memory management utilities
+  protected resetState(): void {
+    this.nodeIdCounter = 0;
+    this.locationMap.length = 0;
   }
 
   // Object pooling for ProcessResult
@@ -79,17 +129,26 @@ export abstract class AbstractParser {
 
     return result;
   }
-  
+
   // Return ProcessResult to pool for reuse
   protected recycleProcessResult(result: ProcessResult): void {
-    if (AbstractParser.processResultPool.length < AbstractParser.MAX_POOL_SIZE) {
+    if (
+      AbstractParser.processResultPool.length < AbstractParser.MAX_POOL_SIZE
+    ) {
       AbstractParser.processResultPool.push(result);
     }
   }
 
   abstract listFunctions(sourceCode: string): string[];
-  abstract findFunctionAtPosition(sourceCode: string, position: number): string | undefined;
-  abstract generateFlowchart(sourceCode: string, functionName?: string, position?: number): FlowchartIR;
+  abstract findFunctionAtPosition(
+    sourceCode: string,
+    position: number
+  ): string | undefined;
+  abstract generateFlowchart(
+    sourceCode: string,
+    functionName?: string,
+    position?: number
+  ): FlowchartIR;
 
   protected processBlock(
     blockNode: Parser.SyntaxNode | null,
@@ -184,12 +243,6 @@ export abstract class AbstractParser {
     });
 
     return this.createProcessResult([node], [], nodeId, [{ id: nodeId }]);
-  }
-
-  // Memory management utilities
-  protected resetState(): void {
-    this.nodeIdCounter = 0;
-    this.locationMap.length = 0;
   }
 
   // Performance monitoring
