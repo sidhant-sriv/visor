@@ -1333,12 +1333,12 @@ export class CppAstParser extends AbstractParser {
 
     const labelId = this.generateNodeId("label");
     const labelText = `${this.escapeString(labelNode.text)}:`;
-    const labelFlowNode: FlowchartNode = {
-      id: labelId,
-      label: labelText,
-      shape: "rect",
-      style: this.nodeStyles.special,
-    };
+    const labelFlowNode: FlowchartNode = this.createSemanticNode(
+      labelId,
+      labelText,
+      NodeType.PROCESS,
+      labelNode
+    );
     this.locationMap.push({
       start: labelNode.startIndex,
       end: labelNode.endIndex,
@@ -1456,12 +1456,12 @@ export class CppAstParser extends AbstractParser {
       const typeSpecifier = declNode.childForFieldName("type");
       const type = typeSpecifier?.text || "auto";
       const labelText = `${type} ${name}${value}`;
-      const node: FlowchartNode = {
-        id: nodeId,
-        label: labelText,
-        shape: "rect",
-        style: this.nodeStyles.process,
-      };
+      const node: FlowchartNode = this.createSemanticNode(
+        nodeId,
+        labelText,
+        NodeType.ASSIGNMENT,
+        declNode
+      );
       this.locationMap.push({
         start: declNode.startIndex,
         end: declNode.endIndex,
@@ -1493,12 +1493,12 @@ export class CppAstParser extends AbstractParser {
       const typeSpecifier = declNode.childForFieldName("type");
       const type = typeSpecifier?.text || "auto";
       const labelText = `${type} ${name}${value}`;
-      const node: FlowchartNode = {
-        id: nodeId,
-        label: labelText,
-        shape: "rect",
-        style: this.nodeStyles.process,
-      };
+      const node: FlowchartNode = this.createSemanticNode(
+        nodeId,
+        labelText,
+        NodeType.ASSIGNMENT,
+        declarator
+      );
       nodes.push(node);
       this.locationMap.push({
         start: declarator.startIndex,
@@ -1528,12 +1528,12 @@ export class CppAstParser extends AbstractParser {
   ): ProcessResult {
     const nodeId = this.generateNodeId("return");
     const labelText = `return ${this.escapeString(exprNode.text)}`;
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      labelText,
+      NodeType.RETURN,
+      exprNode
+    );
     const edges: FlowchartEdge[] = [
       {
         from: nodeId,

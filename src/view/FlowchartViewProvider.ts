@@ -144,12 +144,19 @@ function getWebviewContent(
                 background-color: var(--vscode-button-hoverBackground);
             }
             
-            /* Complexity display panel - positioned at bottom to not interfere with export buttons */
-            #complexity-panel {
+            /* Container for complexity panel and toggle button, positioned bottom-left */
+            #complexity-container {
                 position: fixed;
                 bottom: 10px;
                 left: 10px;
-                z-index: 1000;
+                z-index: 1001;
+                display: flex;
+                align-items: flex-end;
+                gap: 8px;
+            }
+
+            /* Complexity display panel - layout within the container */
+            #complexity-panel {
                 background-color: var(--vscode-editor-background);
                 border: 1px solid var(--vscode-editorWidget-border);
                 border-radius: 6px;
@@ -165,11 +172,8 @@ function getWebviewContent(
                 display: none;
             }
             
+            /* Complexity toggle button - layout within the container */
             #complexity-toggle {
-                position: fixed;
-                bottom: 10px;
-                right: 10px;
-                z-index: 1001;
                 background-color: var(--vscode-button-background);
                 color: var(--vscode-button-foreground);
                 border: 1px solid var(--vscode-button-border, transparent);
@@ -177,6 +181,7 @@ function getWebviewContent(
                 cursor: pointer;
                 border-radius: 4px;
                 font-size: 11px;
+                flex-shrink: 0; /* Prevents the button from shrinking */
             }
             
             #complexity-toggle:hover {
@@ -211,21 +216,23 @@ function getWebviewContent(
         ${
           functionComplexity
             ? `
-        <div id="complexity-panel">
-            <div>
-                <strong>Cyclomatic Complexity:</strong> 
-                ${functionComplexity.cyclomaticComplexity}
-                <span class="complexity-rating complexity-${
-                  functionComplexity.rating
-                }">
-                    (${functionComplexity.rating.toUpperCase()})
-                </span>
-            </div>
-            <div class="complexity-description">
-                ${functionComplexity.description}
+        <div id="complexity-container">
+            <button id="complexity-toggle" title="Toggle complexity display">📊</button>
+            <div id="complexity-panel">
+                <div>
+                    <strong>Cyclomatic Complexity:</strong> 
+                    ${functionComplexity.cyclomaticComplexity}
+                    <span class="complexity-rating complexity-${
+                      functionComplexity.rating
+                    }">
+                        (${functionComplexity.rating.toUpperCase()})
+                    </span>
+                </div>
+                <div class="complexity-description">
+                    ${functionComplexity.description}
+                </div>
             </div>
         </div>
-        <button id="complexity-toggle" title="Toggle complexity display">📊</button>
         `
             : ""
         }
