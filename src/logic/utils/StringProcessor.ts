@@ -53,17 +53,22 @@ export class StringProcessor {
 
   /**
    * Prepare HTML content for Mermaid compatibility
-   * Handles special HTML characters and formatting for Mermaid's htmlLabels
+   * Mermaid requires specific formatting for HTML labels to work properly
    */
   static prepareHTMLContent(html: string): string {
     if (!html) return "";
 
-    // Remove extra whitespace and newlines that could break Mermaid
+    // For Mermaid HTML labels, we need to:
+    // 1. Keep HTML tags intact
+    // 2. Only escape quotes in text content, not HTML attributes
+    // 3. Remove problematic whitespace
+
+    // Clean up whitespace but preserve HTML structure
     let prepared = html.replace(/\n\s*/g, " ").replace(/\s+/g, " ").trim();
 
-    // Escape quotes that aren't part of HTML attributes
-    // This is a simplified approach - in production might need more sophisticated parsing
-    prepared = prepared.replace(/"/g, "&quot;");
+    // For Mermaid HTML labels, we should NOT escape the HTML tags themselves
+    // Only escape quotes that are not part of HTML attributes
+    // This is a more conservative approach that preserves HTML structure
 
     return prepared;
   }

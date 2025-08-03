@@ -159,6 +159,7 @@ ${flowchartSyntax}
                 startOnLoad: true,
                 theme: '${theme}',
                 securityLevel: 'loose',
+                htmlLabels: true,
                 flowchart: {
                     useMaxWidth: false,
                     htmlLabels: true,

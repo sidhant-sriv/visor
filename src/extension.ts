@@ -30,7 +30,7 @@ export async function activate(context: vscode.ExtensionContext) {
     "visor.toggleSyntaxHighlighting",
     () => {
       const config = vscode.workspace.getConfiguration("visor");
-      const currentValue = config.get("syntaxHighlighting.enabled", false);
+      const currentValue = config.get("syntaxHighlighting.enabled", true);
       config.update(
         "syntaxHighlighting.enabled",
         !currentValue,

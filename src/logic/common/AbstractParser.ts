@@ -229,12 +229,13 @@ export abstract class AbstractParser {
     statement: Parser.SyntaxNode
   ): ProcessResult {
     const nodeId = this.generateNodeId("stmt");
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: this.escapeString(statement.text),
-      shape: "rect",
-      style: this.nodeStyles.process,
-    };
+    const node = this.createFlowchartNode(
+      nodeId,
+      this.escapeString(statement.text),
+      "rect",
+      this.nodeStyles.process,
+      statement
+    );
 
     this.locationMap.push({
       start: statement.startIndex,

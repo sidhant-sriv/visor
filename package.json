@@ -62,7 +62,7 @@
       "properties": {
         "visor.syntaxHighlighting.enabled": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Enable syntax highlighting in flowchart nodes"
         },
         "visor.syntaxHighlighting.maxCharacters": {

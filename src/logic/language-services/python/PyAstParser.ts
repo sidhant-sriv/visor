@@ -1004,12 +1004,14 @@ export class PyAstParser extends AbstractParser {
           }
 
           const returnId = this.generateNodeId("return_hof");
-          allNodes.push({
-            id: returnId,
-            label: "return result",
-            shape: "stadium",
-            style: this.nodeStyles.special,
-          });
+          const returnFlowchartNode = this.createFlowchartNode(
+            returnId,
+            "return result",
+            "stadium",
+            this.nodeStyles.special,
+            returnNode
+          );
+          allNodes.push(returnFlowchartNode);
           this.locationMap.push({
             start: returnNode.startIndex,
             end: returnNode.endIndex,
@@ -1039,12 +1041,13 @@ export class PyAstParser extends AbstractParser {
     const labelText = valueNode
       ? `return ${this.escapeString(valueNode.text)}`
       : "return";
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
+    const node = this.createFlowchartNode(
+      nodeId,
+      labelText,
+      "stadium",
+      this.nodeStyles.special,
+      returnNode
+    );
     const edges: FlowchartEdge[] = [
       {
         from: nodeId,

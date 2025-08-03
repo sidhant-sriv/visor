@@ -6,6 +6,8 @@ import {
   HighlightOptions,
 } from "./utils/SyntaxHighlighter";
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 
 // Optimized string building
 class StringBuilder {
@@ -32,15 +34,35 @@ export class MermaidGenerator {
   private sb = new StringBuilder();
   private syntaxHighlighter = new SyntaxHighlighter();
   private settings: SyntaxHighlightSettings;
+  private debugLog: string[] = [];
+  private logFilePath: string;
 
   constructor() {
     this.settings = this.loadSettings();
+    // Create a temp file for debug logs
+    const tempDir = require("os").tmpdir();
+    this.logFilePath = path.join(tempDir, `visor-debug-${Date.now()}.log`);
+    this.log("=== VISOR DEBUG LOG STARTED ===");
+  }
+
+  private log(message: string): void {
+    const timestamp = new Date().toISOString();
+    const logEntry = `[${timestamp}] ${message}`;
+    this.debugLog.push(logEntry);
+    console.log(message);
+
+    // Also write to file immediately for debugging
+    try {
+      fs.appendFileSync(this.logFilePath, logEntry + "\n");
+    } catch (error) {
+      console.error("Failed to write to debug log file:", error);
+    }
   }
 
   private loadSettings(): SyntaxHighlightSettings {
     const config = vscode.workspace.getConfiguration("visor");
     return {
-      enabled: config.get("syntaxHighlighting.enabled", false),
+      enabled: config.get("syntaxHighlighting.enabled", true),
       maxCharacters: config.get("syntaxHighlighting.maxCharacters", 200),
       maxLines: config.get("syntaxHighlighting.maxLines", 10),
       showLineNumbers: config.get("syntaxHighlighting.showLineNumbers", false),
@@ -53,6 +75,9 @@ export class MermaidGenerator {
     // Reload settings on each generation to pick up changes
     this.settings = this.loadSettings();
 
+    this.log(`Debug log file: ${this.logFilePath}`);
+    this.log("=== STARTING FLOWCHART GENERATION ===");
+
     this.sb.clear();
     this.sb.appendLine("graph TD");
 
@@ -61,7 +86,23 @@ export class MermaidGenerator {
     }
 
     // Generate nodes efficiently
+    this.log("=== PROCESSING NODES ===");
+    this.log(`Total nodes: ${ir.nodes.length}`);
+
     for (const node of ir.nodes) {
+      this.log(`Processing node: ${node.id}, label: ${node.label}`);
+      this.log(`Node has sourceCode: ${!!node.sourceCode}`);
+      if (node.sourceCode) {
+        this.log(`SourceCode language: ${node.sourceCode.language}`);
+        this.log(`SourceCode text length: ${node.sourceCode.text.length}`);
+        this.log(
+          `SourceCode text preview: ${node.sourceCode.text.substring(
+            0,
+            100
+          )}...`
+        );
+      }
+
       const shape = this.getShape(node);
       const label = this.generateNodeLabel(node);
       this.sb.append("    ");
@@ -73,6 +114,7 @@ export class MermaidGenerator {
       this.sb.append(shape[1]);
       this.sb.appendLine("");
     }
+    this.log("=== END PROCESSING NODES ===");
 
     // Generate edges efficiently
     for (const edge of ir.edges) {
@@ -103,19 +145,47 @@ export class MermaidGenerator {
       this.sb.appendLine(")");
     }
 
-    return this.sb.toString();
+    const finalMermaid = this.sb.toString();
+
+    // Debug logging - log the final Mermaid syntax
+    this.log("=== FINAL MERMAID SYNTAX ===");
+    this.log(finalMermaid);
+    this.log("=== END MERMAID SYNTAX ===");
+
+    // Also log settings for debugging
+    this.log("=== SYNTAX HIGHLIGHTING SETTINGS ===");
+    this.log(`Enabled: ${this.settings.enabled}`);
+    this.log(
+      `Supported languages: ${this.settings.supportedLanguages.join(", ")}`
+    );
+    this.log(`Theme: ${this.settings.theme}`);
+    this.log("=== END SETTINGS ===");
+
+    return finalMermaid;
   }
 
   /**
    * Generate the label for a node, with optional syntax highlighting
    */
   private generateNodeLabel(node: FlowchartNode): string {
+    this.log("=== GENERATING NODE LABEL ===");
+    this.log(`Node ID: ${node.id}`);
+    this.log(`Settings enabled: ${this.settings.enabled}`);
+    this.log(`Has sourceCode: ${!!node.sourceCode}`);
+
     if (!this.settings.enabled || !node.sourceCode) {
+      this.log(`Returning escaped string: ${this.escapeString(node.label)}`);
       return this.escapeString(node.label);
     }
 
+    this.log(`Source code language: ${node.sourceCode.language}`);
+    this.log(
+      `Supported languages: ${this.settings.supportedLanguages.join(", ")}`
+    );
+
     // Check if the language is supported
     if (!this.settings.supportedLanguages.includes(node.sourceCode.language)) {
+      this.log("Language not supported, returning escaped string");
       return this.escapeString(node.label);
     }
 
@@ -125,6 +195,8 @@ export class MermaidGenerator {
           ? this.detectTheme()
           : (this.settings.theme as "light" | "dark");
 
+      this.log(`Detected theme: ${theme}`);
+
       const options: HighlightOptions = {
         language: node.sourceCode.language,
         theme,
@@ -133,26 +205,36 @@ export class MermaidGenerator {
         maxCharacters: this.settings.maxCharacters,
       };
 
+      this.log(`Highlighting options: ${JSON.stringify(options)}`);
+      this.log(`Source code text: ${node.sourceCode.text}`);
+
       const result = this.syntaxHighlighter.highlight(
         node.sourceCode.text,
         options
       );
 
+      this.log(`Highlight result HTML: ${result.html}`);
+
       // Create HTML template for the highlighted code
-      let htmlLabel = this.createHTMLNodeTemplate(
-        result.html,
-        node.shape || "rect"
-      );
+      let htmlContent = result.html;
 
       if (result.truncated) {
-        htmlLabel += '<div class="truncation-indicator">...</div>';
+        htmlContent +=
+          '<br/><em style="color: #888; font-size: 10px;">...</em>';
       }
 
-      // Prepare HTML for Mermaid
-      return StringProcessor.prepareHTMLContent(htmlLabel);
+      // For Mermaid HTML labels, wrap content in a way that preserves HTML
+      // Use backticks for HTML content in Mermaid
+      const finalLabel = `\`${htmlContent}\``;
+      this.log(`Final label: ${finalLabel}`);
+      this.log("=== END NODE LABEL ===");
+
+      return finalLabel;
     } catch (error) {
       // Fallback to regular escaped text if highlighting fails
-      console.warn("Syntax highlighting failed for node:", node.id, error);
+      this.log(
+        `Syntax highlighting failed for node: ${node.id}, error: ${error}`
+      );
       return this.escapeString(node.label);
     }
   }
@@ -189,7 +271,11 @@ export class MermaidGenerator {
    * Get CSS styles for syntax highlighting
    */
   public getSyntaxHighlightCSS(): string {
+    this.log("=== GENERATING SYNTAX CSS ===");
+    this.log(`Settings enabled: ${this.settings.enabled}`);
+
     if (!this.settings.enabled) {
+      this.log("Syntax highlighting disabled, returning empty CSS");
       return "";
     }
 
@@ -198,50 +284,49 @@ export class MermaidGenerator {
         ? this.detectTheme()
         : (this.settings.theme as "light" | "dark");
 
+    this.log(`CSS Theme: ${theme}`);
+
     const themeCSS = this.syntaxHighlighter.getThemeCSS(theme);
+    this.log(`Theme CSS from highlighter: ${themeCSS}`);
 
-    return `
+    const finalCSS = `
             <style>
-                .syntax-node {
-                    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-                    font-size: 12px;
-                    line-height: 1.4;
-                    padding: 8px 12px;
-                    border-radius: 4px;
-                    background: ${theme === "dark" ? "#1e1e1e" : "#ffffff"};
-                    border: 1px solid ${
-                      theme === "dark" ? "#3e3e3e" : "#cccccc"
-                    };
-                    max-width: 300px;
-                    overflow: hidden;
-                    text-align: left;
+                /* Syntax highlighting for code in flowchart nodes */
+                .node .label {
+                    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
+                    font-size: 12px !important;
+                    line-height: 1.4 !important;
+                    text-align: left !important;
                 }
 
-                .syntax-node .code-content {
-                    white-space: pre-wrap;
-                    word-break: break-word;
+                /* Token-based syntax highlighting */
+                .token.keyword { color: ${
+                  theme === "dark" ? "#569cd6" : "#0000ff"
+                } !important; }
+                .token.string { color: ${
+                  theme === "dark" ? "#ce9178" : "#a31515"
+                } !important; }
+                .token.comment { color: ${
+                  theme === "dark" ? "#6a9955" : "#008000"
+                } !important; }
+                .token.number { color: ${
+                  theme === "dark" ? "#b5cea8" : "#09885a"
+                } !important; }
+                .token.function { color: ${
+                  theme === "dark" ? "#dcdcaa" : "#795e26"
+                } !important; }
+                
+                /* Additional highlighting support */
+                .mermaid .node text {
+                    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
                 }
-
-                .syntax-node.rect {
-                    border-radius: 4px;
-                }
-
-                .syntax-node.diamond {
-                    border-radius: 8px;
-                    background: ${theme === "dark" ? "#2e2e2e" : "#f5f5f5"};
-                }
-
-                .truncation-indicator {
-                    color: ${theme === "dark" ? "#888888" : "#666666"};
-                    font-style: italic;
-                    margin-top: 4px;
-                    text-align: center;
-                    font-size: 10px;
-                }
-
-                ${themeCSS}
             </style>
         `;
+
+    this.log(`Final CSS: ${finalCSS}`);
+    this.log("=== END SYNTAX CSS ===");
+
+    return finalCSS;
   }
 
   private getShape(node: FlowchartNode): [string, string] {
