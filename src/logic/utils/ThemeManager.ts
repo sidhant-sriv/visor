@@ -171,7 +171,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#272822",
-            stroke: "#66D9EF",
+            stroke: "#5299d8",
             textColor: "#F8F8F2",
           },
           functionCall: {
@@ -191,7 +191,7 @@ export class SubtleThemeManager {
           },
           returnNode: {
             fill: "#272822",
-            stroke: "#A6E22E",
+            stroke: "#FD971F",
             textColor: "#F8F8F2",
           },
         },
@@ -212,7 +212,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#f0f0f0",
-            stroke: "#3ab1cf",
+            stroke: "#3973ab",
             textColor: "#2d2d2d",
           },
           functionCall: {
@@ -232,7 +232,7 @@ export class SubtleThemeManager {
           },
           returnNode: {
             fill: "#f0f0f0",
-            stroke: "#7fb42b",
+            stroke: "#f0750c",
             textColor: "#2d2d2d",
           },
         },
@@ -259,7 +259,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#0d1117",
-            stroke: "#58a6ff",
+            stroke: "#79c0ff",
             textColor: "#f0f6fc",
           },
           functionCall: {
@@ -300,7 +300,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#ffffff",
-            stroke: "#0969da",
+            stroke: "#2188ff",
             textColor: "#24292f",
           },
           functionCall: {
@@ -347,7 +347,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#002b36",
-            stroke: "#268bd2",
+            stroke: "#d33682",
             textColor: "#839496",
           },
           functionCall: {
@@ -388,7 +388,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#fdf6e3",
-            stroke: "#268bd2",
+            stroke: "#d33682",
             textColor: "#657b83",
           },
           functionCall: {
@@ -435,7 +435,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#282c34",
-            stroke: "#61afef",
+            stroke: "#528bff",
             textColor: "#abb2bf",
           },
           functionCall: {
@@ -476,7 +476,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#fafafa",
-            stroke: "#4078f2",
+            stroke: "#2962ff",
             textColor: "#383a42",
           },
           functionCall: {
@@ -523,7 +523,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#282a36",
-            stroke: "#8be9fd",
+            stroke: "#62f8e5",
             textColor: "#f8f8f2",
           },
           functionCall: {
@@ -564,7 +564,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#f8f8f2",
-            stroke: "#0ea5e9",
+            stroke: "#1f9c91",
             textColor: "#44475a",
           },
           functionCall: {
@@ -611,7 +611,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#263238",
-            stroke: "#82b1ff",
+            stroke: "#ffd700",
             textColor: "#eeffff",
           },
           functionCall: {
@@ -652,7 +652,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#fafafa",
-            stroke: "#2196f3",
+            stroke: "#ffc107",
             textColor: "#90a4ae",
           },
           functionCall: {
@@ -699,7 +699,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#2e3440",
-            stroke: "#81a1c1",
+            stroke: "#8fbcbb",
             textColor: "#d8dee9",
           },
           functionCall: {
@@ -740,7 +740,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#eceff4",
-            stroke: "#5e81ac",
+            stroke: "#8fbcbb",
             textColor: "#2e3440",
           },
           functionCall: {
@@ -787,7 +787,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#1a1b26",
-            stroke: "#7aa2f7",
+            stroke: "#c0caf5",
             textColor: "#a9b1d6",
           },
           functionCall: {
@@ -828,7 +828,7 @@ export class SubtleThemeManager {
           },
           assignment: { // UPDATED
             fill: "#d5d6db",
-            stroke: "#34548a",
+            stroke: "#7a88b8",
             textColor: "#343b58",
           },
           functionCall: {
