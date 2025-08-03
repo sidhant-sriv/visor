@@ -174,302 +174,115 @@ ${flowchartSyntax}
                 }
             });
 
-            function cleanSvgForExport(svgElement) {
-                const svgClone = svgElement.cloneNode(true);
-
-                // Remove pan-zoom controls
-                const controls = svgClone.querySelector('.svg-pan-zoom-controls');
-                if (controls) {
-                    controls.remove();
-                }
-                svgClone.removeAttribute('data-svg-pan-zoom');
-
-                // Reset pan-zoom transform and restore original dimensions
-                const viewport = svgClone.querySelector('.svg-pan-zoom_viewport');
-                if (viewport) {
-                    viewport.removeAttribute('transform');
-                }
-
-                // Remove any width/height constraints that might be set by pan-zoom
-                svgClone.removeAttribute('width');
-                svgClone.removeAttribute('height');
-                svgClone.removeAttribute('viewBox');
-                svgClone.removeAttribute('style');
-
-                // Create a temporary container with no styling constraints
-                const tempDiv = document.createElement('div');
-                tempDiv.style.position = 'absolute';
-                tempDiv.style.visibility = 'hidden';
-                tempDiv.style.top = '-9999px';
-                tempDiv.style.width = 'auto';
-                tempDiv.style.height = 'auto';
-                tempDiv.style.overflow = 'visible';
-                document.body.appendChild(tempDiv);
-                tempDiv.appendChild(svgClone);
-
-                // Force a reflow to ensure the SVG is rendered without constraints
-                svgClone.style.width = 'auto';
-                svgClone.style.height = 'auto';
-                svgClone.style.maxWidth = 'none';
-                svgClone.style.maxHeight = 'none';
-
-                // Get the bounding box of all content
-                let bbox;
-                try {
-                    bbox = svgClone.getBBox();
-                } catch (e) {
-                    // Fallback: try to get dimensions from the root g element
-                    const rootG = svgClone.querySelector('g');
-                    if (rootG) {
-                        bbox = rootG.getBBox();
-                    } else {
-                        // Ultimate fallback
-                        bbox = { x: 0, y: 0, width: 800, height: 600 };
-                    }
-                }
-
-                document.body.removeChild(tempDiv);
-
-                const padding = 20;
-                const totalWidth = bbox.width + (padding * 2);
-                const totalHeight = bbox.height + (padding * 2);
-                const viewBoxX = bbox.x - padding;
-                const viewBoxY = bbox.y - padding;
-
-                // Set proper dimensions and viewBox to capture the entire flowchart
-                svgClone.setAttribute('width', totalWidth.toString());
-                svgClone.setAttribute('height', totalHeight.toString());
-                svgClone.setAttribute('viewBox', \`\${viewBoxX} \${viewBoxY} \${totalWidth} \${totalHeight}\`);
-
-                // Add a background rect
-                const backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
-                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                rect.setAttribute('x', viewBoxX.toString());
-                rect.setAttribute('y', viewBoxY.toString());
-                rect.setAttribute('width', totalWidth.toString());
-                rect.setAttribute('height', totalHeight.toString());
-                rect.setAttribute('fill', backgroundColor);
-                svgClone.insertBefore(rect, svgClone.firstChild);
-
-                return {
-                    svgElement: svgClone,
-                    width: totalWidth,
-                    height: totalHeight
-                };
-            }
-
-            // Helper function for fallback SVG export
-            function fallbackSvgExport(svgElement) {
-                try {
-                    const { svgElement: svgClone } = cleanSvgForExport(svgElement);
-                    const svgData = new XMLSerializer().serializeToString(svgClone);
-                    vscode.postMessage({
-                        command: 'export',
-                        payload: { fileType: 'svg', data: svgData }
-                    });
-                } catch (fallbackError) {
-                    const errorMessage = fallbackError instanceof Error ? fallbackError.message : 'Unknown fallback error';
-                    vscode.postMessage({
-                        command: 'exportError',
-                        payload: { error: 'SVG export failed: ' + errorMessage }
-                    });
-                }
-            }
-
+            /**
+             * Handles exporting the flowchart to SVG or PNG.
+             * It generates a clean SVG from the source to ensure no UI controls are included.
+             */
             function exportFlowchart(fileType) {
-                const svgElement = document.querySelector('.mermaid svg');
-                if (!svgElement) {
+                const mermaidSourceElement = document.getElementById('mermaid-source');
+
+                if (!mermaidSourceElement || !mermaidSourceElement.innerHTML) {
                     vscode.postMessage({
                         command: 'exportError',
-                        payload: { error: "Mermaid SVG element not found." }
+                        payload: { error: "Could not find Mermaid source code to export." }
                     });
                     return;
                 }
 
-                try {
-                    if (fileType === 'svg') {
-                        // Get the original mermaid source from the hidden element
-                        const mermaidSourceElement = document.getElementById('mermaid-source');
-                        if (!mermaidSourceElement) {
-                            console.warn('Mermaid source element not found, falling back to text extraction');
-                            fallbackSvgExport(svgElement);
-                            return;
+                const mermaidSource = mermaidSourceElement.innerHTML
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&amp;/g, '&')
+                    .trim();
+
+                const exportId = 'export-' + Date.now();
+
+                // Use mermaid.render to get a clean SVG without pan-zoom controls
+                mermaid.render(exportId, mermaidSource)
+                    .then(result => {
+                        const { svg } = result;
+                        const parser = new DOMParser();
+                        const svgDoc = parser.parseFromString(svg, 'image/svg+xml');
+                        const cleanSvgElement = svgDoc.documentElement;
+
+                        if (!cleanSvgElement || cleanSvgElement.tagName !== 'svg') {
+                            throw new Error('Invalid SVG generated by Mermaid render');
                         }
 
-                        let mermaidSource = mermaidSourceElement.innerHTML
-                            .replace(/&lt;/g, '<')
-                            .replace(/&gt;/g, '>')
-                            .replace(/&amp;/g, '&');
+                        // Temporarily add to DOM to calculate size
+                        const tempDiv = document.createElement('div');
+                        tempDiv.style.position = 'absolute';
+                        tempDiv.style.visibility = 'hidden';
+                        document.body.appendChild(tempDiv);
+                        tempDiv.appendChild(cleanSvgElement);
+                        const bbox = cleanSvgElement.getBBox();
+                        document.body.removeChild(tempDiv);
 
-                        // Clean up the mermaid source - remove extra whitespace and ensure proper format
-                        mermaidSource = mermaidSource.trim();
+                        const padding = 20;
+                        const finalX = bbox.x - padding;
+                        const finalY = bbox.y - padding;
+                        const finalWidth = bbox.width + (padding * 2);
+                        const finalHeight = bbox.height + (padding * 2);
 
-                        // Validate that we have valid mermaid syntax
-                        if (!mermaidSource || mermaidSource.length === 0) {
-                            console.warn('Empty mermaid source, falling back to existing SVG');
-                            fallbackSvgExport(svgElement);
-                            return;
-                        }
+                        // Set final dimensions and viewBox
+                        cleanSvgElement.setAttribute('width', finalWidth.toString());
+                        cleanSvgElement.setAttribute('height', finalHeight.toString());
+                        cleanSvgElement.setAttribute('viewBox', \`\${finalX} \${finalY} \${finalWidth} \${finalHeight}\`);
 
-                        // Create a unique ID for this export
-                        const exportId = 'export-svg-' + Date.now();
+                        // Add a background rectangle
+                        const backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
+                        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                        rect.setAttribute('x', finalX.toString());
+                        rect.setAttribute('y', finalY.toString());
+                        rect.setAttribute('width', finalWidth.toString());
+                        rect.setAttribute('height', finalHeight.toString());
+                        rect.setAttribute('fill', backgroundColor);
+                        cleanSvgElement.insertBefore(rect, cleanSvgElement.firstChild);
 
-                        // Create a temporary container for clean rendering
-                        const tempContainer = document.createElement('div');
-                        tempContainer.style.position = 'absolute';
-                        tempContainer.style.visibility = 'hidden';
-                        tempContainer.style.top = '-9999px';
-                        tempContainer.style.left = '-9999px';
-                        tempContainer.style.width = 'auto';
-                        tempContainer.style.height = 'auto';
-                        tempContainer.style.overflow = 'visible';
-                        tempContainer.className = 'mermaid-export-temp';
-                        document.body.appendChild(tempContainer);
+                        const finalSvgData = new XMLSerializer().serializeToString(cleanSvgElement);
 
-                        // Use mermaid.render with proper error handling
-                        mermaid.render(exportId, mermaidSource)
-                            .then((result) => {
-                                // Clean up temp container
-                                if (document.body.contains(tempContainer)) {
-                                    document.body.removeChild(tempContainer);
-                                }
-
-                                try {
-                                    // Parse the SVG and add background
-                                    const parser = new DOMParser();
-                                    const svgDoc = parser.parseFromString(result.svg, 'image/svg+xml');
-                                    const cleanSvg = svgDoc.documentElement;
-
-                                    if (!cleanSvg || cleanSvg.tagName !== 'svg') {
-                                        throw new Error('Invalid SVG generated by Mermaid render');
-                                    }
-
-                                    // Get the viewBox or calculate dimensions
-                                    const viewBox = cleanSvg.getAttribute('viewBox');
-                                    let bbox;
-
-                                    if (viewBox) {
-                                        const parts = viewBox.split(' ').map(Number);
-                                        bbox = {
-                                            x: parts[0] || 0,
-                                            y: parts[1] || 0,
-                                            width: parts[2] || 800,
-                                            height: parts[3] || 600
-                                        };
-                                    } else {
-                                        // Try to get bounding box
-                                        try {
-                                            bbox = cleanSvg.getBBox();
-                                        } catch (e) {
-                                            // Fallback dimensions
-                                            bbox = { x: 0, y: 0, width: 800, height: 600 };
-                                        }
-                                    }
-
-                                    // Add padding
-                                    const padding = 20;
-                                    const finalX = bbox.x - padding;
-                                    const finalY = bbox.y - padding;
-                                    const finalWidth = bbox.width + (padding * 2);
-                                    const finalHeight = bbox.height + (padding * 2);
-
-                                    // Set proper dimensions
-                                    cleanSvg.setAttribute('width', finalWidth.toString());
-                                    cleanSvg.setAttribute('height', finalHeight.toString());
-                                    cleanSvg.setAttribute('viewBox', \`\${finalX} \${finalY} \${finalWidth} \${finalHeight}\`);
-
-                                    // Add background rectangle
-                                    const backgroundColor = getComputedStyle(document.documentElement)
-                                        .getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
-                                    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-                                    rect.setAttribute('x', finalX.toString());
-                                    rect.setAttribute('y', finalY.toString());
-                                    rect.setAttribute('width', finalWidth.toString());
-                                    rect.setAttribute('height', finalHeight.toString());
-                                    rect.setAttribute('fill', backgroundColor);
-                                    cleanSvg.insertBefore(rect, cleanSvg.firstChild);
-
-                                    // Serialize and send
-                                    const svgData = new XMLSerializer().serializeToString(cleanSvg);
-                                    vscode.postMessage({
-                                        command: 'export',
-                                        payload: { fileType: 'svg', data: svgData }
-                                    });
-
-                                } catch (parseError) {
-                                    console.error('SVG parsing error:', parseError);
-                                    // Fallback to the cleaned pan-zoom method
-                                    fallbackSvgExport(svgElement);
-                                }
-                            })
-                            .catch((renderError) => {
-                                console.error('Mermaid render error:', renderError);
-                                // Clean up temp container
-                                if (document.body.contains(tempContainer)) {
-                                    document.body.removeChild(tempContainer);
-                                }
-                                // Fallback to the cleaned pan-zoom method
-                                fallbackSvgExport(svgElement);
-                            });
-
-                        return; // Early return for SVG
-                    }
-
-                    // PNG export (unchanged)
-                    const { svgElement: svgClone, width, height } = cleanSvgForExport(svgElement);
-                    const svgData = new XMLSerializer().serializeToString(svgClone);
-
-                    const canvas = document.createElement('canvas');
-                    const ctx = canvas.getContext('2d');
-
-                    if (!ctx) {
-                        throw new Error("Could not get canvas 2D context.");
-                    }
-
-                    const scale = 2; // For higher DPI
-                    canvas.width = width * scale;
-                    canvas.height = height * scale;
-                    ctx.scale(scale, scale);
-
-                    const img = new Image();
-                    img.onload = function() {
-                        try {
-                            ctx.drawImage(img, 0, 0, width, height);
-                            const pngData = canvas.toDataURL('image/png');
-                            const base64Data = pngData.split(',')[1];
-
+                        if (fileType === 'svg') {
                             vscode.postMessage({
                                 command: 'export',
-                                payload: {
-                                    fileType: 'png',
-                                    data: base64Data
-                                }
+                                payload: { fileType: 'svg', data: finalSvgData }
                             });
-                        } catch (e) {
-                             const errorMessage = e instanceof Error ? e.message : 'Unknown canvas error';
-                            vscode.postMessage({
-                                command: 'exportError',
-                                payload: { error: 'Canvas error: ' + errorMessage }
-                            });
-                        }
-                    };
+                        } else { // PNG export
+                            const canvas = document.createElement('canvas');
+                            const ctx = canvas.getContext('2d');
+                            if (!ctx) {
+                                throw new Error("Could not get canvas 2D context.");
+                            }
 
-                    img.onerror = function() {
+                            const scale = 2; // For higher DPI
+                            canvas.width = finalWidth * scale;
+                            canvas.height = finalHeight * scale;
+                            ctx.scale(scale, scale);
+
+                            const img = new Image();
+                            img.onload = function() {
+                                ctx.drawImage(img, 0, 0, finalWidth, finalHeight);
+                                const pngData = canvas.toDataURL('image/png').split(',')[1]; // Get base64 part
+                                vscode.postMessage({
+                                    command: 'export',
+                                    payload: { fileType: 'png', data: pngData }
+                                });
+                            };
+                            img.onerror = function() {
+                                vscode.postMessage({
+                                    command: 'exportError',
+                                    payload: { error: "SVG to PNG conversion failed (image load error)." }
+                                });
+                            };
+                            img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(finalSvgData);
+                        }
+                    })
+                    .catch(error => {
+                        const errorMessage = error instanceof Error ? error.message : 'Unknown export error';
                         vscode.postMessage({
                             command: 'exportError',
-                            payload: { error: "SVG to PNG conversion failed (image load error)." }
+                            payload: { error: 'Export failed: ' + errorMessage }
                         });
-                    };
-
-                    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgData);
-
-                } catch (error) {
-                    const errorMessage = error instanceof Error ? error.message : 'Unknown export error';
-                    vscode.postMessage({
-                        command: 'exportError',
-                        payload: { error: 'Export failed: ' + errorMessage }
                     });
-                }
             }
 
             document.getElementById('export-svg').addEventListener('click', () => exportFlowchart('svg'));
@@ -540,8 +353,7 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
       this._disposables
     );
 
-    // *** ADDED FOR LIVE UPDATES ***
-    // Listen for changes to the document text
+    // Listen for changes to the document text for live updates
     vscode.workspace.onDidChangeTextDocument(
       (event) => {
         if (event.document === vscode.window.activeTextEditor?.document) {
