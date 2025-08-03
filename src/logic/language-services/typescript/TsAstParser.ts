@@ -8,53 +8,53 @@ import {
 } from "../../../ir/ir";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 
-export class JavaAstParser extends AbstractParser {
-  private currentMethodIsLambda = false;
+export class TsAstParser extends AbstractParser {
+  private currentFunctionIsArrow = false;
 
   /**
-   * Asynchronously creates and initializes an instance of JavaAstParser.
+   * Asynchronously creates and initializes an instance of TsAstParser.
    * This is the required entry point for creating a parser instance.
-   * @param wasmPath The file path to the tree-sitter-java.wasm file.
-   * @returns A promise that resolves to a new JavaAstParser instance.
+   * @param wasmPath The file path to the tree-sitter-typescript.wasm file.
+   * @returns A promise that resolves to a new TsAstParser instance.
    */
-  public static async create(wasmPath: string): Promise<JavaAstParser> {
+  public static async create(wasmPath: string): Promise<TsAstParser> {
     await Parser.init();
     const language = await Parser.Language.load(wasmPath);
     const parser = new Parser();
     parser.setLanguage(language);
-    return new JavaAstParser(parser);
+    return new TsAstParser(parser);
   }
 
   public listFunctions(sourceCode: string): string[] {
     return this.measurePerformance("listFunctions", () => {
       const tree = this.parser.parse(sourceCode);
 
-      // Get method declarations
+      // Get regular function declarations
+      const funcNames = tree.rootNode
+        .descendantsOfType("function_declaration")
+        .map(
+          (f: Parser.SyntaxNode) =>
+            f.childForFieldName("name")?.text || "[anonymous]"
+        );
+
+      // Get method definitions in classes
       const methodNames = tree.rootNode
-        .descendantsOfType("method_declaration")
+        .descendantsOfType("method_definition")
         .map(
           (m: Parser.SyntaxNode) =>
             m.childForFieldName("name")?.text || "[anonymous method]"
         );
 
-      // Get constructor declarations
-      const constructorNames = tree.rootNode
-        .descendantsOfType("constructor_declaration")
-        .map(
-          (c: Parser.SyntaxNode) =>
-            c.childForFieldName("name")?.text || "[constructor]"
-        );
-
-      // Get lambda expressions assigned to variables
-      const lambdaNames = tree.rootNode
+      // Get arrow functions assigned to variables/constants
+      const arrowFunctionNames = tree.rootNode
         .descendantsOfType("variable_declarator")
         .filter((v) => {
           const value = v.childForFieldName("value");
-          return value?.type === "lambda_expression";
+          return value?.type === "arrow_function";
         })
-        .map((v) => v.childForFieldName("name")?.text || "[anonymous lambda]");
+        .map((v) => v.childForFieldName("name")?.text || "[anonymous arrow]");
 
-      return [...methodNames, ...constructorNames, ...lambdaNames];
+      return [...funcNames, ...methodNames, ...arrowFunctionNames];
     });
   }
 
@@ -64,32 +64,31 @@ export class JavaAstParser extends AbstractParser {
   ): string | undefined {
     const tree = this.parser.parse(sourceCode);
 
-    // Check method declarations
-    let method = tree.rootNode
-      .descendantsOfType("method_declaration")
-      .find((m) => position >= m.startIndex && position <= m.endIndex);
-    if (method)
-      return method.childForFieldName("name")?.text || "[anonymous method]";
+    // Check function declarations
+    let func = tree.rootNode
+      .descendantsOfType("function_declaration")
+      .find((f) => position >= f.startIndex && position <= f.endIndex);
+    if (func) return func.childForFieldName("name")?.text || "[anonymous]";
 
-    // Check constructor declarations
-    method = tree.rootNode
-      .descendantsOfType("constructor_declaration")
-      .find((c) => position >= c.startIndex && position <= c.endIndex);
-    if (method)
-      return method.childForFieldName("name")?.text || "[constructor]";
+    // Check method definitions
+    func = tree.rootNode
+      .descendantsOfType("method_definition")
+      .find((f) => position >= f.startIndex && position <= f.endIndex);
+    if (func)
+      return func.childForFieldName("name")?.text || "[anonymous method]";
 
-    // Check lambda expressions
-    const lambda = tree.rootNode
+    // Check arrow functions
+    const arrowFunc = tree.rootNode
       .descendantsOfType("variable_declarator")
       .find((v) => {
         const value = v.childForFieldName("value");
         return (
           position >= v.startIndex &&
           position <= v.endIndex &&
-          value?.type === "lambda_expression"
+          value?.type === "arrow_function"
         );
       });
-    return lambda?.childForFieldName("name")?.text || "[anonymous lambda]";
+    return arrowFunc?.childForFieldName("name")?.text || "[anonymous arrow]";
   }
 
   public generateFlowchart(
@@ -101,25 +100,25 @@ export class JavaAstParser extends AbstractParser {
     this.resetState();
 
     let targetNode: Parser.SyntaxNode | undefined;
-    let isLambda = false;
-    let isConstructor = false;
+    let isArrowFunction = false;
+    let isMethod = false;
 
     if (position !== undefined) {
-      // Try to find method declaration at position
+      // Try to find function declaration at position
       targetNode = tree.rootNode
-        .descendantsOfType("method_declaration")
-        .find((m) => position >= m.startIndex && position <= m.endIndex);
+        .descendantsOfType("function_declaration")
+        .find((f) => position >= f.startIndex && position <= f.endIndex);
 
       if (!targetNode) {
-        // Try to find constructor declaration at position
+        // Try to find method definition at position
         targetNode = tree.rootNode
-          .descendantsOfType("constructor_declaration")
-          .find((c) => position >= c.startIndex && position <= c.endIndex);
-        isConstructor = !!targetNode;
+          .descendantsOfType("method_definition")
+          .find((f) => position >= f.startIndex && position <= f.endIndex);
+        isMethod = !!targetNode;
       }
 
       if (!targetNode) {
-        // Try to find lambda expression at position
+        // Try to find arrow function at position
         targetNode = tree.rootNode
           .descendantsOfType("variable_declarator")
           .find((v) => {
@@ -127,22 +126,22 @@ export class JavaAstParser extends AbstractParser {
             return (
               position >= v.startIndex &&
               position <= v.endIndex &&
-              value?.type === "lambda_expression"
+              value?.type === "arrow_function"
             );
           });
-        isLambda = !!targetNode;
+        isArrowFunction = !!targetNode;
       }
     } else if (functionName) {
       // Find by function name
       targetNode = tree.rootNode
-        .descendantsOfType("method_declaration")
-        .find((m) => m.childForFieldName("name")?.text === functionName);
+        .descendantsOfType("function_declaration")
+        .find((f) => f.childForFieldName("name")?.text === functionName);
 
       if (!targetNode) {
         targetNode = tree.rootNode
-          .descendantsOfType("constructor_declaration")
-          .find((c) => c.childForFieldName("name")?.text === functionName);
-        isConstructor = !!targetNode;
+          .descendantsOfType("method_definition")
+          .find((f) => f.childForFieldName("name")?.text === functionName);
+        isMethod = !!targetNode;
       }
 
       if (!targetNode) {
@@ -151,25 +150,23 @@ export class JavaAstParser extends AbstractParser {
           .find(
             (v) =>
               v.childForFieldName("name")?.text === functionName &&
-              v.childForFieldName("value")?.type === "lambda_expression"
+              v.childForFieldName("value")?.type === "arrow_function"
           );
-        isLambda = !!targetNode;
+        isArrowFunction = !!targetNode;
       }
     } else {
-      // Get first method/constructor/lambda
+      // Get first function
       targetNode =
-        tree.rootNode.descendantsOfType("method_declaration")[0] ||
-        tree.rootNode.descendantsOfType("constructor_declaration")[0] ||
+        tree.rootNode.descendantsOfType("function_declaration")[0] ||
+        tree.rootNode.descendantsOfType("method_definition")[0] ||
         tree.rootNode
           .descendantsOfType("variable_declarator")
-          .find(
-            (v) => v.childForFieldName("value")?.type === "lambda_expression"
-          );
+          .find((v) => v.childForFieldName("value")?.type === "arrow_function");
 
-      if (targetNode?.type === "constructor_declaration") {
-        isConstructor = true;
+      if (targetNode?.type === "method_definition") {
+        isMethod = true;
       } else if (targetNode?.type === "variable_declarator") {
-        isLambda = true;
+        isArrowFunction = true;
       }
     }
 
@@ -178,7 +175,7 @@ export class JavaAstParser extends AbstractParser {
         nodes: [
           {
             id: "A",
-            label: "Place cursor inside a method to generate a flowchart.",
+            label: "Place cursor inside a function to generate a flowchart.",
             shape: "rect",
           },
         ],
@@ -187,32 +184,32 @@ export class JavaAstParser extends AbstractParser {
       };
     }
 
-    this.currentMethodIsLambda = isLambda;
+    this.currentFunctionIsArrow = isArrowFunction;
 
-    // Get method body and name
+    // Get function body and name
     let bodyToProcess: Parser.SyntaxNode | null = null;
     let funcNameStr = "";
 
-    if (isLambda) {
-      const lambdaExpr = targetNode.childForFieldName("value");
-      bodyToProcess = lambdaExpr?.childForFieldName("body") || null;
+    if (isArrowFunction) {
+      const arrowFunc = targetNode.childForFieldName("value");
+      bodyToProcess = arrowFunc?.childForFieldName("body") || null;
       funcNameStr = this.escapeString(
-        targetNode.childForFieldName("name")?.text || "[anonymous lambda]"
+        targetNode.childForFieldName("name")?.text || "[anonymous arrow]"
       );
-    } else if (isConstructor) {
-      bodyToProcess = targetNode.childForFieldName("body");
-      funcNameStr = this.escapeString(
-        targetNode.childForFieldName("name")?.text || "[constructor]"
-      );
-    } else {
+    } else if (isMethod) {
       bodyToProcess = targetNode.childForFieldName("body");
       funcNameStr = this.escapeString(
         targetNode.childForFieldName("name")?.text || "[anonymous method]"
       );
+    } else {
+      bodyToProcess = targetNode.childForFieldName("body");
+      funcNameStr = this.escapeString(
+        targetNode.childForFieldName("name")?.text || "[anonymous function]"
+      );
     }
 
     const title = `Flowchart for ${
-      isLambda ? "lambda" : isConstructor ? "constructor" : "method"
+      isArrowFunction ? "arrow function" : isMethod ? "method" : "function"
     }: ${funcNameStr}`;
 
     if (!bodyToProcess) {
@@ -220,7 +217,7 @@ export class JavaAstParser extends AbstractParser {
         nodes: [
           this.createSemanticNode(
             "A",
-            "Method has no body.",
+            "Function has no body.",
             NodeType.PROCESS
           ),
         ],
@@ -242,9 +239,9 @@ export class JavaAstParser extends AbstractParser {
       this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
     );
 
-    // For lambda expressions with expression bodies, handle them differently
+    // For arrow functions with expression bodies, handle them differently
     const bodyResult =
-      isLambda && bodyToProcess.type !== "block"
+      isArrowFunction && bodyToProcess.type !== "statement_block"
         ? this.processStatement(bodyToProcess, exitId)
         : this.processBlock(bodyToProcess, exitId);
 
@@ -298,9 +295,9 @@ export class JavaAstParser extends AbstractParser {
       );
     }
 
-    // Handle ternary operator
-    if (statement.type === "ternary_expression") {
-      return this.processTernaryExpression(
+    // Handle conditional expressions (ternary operator)
+    if (statement.type === "conditional_expression") {
+      return this.processConditionalExpression(
         statement,
         exitId,
         loopContext,
@@ -318,12 +315,8 @@ export class JavaAstParser extends AbstractParser {
         );
       case "for_statement":
         return this.processForStatement(statement, exitId, finallyContext);
-      case "enhanced_for_statement":
-        return this.processEnhancedForStatement(
-          statement,
-          exitId,
-          finallyContext
-        );
+      case "for_in_statement":
+        return this.processForInStatement(statement, exitId, finallyContext);
       case "while_statement":
         return this.processWhileStatement(statement, exitId, finallyContext);
       case "do_statement":
@@ -335,7 +328,6 @@ export class JavaAstParser extends AbstractParser {
           loopContext,
           finallyContext
         );
-      case "switch_expression":
       case "switch_statement":
         return this.processSwitchStatement(
           statement,
@@ -355,13 +347,6 @@ export class JavaAstParser extends AbstractParser {
         return loopContext
           ? this.processContinueStatement(statement, loopContext)
           : this.processDefaultStatement(statement);
-      case "assert_statement":
-        return this.processAssertStatement(
-          statement,
-          exitId,
-          loopContext,
-          finallyContext
-        );
       case "empty_statement":
         return this.createProcessResult();
       default: {
@@ -369,7 +354,7 @@ export class JavaAstParser extends AbstractParser {
         let expressionNode: Parser.SyntaxNode | undefined;
         let assignmentTargetNode: Parser.SyntaxNode | undefined;
 
-        if (statement.type === "local_variable_declaration") {
+        if (statement.type === "variable_declaration") {
           return this.processVariableDeclaration(
             statement,
             exitId,
@@ -395,29 +380,25 @@ export class JavaAstParser extends AbstractParser {
 
         // Handle ternary expressions in assignments
         if (
-          expressionNode?.type === "ternary_expression" &&
+          expressionNode?.type === "conditional_expression" &&
           assignmentTargetNode
         ) {
-          const conditionNode = expressionNode.childForFieldName("condition");
-          const consequenceNode =
-            expressionNode.childForFieldName("consequence");
-          const alternativeNode =
-            expressionNode.childForFieldName("alternative");
-
-          if (!conditionNode || !consequenceNode || !alternativeNode) {
+          const namedChildren = expressionNode.namedChildren;
+          if (namedChildren.length < 3)
             return this.processDefaultStatement(statement);
-          }
 
           const targetText = this.escapeString(assignmentTargetNode.text);
-          const conditionId = this.generateNodeId("ternary_cond");
+          const [consequenceNode, conditionNode, alternativeNode] =
+            namedChildren;
+          const conditionId = this.generateNodeId("cond_expr");
 
           const nodes: FlowchartNode[] = [
-            this.createSemanticNode(
-              conditionId,
-              conditionNode.text,
-              NodeType.DECISION,
-              conditionNode
-            ),
+            {
+              id: conditionId,
+              label: this.escapeString(conditionNode.text),
+              shape: "diamond",
+              style: this.nodeStyles.decision,
+            },
           ];
           const edges: FlowchartEdge[] = [];
 
@@ -428,14 +409,12 @@ export class JavaAstParser extends AbstractParser {
           });
 
           const consequenceId = this.generateNodeId("ternary_true");
-          nodes.push(
-            this.createSemanticNode(
-              consequenceId,
-              `${targetText} = ${this.escapeString(consequenceNode.text)}`,
-              NodeType.ASSIGNMENT,
-              statement
-            )
-          );
+          nodes.push({
+            id: consequenceId,
+            label: `${targetText} = ${this.escapeString(consequenceNode.text)}`,
+            shape: "rect",
+            style: this.nodeStyles.process,
+          });
           this.locationMap.push({
             start: statement.startIndex,
             end: statement.endIndex,
@@ -444,14 +423,12 @@ export class JavaAstParser extends AbstractParser {
           edges.push({ from: conditionId, to: consequenceId, label: "true" });
 
           const alternativeId = this.generateNodeId("ternary_false");
-          nodes.push(
-            this.createSemanticNode(
-              alternativeId,
-              `${targetText} = ${this.escapeString(alternativeNode.text)}`,
-              NodeType.ASSIGNMENT,
-              statement
-            )
-          );
+          nodes.push({
+            id: alternativeId,
+            label: `${targetText} = ${this.escapeString(alternativeNode.text)}`,
+            shape: "rect",
+            style: this.nodeStyles.process,
+          });
           this.locationMap.push({
             start: statement.startIndex,
             end: statement.endIndex,
@@ -465,8 +442,8 @@ export class JavaAstParser extends AbstractParser {
           ]);
         }
 
-        // For lambda expressions, treat expressions as return statements
-        return this.currentMethodIsLambda
+        // For arrow functions, treat expressions as return statements
+        return this.currentFunctionIsArrow
           ? this.processReturnStatementForExpression(
               statement,
               exitId,
@@ -479,28 +456,25 @@ export class JavaAstParser extends AbstractParser {
 
   // --- PRIVATE HELPER AND PROCESSING METHODS --- //
 
-  private processTernaryExpression(
-    ternaryNode: Parser.SyntaxNode,
+  private processConditionalExpression(
+    condExprNode: Parser.SyntaxNode,
     exitId: string,
     loopContext?: LoopContext,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    const conditionNode = ternaryNode.childForFieldName("condition");
-    const consequenceNode = ternaryNode.childForFieldName("consequence");
-    const alternativeNode = ternaryNode.childForFieldName("alternative");
+    const namedChildren = condExprNode.namedChildren;
+    if (namedChildren.length < 3)
+      return this.processDefaultStatement(condExprNode);
 
-    if (!conditionNode || !consequenceNode || !alternativeNode) {
-      return this.processDefaultStatement(ternaryNode);
-    }
-
-    const conditionId = this.generateNodeId("ternary_cond");
+    const [consequenceNode, conditionNode, alternativeNode] = namedChildren;
+    const conditionId = this.generateNodeId("cond_expr");
     const nodes: FlowchartNode[] = [
-      this.createSemanticNode(
-        conditionId,
-        conditionNode.text,
-        NodeType.DECISION,
-        conditionNode
-      ),
+      {
+        id: conditionId,
+        label: this.escapeString(conditionNode.text),
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+      },
     ];
     this.locationMap.push({
       start: conditionNode.startIndex,
@@ -550,7 +524,7 @@ export class JavaAstParser extends AbstractParser {
       nodes,
       edges,
       conditionId,
-      this.currentMethodIsLambda
+      this.currentFunctionIsArrow
         ? []
         : [...consequenceResult.exitPoints, ...alternativeResult.exitPoints],
       nodesConnectedToExit
@@ -568,14 +542,14 @@ export class JavaAstParser extends AbstractParser {
     if (!ifConditionNode || !ifConsequenceNode)
       return this.createProcessResult();
 
-    const ifConditionId = this.generateNodeId("if_cond");
+    const ifConditionId = this.generateNodeId("cond");
     const nodes: FlowchartNode[] = [
-      this.createSemanticNode(
-        ifConditionId,
-        ifConditionNode.text,
-        NodeType.DECISION,
-        ifConditionNode
-      ),
+      {
+        id: ifConditionId,
+        label: this.escapeString(ifConditionNode.text),
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+      },
     ];
     this.locationMap.push({
       start: ifConditionNode.startIndex,
@@ -713,18 +687,16 @@ export class JavaAstParser extends AbstractParser {
     );
   }
 
-  private processEnhancedForStatement(
-    forNode: Parser.SyntaxNode,
+  private processForInStatement(
+    forInNode: Parser.SyntaxNode,
     exitId: string,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    const variable = forNode.childForFieldName("name");
-    const iterable = forNode.childForFieldName("value");
-    const headerText = `for (${variable?.text || ""} : ${
-      iterable?.text || ""
-    })`;
-    const headerId = this.generateNodeId("enhanced_for_header");
-    const loopExitId = this.generateNodeId("enhanced_for_exit");
+    const left = forInNode.childForFieldName("left");
+    const right = forInNode.childForFieldName("right");
+    const headerText = `for (${left?.text || ""} in ${right?.text || ""})`;
+    const headerId = this.generateNodeId("for_in_header");
+    const loopExitId = this.generateNodeId("for_in_exit");
 
     const nodes: FlowchartNode[] = [
       {
@@ -736,8 +708,8 @@ export class JavaAstParser extends AbstractParser {
       { id: loopExitId, label: "end loop", shape: "stadium" },
     ];
     this.locationMap.push({
-      start: forNode.startIndex,
-      end: forNode.endIndex,
+      start: forInNode.startIndex,
+      end: forInNode.endIndex,
       nodeId: headerId,
     });
 
@@ -746,7 +718,7 @@ export class JavaAstParser extends AbstractParser {
       continueTargetId: headerId,
     };
     const bodyResult = this.processBlock(
-      forNode.childForFieldName("body")!,
+      forInNode.childForFieldName("body")!,
       exitId,
       loopContext,
       finallyContext
@@ -905,7 +877,7 @@ export class JavaAstParser extends AbstractParser {
     loopContext?: LoopContext,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    const discriminantNode = switchNode.childForFieldName("condition");
+    const discriminantNode = switchNode.childForFieldName("value");
     if (!discriminantNode) return this.processDefaultStatement(switchNode);
 
     const switchId = this.generateNodeId("switch");
@@ -930,100 +902,80 @@ export class JavaAstParser extends AbstractParser {
     const body = switchNode.childForFieldName("body");
     const cases =
       body?.namedChildren.filter(
-        (child) => child.type === "switch_block_statement_group"
+        (child) =>
+          child.type === "switch_case" || child.type === "switch_default"
       ) || [];
 
     let lastCaseExitPoints: { id: string; label?: string }[] = [
       { id: switchId },
     ];
 
-    for (const caseGroup of cases) {
-      const labels = caseGroup.namedChildren.filter(
-        (child) => child.type === "switch_label"
+    for (const caseNode of cases) {
+      const isDefault = caseNode.type === "switch_default";
+      const valueNode = caseNode.childForFieldName("value");
+      const caseLabel = isDefault
+        ? "default"
+        : `case ${this.escapeString(valueNode?.text || "")}`;
+
+      const caseId = this.generateNodeId("case");
+      nodes.push({
+        id: caseId,
+        label: caseLabel,
+        shape: "diamond",
+        style: this.nodeStyles.decision,
+      });
+      this.locationMap.push({
+        start: caseNode.startIndex,
+        end: caseNode.endIndex,
+        nodeId: caseId,
+      });
+
+      // Connect from previous case or switch
+      lastCaseExitPoints.forEach((ep) => {
+        edges.push({ from: ep.id, to: caseId, label: ep.label || "no match" });
+      });
+
+      // Process case body
+      const caseBody = caseNode.namedChildren.filter(
+        (child) =>
+          child.type !== "switch_case" && child.type !== "switch_default"
       );
 
-      // Process each label in the group
-      for (let i = 0; i < labels.length; i++) {
-        const label = labels[i];
-        const isDefault = label.namedChildren.some(
-          (child) => child.type === "default"
-        );
-        const valueNode = label.namedChildren.find(
-          (child) => child.type !== "default"
-        );
-        const caseLabel = isDefault
-          ? "default"
-          : `case ${this.escapeString(valueNode?.text || "")}`;
+      if (caseBody.length > 0) {
+        let caseExitPoints: { id: string; label?: string }[] = [
+          { id: caseId, label: "match" },
+        ];
 
-        const caseId = this.generateNodeId("case");
-        nodes.push({
-          id: caseId,
-          label: caseLabel,
-          shape: "diamond",
-          style: this.nodeStyles.decision,
-        });
-        this.locationMap.push({
-          start: label.startIndex,
-          end: label.endIndex,
-          nodeId: caseId,
-        });
-
-        // Connect from previous case or switch
-        lastCaseExitPoints.forEach((ep) => {
-          edges.push({
-            from: ep.id,
-            to: caseId,
-            label: ep.label || "no match",
-          });
-        });
-
-        if (i === labels.length - 1) {
-          // Process statements for the last label in the group
-          const statements = caseGroup.namedChildren.filter(
-            (child) => child.type !== "switch_label"
+        for (const stmt of caseBody) {
+          const stmtResult = this.processStatement(
+            stmt,
+            exitId,
+            loopContext,
+            finallyContext
+          );
+          nodes.push(...stmtResult.nodes);
+          edges.push(...stmtResult.edges);
+          stmtResult.nodesConnectedToExit.forEach((n) =>
+            nodesConnectedToExit.add(n)
           );
 
-          if (statements.length > 0) {
-            let caseExitPoints: { id: string; label?: string }[] = [
-              { id: caseId, label: "match" },
-            ];
-
-            for (const stmt of statements) {
-              const stmtResult = this.processStatement(
-                stmt,
-                exitId,
-                loopContext,
-                finallyContext
-              );
-              nodes.push(...stmtResult.nodes);
-              edges.push(...stmtResult.edges);
-              stmtResult.nodesConnectedToExit.forEach((n) =>
-                nodesConnectedToExit.add(n)
-              );
-
-              if (stmtResult.entryNodeId) {
-                caseExitPoints.forEach((ep) => {
-                  edges.push({
-                    from: ep.id,
-                    to: stmtResult.entryNodeId!,
-                    label: ep.label,
-                  });
-                });
-                caseExitPoints = stmtResult.exitPoints;
-              }
-            }
-
-            allExitPoints.push(...caseExitPoints);
-            lastCaseExitPoints = [{ id: caseId, label: "no match" }];
-          } else {
-            lastCaseExitPoints = [{ id: caseId, label: "no match" }];
-            allExitPoints.push({ id: caseId, label: "match" });
+          if (stmtResult.entryNodeId) {
+            caseExitPoints.forEach((ep) => {
+              edges.push({
+                from: ep.id,
+                to: stmtResult.entryNodeId!,
+                label: ep.label,
+              });
+            });
+            caseExitPoints = stmtResult.exitPoints;
           }
-        } else {
-          // Fall through to next label
-          allExitPoints.push({ id: caseId, label: "match" });
-          lastCaseExitPoints = [{ id: caseId, label: "no match" }];
         }
+
+        allExitPoints.push(...caseExitPoints);
+        lastCaseExitPoints = [{ id: caseId, label: "no match" }];
+      } else {
+        lastCaseExitPoints = [{ id: caseId, label: "no match" }];
+        allExitPoints.push({ id: caseId, label: "match" });
       }
     }
 
@@ -1062,27 +1014,22 @@ export class JavaAstParser extends AbstractParser {
     // Process finally clause first to create context
     let newFinallyContext: { finallyEntryId: string } | undefined;
     let finallyResult: ProcessResult | null = null;
-    const finallyClause = tryNode.namedChildren.find(
-      (child) => child.type === "finally_clause"
-    );
+    const finallyClause = tryNode.childForFieldName("finalizer");
 
     if (finallyClause) {
-      const finallyBody = finallyClause.childForFieldName("body");
-      if (finallyBody) {
-        finallyResult = this.processBlock(
-          finallyBody,
-          exitId,
-          loopContext,
-          finallyContext
+      finallyResult = this.processBlock(
+        finallyClause,
+        exitId,
+        loopContext,
+        finallyContext
+      );
+      if (finallyResult.entryNodeId) {
+        nodes.push(...finallyResult.nodes);
+        edges.push(...finallyResult.edges);
+        finallyResult.nodesConnectedToExit.forEach((n) =>
+          nodesConnectedToExit.add(n)
         );
-        if (finallyResult.entryNodeId) {
-          nodes.push(...finallyResult.nodes);
-          edges.push(...finallyResult.edges);
-          finallyResult.nodesConnectedToExit.forEach((n) =>
-            nodesConnectedToExit.add(n)
-          );
-          newFinallyContext = { finallyEntryId: finallyResult.entryNodeId };
-        }
+        newFinallyContext = { finallyEntryId: finallyResult.entryNodeId };
       }
     }
 
@@ -1119,47 +1066,40 @@ export class JavaAstParser extends AbstractParser {
     });
 
     // Process catch clauses
-    const catchClauses = tryNode.namedChildren.filter(
-      (child) => child.type === "catch_clause"
-    );
-    for (const catchClause of catchClauses) {
-      const parameter = catchClause.childForFieldName("parameter");
-      const catchType = parameter
-        ? this.escapeString(parameter.text)
-        : "Exception";
+    const handler = tryNode.childForFieldName("handler");
+    if (handler) {
+      const parameter = handler.childForFieldName("parameter");
+      const catchType = parameter ? this.escapeString(parameter.text) : "error";
 
-      const catchBody = catchClause.childForFieldName("body");
-      if (catchBody) {
-        const catchResult = this.processBlock(
-          catchBody,
-          exitId,
-          loopContext,
-          newFinallyContext || finallyContext
-        );
-        nodes.push(...catchResult.nodes);
-        edges.push(...catchResult.edges);
-        catchResult.nodesConnectedToExit.forEach((n) =>
-          nodesConnectedToExit.add(n)
-        );
+      const catchResult = this.processBlock(
+        handler.childForFieldName("body")!,
+        exitId,
+        loopContext,
+        newFinallyContext || finallyContext
+      );
+      nodes.push(...catchResult.nodes);
+      edges.push(...catchResult.edges);
+      catchResult.nodesConnectedToExit.forEach((n) =>
+        nodesConnectedToExit.add(n)
+      );
 
-        if (catchResult.entryNodeId) {
-          edges.push({
-            from: entryId,
-            to: catchResult.entryNodeId,
-            label: `catch ${catchType}`,
-          });
-          catchResult.exitPoints.forEach((ep) => {
-            if (finallyResult?.entryNodeId) {
-              edges.push({
-                from: ep.id,
-                to: finallyResult.entryNodeId,
-                label: ep.label,
-              });
-            } else {
-              allExitPoints.push(ep);
-            }
-          });
-        }
+      if (catchResult.entryNodeId) {
+        edges.push({
+          from: entryId,
+          to: catchResult.entryNodeId,
+          label: `catch ${catchType}`,
+        });
+        catchResult.exitPoints.forEach((ep) => {
+          if (finallyResult?.entryNodeId) {
+            edges.push({
+              from: ep.id,
+              to: finallyResult.entryNodeId,
+              label: ep.label,
+            });
+          } else {
+            allExitPoints.push(ep);
+          }
+        });
       }
     }
 
@@ -1246,38 +1186,6 @@ export class JavaAstParser extends AbstractParser {
     );
   }
 
-  private processAssertStatement(
-    assertNode: Parser.SyntaxNode,
-    exitId: string,
-    loopContext?: LoopContext,
-    finallyContext?: { finallyEntryId: string }
-  ): ProcessResult {
-    const conditionNode = assertNode.namedChild(0);
-    const messageNode = assertNode.namedChildren[1];
-
-    const nodeId = this.generateNodeId("assert");
-    let labelText = "assert";
-    if (conditionNode) {
-      labelText = `assert ${this.escapeString(conditionNode.text)}`;
-      if (messageNode) {
-        labelText += ` : ${this.escapeString(messageNode.text)}`;
-      }
-    }
-
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "rect",
-      style: this.nodeStyles.process,
-    };
-    this.locationMap.push({
-      start: assertNode.startIndex,
-      end: assertNode.endIndex,
-      nodeId,
-    });
-    return this.createProcessResult([node], [], nodeId, [{ id: nodeId }]);
-  }
-
   private processBreakStatement(
     breakNode: Parser.SyntaxNode,
     loopContext: LoopContext
@@ -1354,7 +1262,7 @@ export class JavaAstParser extends AbstractParser {
       const name = declarator.childForFieldName("name");
       const value = declarator.childForFieldName("value");
 
-      if (value?.type === "ternary_expression") {
+      if (value?.type === "conditional_expression") {
         return this.processStatement(
           declNode,
           exitId,
@@ -1364,10 +1272,9 @@ export class JavaAstParser extends AbstractParser {
       }
 
       const nodeId = this.generateNodeId("var_decl");
-      const type = declNode.childForFieldName("type")?.text || "var";
-      const labelText = `${type} ${name?.text || "variable"}${
-        value ? ` = ${this.escapeString(value.text)}` : ""
-      }`;
+      const labelText = `${declNode.childForFieldName("kind")?.text || "var"} ${
+        name?.text || "variable"
+      }${value ? ` = ${this.escapeString(value.text)}` : ""}`;
       const node: FlowchartNode = {
         id: nodeId,
         label: labelText,
@@ -1393,10 +1300,9 @@ export class JavaAstParser extends AbstractParser {
       const value = declarator.childForFieldName("value");
 
       const nodeId = this.generateNodeId("var_decl");
-      const type = declNode.childForFieldName("type")?.text || "var";
-      const labelText = `${type} ${name?.text || "variable"}${
-        value ? ` = ${this.escapeString(value.text)}` : ""
-      }`;
+      const labelText = `${declNode.childForFieldName("kind")?.text || "var"} ${
+        name?.text || "variable"
+      }${value ? ` = ${this.escapeString(value.text)}` : ""}`;
       const node: FlowchartNode = {
         id: nodeId,
         label: labelText,

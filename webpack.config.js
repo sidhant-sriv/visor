@@ -1,10 +1,12 @@
 //@ts-check
+
 "use strict";
 
 const path = require("path");
+const CopyPlugin = require("copy-webpack-plugin");
 
-/** @type {import('webpack').Configuration} */
-const extensionConfig = {
+/**@type {import('webpack').Configuration}*/
+const config = {
   target: "node",
   mode: "none",
 
@@ -14,14 +16,9 @@ const extensionConfig = {
     filename: "extension.js",
     libraryTarget: "commonjs2",
   },
+  devtool: false,
   externals: {
     vscode: "commonjs vscode",
-    "tree-sitter": "commonjs tree-sitter",
-    "tree-sitter-python": "commonjs tree-sitter-python",
-    "tree-sitter-typescript": "commonjs tree-sitter-typescript",
-    "tree-sitter-javascript": "commonjs tree-sitter-javascript",
-    "tree-sitter-java": "commonjs tree-sitter-java",
-    "tree-sitter-cpp": "commonjs tree-sitter-cpp",
   },
   resolve: {
     extensions: [".ts", ".js"],
@@ -31,18 +28,72 @@ const extensionConfig = {
       {
         test: /\.ts$/,
         exclude: /node_modules/,
-        use: [{ loader: "ts-loader" }],
-      },
-      {
-        test: /\.node$/,
-        use: "node-loader",
+        use: [
+          {
+            loader: "ts-loader",
+          },
+        ],
       },
     ],
   },
-  devtool: "nosources-source-map",
-  infrastructureLogging: {
-    level: "log",
-  },
+  plugins: [
+    new CopyPlugin({
+      patterns: [
+        {
+          from: path.resolve(
+            __dirname,
+            "src",
+            "logic",
+            "language-services",
+            "python",
+            "tree-sitter-python.wasm"
+          ),
+          to: ".",
+        },
+        {
+          from: path.resolve(
+            __dirname,
+            "src",
+            "logic",
+            "language-services",
+            "typescript",
+            "tree-sitter-typescript.wasm"
+          ),
+          to: ".",
+        },
+        {
+          from: path.resolve(
+            __dirname,
+            "src",
+            "logic",
+            "language-services",
+            "java",
+            "tree-sitter-java.wasm"
+          ),
+          to: ".",
+        },
+        {
+          from: path.resolve(
+            __dirname,
+            "src",
+            "logic",
+            "language-services",
+            "cpp",
+            "tree-sitter-cpp.wasm"
+          ),
+          to: ".",
+        },
+        {
+          from: path.resolve(
+            __dirname,
+            "node_modules",
+            "web-tree-sitter",
+            "tree-sitter.wasm"
+          ),
+          to: ".",
+        },
+      ],
+    }),
+  ],
 };
-
-module.exports = [extensionConfig];
+module.exports = config;

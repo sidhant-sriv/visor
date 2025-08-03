@@ -1,9 +1,9 @@
 {
   "name": "visor",
-  "displayName": "visor",
+  "displayName": "Visor",
+  "version": "0.0.10",
   "publisher": "sidhantsriv",
   "description": "Makes a flowchart on the side for your code for better visualization.",
-  "version": "0.0.7",
   "repository": {
     "type": "git",
     "url": "https://github.com/sidhant-sriv/sidvis.git"
@@ -52,28 +52,59 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Visor",
+      "properties": {
+        "visor.nodeReadability.theme": {
+          "type": "string",
+          "enum": [
+            "monokai",
+            "catppuccin",
+            "github",
+            "solarized",
+            "one-dark-pro",
+            "dracula",
+            "material-theme",
+            "nord",
+            "tokyo-night"
+          ],
+          "enumDescriptions": [
+            "Monokai - Classic dark theme with vibrant syntax highlighting",
+            "Catppuccin - Popular pastel theme with excellent readability",
+            "GitHub - Clean and modern theme matching GitHub's interface",
+            "Solarized - Precision colors for machines and people",
+            "One Dark Pro - Atom's iconic One Dark theme",
+            "Dracula - A dark theme for vampires and developers",
+            "Material Theme - Google's Material Design colors",
+            "Nord - An arctic, north-bluish color palette",
+            "Tokyo Night - A clean, dark theme inspired by Tokyo's neon nights"
+          ],
+          "default": "monokai",
+          "description": "Choose the color theme for flowchart nodes"
+        }
+      }
     }
   },
   "scripts": {
     "vscode:prepublish": "yarn run package",
-    "compile": "webpack",
+    "clean": "rm -rf dist",
+    "compile": "yarn run clean && webpack",
     "watch": "webpack --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
+    "package": "yarn run clean && webpack --mode production",
     "compile-tests": "tsc -p . --outDir out",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "yarn run compile-tests && yarn run compile && yarn run lint",
     "lint": "eslint src",
     "test": "vscode-test",
-    "perf": "tsc -p . --outDir out && node out/src/performance-test.js",
-    "perf:quick": "tsc -p . --outDir out && node out/src/performance-test.js --quick",
-    "perf:compare": "tsc -p . --outDir out && node out/src/performance-test.js --compare"
+    "publish:patch": "vsce publish patch",
+    "publish:minor": "vsce publish minor",
+    "publish:major": "vsce publish major",
+    "release": "yarn run pretest && vsce publish patch && git push --follow-tags"
   },
   "dependencies": {
-    "tree-sitter": "^0.21.1",
-    "tree-sitter-cpp": "^0.23.4",
-    "tree-sitter-java": "^0.23.5",
-    "tree-sitter-python": "^0.23.6",
-    "tree-sitter-typescript": "^0.23.2"
+    "@vscode/tree-sitter-wasm": "^0.1.4",
+    "web-tree-sitter": "^0.22.2"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
@@ -83,9 +114,8 @@
     "@typescript-eslint/parser": "^8.31.1",
     "@vscode/test-cli": "^0.0.11",
     "@vscode/test-electron": "^2.5.2",
-    "copy-webpack-plugin": "^13.0.0",
+    "copy-webpack-plugin": "^12.0.2",
     "eslint": "^9.25.1",
-    "node-loader": "^2.1.0",
     "ts-loader": "^9.5.2",
     "typescript": "^5.8.3",
     "webpack": "^5.99.7",

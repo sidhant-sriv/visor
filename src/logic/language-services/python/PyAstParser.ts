@@ -1,42 +1,33 @@
-import Parser from "tree-sitter";
-import Python from "tree-sitter-python";
+import Parser from "web-tree-sitter";
+import { AbstractParser } from "../../common/AbstractParser";
 import {
   FlowchartIR,
   FlowchartNode,
   FlowchartEdge,
-  LocationMapEntry,
+  NodeType,
 } from "../../../ir/ir";
-import { AbstractParser } from "../../common/AbstractParser";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
-
-interface TreeSitterLanguage {
-  name: string;
-  language: unknown;
-  nodeTypeInfo?: unknown;
-}
-
-type PythonLanguage = TreeSitterLanguage;
 
 export class PyAstParser extends AbstractParser {
   private currentFunctionIsLambda = false;
 
-  protected log(message: string, ...args: any[]) {
-    if (this.debug) console.log(`[PyAstParser] ${message}`, ...args);
-  }
-
-  protected getParser(): Parser {
-    return this.getCachedParser("python", () => {
-      const parser = new Parser();
-      parser.setLanguage(Python as PythonLanguage);
-      return parser;
-    });
+  /**
+   * Asynchronously creates and initializes an instance of PyAstParser.
+   * This is the required entry point for creating a parser instance.
+   * @param wasmPath The file path to the tree-sitter-python.wasm file.
+   * @returns A promise that resolves to a new PyAstParser instance.
+   */
+  public static async create(wasmPath: string): Promise<PyAstParser> {
+    await Parser.init();
+    const language = await Parser.Language.load(wasmPath);
+    const parser = new Parser();
+    parser.setLanguage(language);
+    return new PyAstParser(parser);
   }
 
   public listFunctions(sourceCode: string): string[] {
     return this.measurePerformance("listFunctions", () => {
-      const parser = this.getParser();
-      const tree = parser.parse(sourceCode);
-
+      const tree = this.parser.parse(sourceCode);
       const funcNames = tree.rootNode
         .descendantsOfType("function_definition")
         .map(
@@ -57,10 +48,7 @@ export class PyAstParser extends AbstractParser {
     sourceCode: string,
     position: number
   ): string | undefined {
-    const parser = new Parser();
-    parser.setLanguage(Python as PythonLanguage);
-    const tree = parser.parse(sourceCode);
-
+    const tree = this.parser.parse(sourceCode);
     const func = tree.rootNode
       .descendantsOfType("function_definition")
       .find((f) => position >= f.startIndex && position <= f.endIndex);
@@ -77,117 +65,13 @@ export class PyAstParser extends AbstractParser {
     return lambda?.childForFieldName("left")?.text || "[anonymous lambda]";
   }
 
-  private isHofCall(node: Parser.SyntaxNode | null | undefined): boolean {
-    if (!node || node.type !== "call") return false;
-    const functionName = node
-      .childForFieldName("function")
-      ?.text.split(".")
-      .pop();
-    return ["map", "filter", "reduce"].includes(functionName!);
-  }
-
-  private generateHofFlowchart(
-    statementNode: Parser.SyntaxNode,
-    hofCallNode: Parser.SyntaxNode,
-    containerName?: string
-  ): FlowchartIR {
-    this.nodeIdCounter = 0;
-    this.locationMap = [];
-    const nodes: FlowchartNode[] = [];
-    const edges: FlowchartEdge[] = [];
-
-    const hofResult = this.processHigherOrderFunctionCall(hofCallNode);
-    if (!hofResult) return this.generateFlowchart(statementNode.text);
-
-    nodes.push(...hofResult.nodes);
-    edges.push(...hofResult.edges);
-    let entryPointId = hofResult.entryNodeId;
-    let finalExitPoints = hofResult.exitPoints;
-
-    if (["assignment", "expression_statement"].includes(statementNode.type)) {
-      const assignment =
-        statementNode.type === "assignment"
-          ? statementNode
-          : statementNode.namedChild(0)!;
-      const assignId = this.generateNodeId("assign_hof");
-      const leftText = this.escapeString(
-        assignment.childForFieldName("left")!.text
-      );
-      nodes.unshift({
-        id: assignId,
-        label: `${leftText} = ...`,
-        shape: "rect",
-        style: this.nodeStyles.process,
-      });
-      if (entryPointId) edges.unshift({ from: assignId, to: entryPointId });
-      entryPointId = assignId;
-      this.locationMap.push({
-        start: assignment.childForFieldName("left")!.startIndex,
-        end: assignment.childForFieldName("left")!.endIndex,
-        nodeId: assignId,
-      });
-    }
-
-    if (containerName) {
-      const convertId = this.generateNodeId("convert");
-      nodes.push({
-        id: convertId,
-        label: `Convert to ${containerName}`,
-        shape: "rect",
-        style: this.nodeStyles.process,
-      });
-      finalExitPoints.forEach((ep) =>
-        edges.push({ from: ep.id, to: convertId, label: ep.label })
-      );
-      finalExitPoints = [{ id: convertId }];
-    }
-
-    const startId = this.generateNodeId("start");
-    const endId = this.generateNodeId("end");
-    nodes.unshift({
-      id: startId,
-      label: "Start",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
-    nodes.push({
-      id: endId,
-      label: "End",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
-
-    edges.unshift(
-      entryPointId
-        ? { from: startId, to: entryPointId }
-        : { from: startId, to: endId }
-    );
-    finalExitPoints.forEach((ep) =>
-      edges.push({ from: ep.id, to: endId, label: ep.label })
-    );
-
-    return {
-      nodes,
-      edges,
-      locationMap: this.locationMap,
-      functionRange: {
-        start: statementNode.startIndex,
-        end: statementNode.endIndex,
-      },
-      title: `Flowchart for: ${this.escapeString(statementNode.text)}`,
-      entryNodeId: startId,
-      exitNodeId: endId,
-    };
-  }
-
   public generateFlowchart(
     sourceCode: string,
     functionName?: string,
     position?: number
   ): FlowchartIR {
-    const parser = new Parser();
-    parser.setLanguage(Python as PythonLanguage);
-    const tree = parser.parse(sourceCode);
+    const tree = this.parser.parse(sourceCode);
+    this.resetState();
 
     if (position !== undefined) {
       const statements = tree.rootNode.descendantsOfType([
@@ -230,18 +114,22 @@ export class PyAstParser extends AbstractParser {
 
         if (potentialCallNode?.type === "call") {
           const funcNode = potentialCallNode.childForFieldName("function");
-          const funcName = funcNode?.text;
+          const funcNameText = funcNode?.text;
           const args =
             potentialCallNode.childForFieldName("arguments")?.namedChildren ||
             [];
 
           if (
-            ["list", "tuple", "set"].includes(funcName!) &&
+            ["list", "tuple", "set"].includes(funcNameText!) &&
             args.length === 1 &&
             args[0].type === "call" &&
             this.isHofCall(args[0])
           ) {
-            return this.generateHofFlowchart(baseStatement, args[0], funcName);
+            return this.generateHofFlowchart(
+              baseStatement,
+              args[0],
+              funcNameText
+            );
           } else if (this.isHofCall(potentialCallNode)) {
             return this.generateHofFlowchart(baseStatement, potentialCallNode);
           }
@@ -256,7 +144,6 @@ export class PyAstParser extends AbstractParser {
       targetNode = tree.rootNode
         .descendantsOfType("function_definition")
         .find((f) => position >= f.startIndex && position <= f.endIndex);
-
       if (!targetNode) {
         targetNode = tree.rootNode
           .descendantsOfType("assignment")
@@ -272,7 +159,6 @@ export class PyAstParser extends AbstractParser {
       targetNode = tree.rootNode
         .descendantsOfType("function_definition")
         .find((f) => f.childForFieldName("name")?.text === functionName);
-
       if (!targetNode) {
         targetNode = tree.rootNode
           .descendantsOfType("assignment")
@@ -290,29 +176,39 @@ export class PyAstParser extends AbstractParser {
     if (!targetNode) {
       return {
         nodes: [
-          {
-            id: "A",
-            label:
-              "Place cursor inside a function or statement to generate a flowchart.",
-            shape: "rect",
-          },
+          this.createSemanticNode(
+            "A",
+            "Place cursor inside a function or statement to generate a flowchart.",
+            NodeType.PROCESS
+          ),
         ],
         edges: [],
         locationMap: [],
       };
     }
 
-    this.nodeIdCounter = 0;
-    this.locationMap = [];
     this.currentFunctionIsLambda = isLambda;
-
     const bodyToProcess = isLambda
       ? targetNode.childForFieldName("right")!.childForFieldName("body")
       : targetNode.childForFieldName("body");
+    const funcNameStr = this.escapeString(
+      isLambda
+        ? targetNode.childForFieldName("left")!.text
+        : targetNode.childForFieldName("name")!.text
+    );
+    const title = `Flowchart for ${
+      isLambda ? "lambda" : "function"
+    }: ${funcNameStr}`;
 
     if (!bodyToProcess) {
       return {
-        nodes: [{ id: "A", label: "Function has no body.", shape: "rect" }],
+        nodes: [
+          this.createSemanticNode(
+            "A",
+            "Function has no body.",
+            NodeType.PROCESS
+          ),
+        ],
         edges: [],
         locationMap: [],
       };
@@ -323,23 +219,17 @@ export class PyAstParser extends AbstractParser {
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
-    nodes.push({
-      id: entryId,
-      label: `Start`,
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
-    nodes.push({
-      id: exitId,
-      label: "End",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
+    // Create semantic entry and exit nodes
+    nodes.push(
+      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
+    );
+    nodes.push(
+      this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
+    );
 
     const bodyResult = isLambda
       ? this.processStatement(bodyToProcess, exitId)
       : this.processBlock(bodyToProcess, exitId);
-
     nodes.push(...bodyResult.nodes);
     edges.push(...bodyResult.edges);
 
@@ -365,38 +255,10 @@ export class PyAstParser extends AbstractParser {
       edges: validEdges,
       locationMap: this.locationMap,
       functionRange: { start: targetNode.startIndex, end: targetNode.endIndex },
-      title: `Flowchart for ${
-        isLambda ? "lambda" : "function"
-      }: ${this.escapeString(
-        isLambda
-          ? targetNode.childForFieldName("left")!.text
-          : targetNode.childForFieldName("name")!.text
-      )}`,
+      title,
       entryNodeId: entryId,
       exitNodeId: exitId,
     };
-  }
-
-  private findHofInExpression(
-    expressionNode: Parser.SyntaxNode
-  ): { hofCallNode: Parser.SyntaxNode; containerName?: string } | null {
-    if (expressionNode?.type !== "call") return null;
-
-    const funcNode = expressionNode.childForFieldName("function");
-    const funcName = funcNode?.text;
-    const args =
-      expressionNode.childForFieldName("arguments")?.namedChildren || [];
-
-    if (
-      ["list", "tuple", "set"].includes(funcName!) &&
-      args.length === 1 &&
-      this.isHofCall(args[0])
-    ) {
-      return { hofCallNode: args[0], containerName: funcName };
-    } else if (this.isHofCall(expressionNode)) {
-      return { hofCallNode: expressionNode };
-    }
-    return null;
   }
 
   protected processStatement(
@@ -405,6 +267,19 @@ export class PyAstParser extends AbstractParser {
     loopContext?: LoopContext,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
+    // FIX: Recursively process the content of a parenthesized expression.
+    if (
+      statement.type === "parenthesized_expression" &&
+      statement.namedChild(0)
+    ) {
+      return this.processStatement(
+        statement.namedChild(0)!,
+        exitId,
+        loopContext,
+        finallyContext
+      );
+    }
+
     if (statement.type === "conditional_expression") {
       return this.processConditionalExpression(
         statement,
@@ -467,13 +342,7 @@ export class PyAstParser extends AbstractParser {
           finallyContext
         );
       case "pass_statement":
-        return {
-          nodes: [],
-          edges: [],
-          entryNodeId: undefined,
-          exitPoints: [],
-          nodesConnectedToExit: new Set<string>(),
-        };
+        return this.createProcessResult();
       default: {
         let expressionNode: Parser.SyntaxNode | undefined;
         let assignmentTargetNode: Parser.SyntaxNode | undefined;
@@ -509,14 +378,14 @@ export class PyAstParser extends AbstractParser {
             const conditionId = this.generateNodeId("cond_expr");
 
             const nodes: FlowchartNode[] = [
-              {
-                id: conditionId,
-                label: this.escapeString(conditionNode.text),
-                shape: "diamond",
-                style: this.nodeStyles.decision,
-              },
+              this.createSemanticNode(
+                conditionId,
+                conditionNode.text,
+                NodeType.DECISION,
+                conditionNode
+              ),
             ];
-            const edges: FlowchartEdge[] = []; // FIX: Initialize edges array
+            const edges: FlowchartEdge[] = [];
 
             this.locationMap.push({
               start: conditionNode.startIndex,
@@ -524,16 +393,15 @@ export class PyAstParser extends AbstractParser {
               nodeId: conditionId,
             });
 
-            // True path
             const consequenceId = this.generateNodeId("ternary_true");
-            nodes.push({
-              id: consequenceId,
-              label: `${targetText} = ${this.escapeString(
-                consequenceNode.text
-              )}`,
-              shape: "rect",
-              style: this.nodeStyles.process,
-            });
+            nodes.push(
+              this.createSemanticNode(
+                consequenceId,
+                `${targetText} = ${this.escapeString(consequenceNode.text)}`,
+                NodeType.ASSIGNMENT,
+                statement
+              )
+            );
             this.locationMap.push({
               start: statement.startIndex,
               end: statement.endIndex,
@@ -541,16 +409,15 @@ export class PyAstParser extends AbstractParser {
             });
             edges.push({ from: conditionId, to: consequenceId, label: "True" });
 
-            // False path
             const alternativeId = this.generateNodeId("ternary_false");
-            nodes.push({
-              id: alternativeId,
-              label: `${targetText} = ${this.escapeString(
-                alternativeNode.text
-              )}`,
-              shape: "rect",
-              style: this.nodeStyles.process,
-            });
+            nodes.push(
+              this.createSemanticNode(
+                alternativeId,
+                `${targetText} = ${this.escapeString(alternativeNode.text)}`,
+                NodeType.ASSIGNMENT,
+                statement
+              )
+            );
             this.locationMap.push({
               start: statement.startIndex,
               end: statement.endIndex,
@@ -562,13 +429,10 @@ export class PyAstParser extends AbstractParser {
               label: "False",
             });
 
-            return {
-              nodes,
-              edges,
-              entryNodeId: conditionId,
-              exitPoints: [{ id: consequenceId }, { id: alternativeId }],
-              nodesConnectedToExit: new Set<string>(),
-            };
+            return this.createProcessResult(nodes, edges, conditionId, [
+              { id: consequenceId },
+              { id: alternativeId },
+            ]);
           }
 
           const hofInfo = this.findHofInExpression(expressionNode);
@@ -598,26 +462,23 @@ export class PyAstParser extends AbstractParser {
 
               if (assignmentTargetNode) {
                 const assignId = this.generateNodeId("assign_hof");
-                allNodes.unshift({
-                  id: assignId,
-                  label: `${this.escapeString(
-                    assignmentTargetNode.text
-                  )} = ...`,
-                  shape: "rect",
-                  style: this.nodeStyles.process,
-                });
+                const assignmentNode = this.createAssignmentNode(
+                  assignId,
+                  `${this.escapeString(assignmentTargetNode.text)} = ...`,
+                  assignmentTargetNode
+                );
+                allNodes.unshift(assignmentNode);
                 if (currentEntry)
                   allEdges.unshift({ from: assignId, to: currentEntry });
                 currentEntry = assignId;
               }
 
-              return {
-                nodes: allNodes,
-                edges: allEdges,
-                entryNodeId: currentEntry,
-                exitPoints: currentExits,
-                nodesConnectedToExit: new Set<string>(),
-              };
+              return this.createProcessResult(
+                allNodes,
+                allEdges,
+                currentEntry,
+                currentExits
+              );
             }
           }
         }
@@ -633,36 +494,129 @@ export class PyAstParser extends AbstractParser {
     }
   }
 
-  private processReturnStatementForExpression(
-    exprNode: Parser.SyntaxNode,
-    exitId: string,
-    finallyContext?: { finallyEntryId: string }
-  ): ProcessResult {
-    const nodeId = this.generateNodeId("return");
-    const labelText = `return ${this.escapeString(exprNode.text)}`;
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
-    const edges: FlowchartEdge[] = [
-      {
-        from: nodeId,
-        to: finallyContext ? finallyContext.finallyEntryId : exitId,
-      },
-    ];
-    this.locationMap.push({
-      start: exprNode.startIndex,
-      end: exprNode.endIndex,
-      nodeId,
+  // --- PRIVATE HELPER AND PROCESSING METHODS --- //
+
+  private isHofCall(node: Parser.SyntaxNode | null | undefined): boolean {
+    if (!node || node.type !== "call") return false;
+    const functionName = node
+      .childForFieldName("function")
+      ?.text.split(".")
+      .pop();
+    return ["map", "filter", "reduce"].includes(functionName!);
+  }
+
+  private findHofInExpression(
+    expressionNode: Parser.SyntaxNode
+  ): { hofCallNode: Parser.SyntaxNode; containerName?: string } | null {
+    if (expressionNode?.type !== "call") return null;
+
+    const funcNode = expressionNode.childForFieldName("function");
+    const funcName = funcNode?.text;
+    const args =
+      expressionNode.childForFieldName("arguments")?.namedChildren || [];
+
+    if (
+      ["list", "tuple", "set"].includes(funcName!) &&
+      args.length === 1 &&
+      this.isHofCall(args[0])
+    ) {
+      return { hofCallNode: args[0], containerName: funcName };
+    } else if (this.isHofCall(expressionNode)) {
+      return { hofCallNode: expressionNode };
+    }
+    return null;
+  }
+
+  private generateHofFlowchart(
+    statementNode: Parser.SyntaxNode,
+    hofCallNode: Parser.SyntaxNode,
+    containerName?: string
+  ): FlowchartIR {
+    this.resetState();
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+
+    const hofResult = this.processHigherOrderFunctionCall(hofCallNode);
+    if (!hofResult) return this.generateFlowchart(statementNode.text);
+
+    nodes.push(...hofResult.nodes);
+    edges.push(...hofResult.edges);
+    let entryPointId = hofResult.entryNodeId;
+    let finalExitPoints = hofResult.exitPoints;
+
+    if (["assignment", "expression_statement"].includes(statementNode.type)) {
+      const assignment =
+        statementNode.type === "assignment"
+          ? statementNode
+          : statementNode.namedChild(0)!;
+      const assignId = this.generateNodeId("assign_hof");
+      const leftText = this.escapeString(
+        assignment.childForFieldName("left")!.text
+      );
+      const assignmentNode = this.createAssignmentNode(
+        assignId,
+        `${leftText} = ...`,
+        assignment
+      );
+      nodes.unshift(assignmentNode);
+      if (entryPointId) edges.unshift({ from: assignId, to: entryPointId });
+      entryPointId = assignId;
+      this.locationMap.push({
+        start: assignment.childForFieldName("left")!.startIndex,
+        end: assignment.childForFieldName("left")!.endIndex,
+        nodeId: assignId,
+      });
+    }
+
+    if (containerName) {
+      const convertId = this.generateNodeId("convert");
+      nodes.push({
+        id: convertId,
+        label: `Convert to ${containerName}`,
+        shape: "rect",
+        style: this.nodeStyles.process,
+      });
+      finalExitPoints.forEach((ep) =>
+        edges.push({ from: ep.id, to: convertId, label: ep.label })
+      );
+      finalExitPoints = [{ id: convertId }];
+    }
+
+    const startId = this.generateNodeId("start");
+    const endId = this.generateNodeId("end");
+    nodes.unshift({
+      id: startId,
+      label: "Start",
+      shape: "round",
+      style: this.nodeStyles.terminator,
     });
+    nodes.push({
+      id: endId,
+      label: "End",
+      shape: "round",
+      style: this.nodeStyles.terminator,
+    });
+
+    edges.unshift(
+      entryPointId
+        ? { from: startId, to: entryPointId }
+        : { from: startId, to: endId }
+    );
+    finalExitPoints.forEach((ep) =>
+      edges.push({ from: ep.id, to: endId, label: ep.label })
+    );
+
     return {
-      nodes: [node],
+      nodes,
       edges,
-      entryNodeId: nodeId,
-      exitPoints: [],
-      nodesConnectedToExit: new Set<string>([nodeId]),
+      locationMap: this.locationMap,
+      functionRange: {
+        start: statementNode.startIndex,
+        end: statementNode.endIndex,
+      },
+      title: `Flowchart for: ${this.escapeString(statementNode.text)}`,
+      entryNodeId: startId,
+      exitNodeId: endId,
     };
   }
 
@@ -730,15 +684,15 @@ export class PyAstParser extends AbstractParser {
       });
     }
 
-    return {
+    return this.createProcessResult(
       nodes,
       edges,
-      entryNodeId: conditionId,
-      exitPoints: this.currentFunctionIsLambda
+      conditionId,
+      this.currentFunctionIsLambda
         ? []
         : [...consequenceResult.exitPoints, ...alternativeResult.exitPoints],
-      nodesConnectedToExit,
-    };
+      nodesConnectedToExit
+    );
   }
 
   private processIfStatement(
@@ -750,22 +704,16 @@ export class PyAstParser extends AbstractParser {
     const ifConditionNode = ifNode.childForFieldName("condition");
     const ifConsequenceNode = ifNode.childForFieldName("consequence");
     if (!ifConditionNode || !ifConsequenceNode)
-      return {
-        nodes: [],
-        edges: [],
-        entryNodeId: undefined,
-        exitPoints: [],
-        nodesConnectedToExit: new Set<string>(),
-      };
+      return this.createProcessResult();
 
     const ifConditionId = this.generateNodeId("cond");
     const nodes: FlowchartNode[] = [
-      {
-        id: ifConditionId,
-        label: this.escapeString(ifConditionNode.text),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
+      this.createSemanticNode(
+        ifConditionId,
+        ifConditionNode.text,
+        NodeType.DECISION,
+        ifConditionNode
+      ),
     ];
     this.locationMap.push({
       start: ifConditionNode.startIndex,
@@ -809,12 +757,14 @@ export class PyAstParser extends AbstractParser {
         if (!elifConditionNode || !elifConsequenceNode) continue;
 
         const elifConditionId = this.generateNodeId("cond");
-        nodes.push({
-          id: elifConditionId,
-          label: this.escapeString(elifConditionNode.text),
-          shape: "diamond",
-          style: this.nodeStyles.decision,
-        });
+        nodes.push(
+          this.createSemanticNode(
+            elifConditionId,
+            elifConditionNode.text,
+            NodeType.DECISION,
+            elifConditionNode
+          )
+        );
         this.locationMap.push({
           start: elifConditionNode.startIndex,
           end: elifConditionNode.endIndex,
@@ -883,13 +833,13 @@ export class PyAstParser extends AbstractParser {
       allExitPoints.push({ id: lastConditionId, label: "False" });
     }
 
-    return {
+    return this.createProcessResult(
       nodes,
       edges,
-      entryNodeId: ifConditionId,
-      exitPoints: allExitPoints,
-      nodesConnectedToExit,
-    };
+      ifConditionId,
+      allExitPoints,
+      nodesConnectedToExit
+    );
   }
 
   private processForStatement(
@@ -903,13 +853,18 @@ export class PyAstParser extends AbstractParser {
     const loopExitId = this.generateNodeId("for_exit");
 
     const nodes: FlowchartNode[] = [
-      {
-        id: headerId,
-        label: this.escapeString(`for ${left} in ${right}`),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      this.createSemanticNode(
+        headerId,
+        `for ${left} in ${right}`,
+        NodeType.LOOP_START,
+        forNode
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        forNode
+      ),
     ];
     this.locationMap.push({
       start: forNode.startIndex,
@@ -929,9 +884,6 @@ export class PyAstParser extends AbstractParser {
     );
     nodes.push(...bodyResult.nodes);
     const edges: FlowchartEdge[] = [...bodyResult.edges];
-    const nodesConnectedToExit = new Set<string>(
-      bodyResult.nodesConnectedToExit
-    );
 
     if (bodyResult.entryNodeId) {
       edges.push({ from: headerId, to: bodyResult.entryNodeId, label: "Loop" });
@@ -944,13 +896,13 @@ export class PyAstParser extends AbstractParser {
     );
     edges.push({ from: headerId, to: loopExitId, label: "End Loop" });
 
-    return {
+    return this.createProcessResult(
       nodes,
       edges,
-      entryNodeId: headerId,
-      exitPoints: [{ id: loopExitId }],
-      nodesConnectedToExit,
-    };
+      headerId,
+      [{ id: loopExitId }],
+      bodyResult.nodesConnectedToExit
+    );
   }
 
   private processWhileStatement(
@@ -991,9 +943,6 @@ export class PyAstParser extends AbstractParser {
     );
     nodes.push(...bodyResult.nodes);
     const edges: FlowchartEdge[] = [...bodyResult.edges];
-    const nodesConnectedToExit = new Set<string>(
-      bodyResult.nodesConnectedToExit
-    );
 
     if (bodyResult.entryNodeId) {
       edges.push({
@@ -1010,13 +959,13 @@ export class PyAstParser extends AbstractParser {
     );
     edges.push({ from: conditionId, to: loopExitId, label: "False" });
 
-    return {
+    return this.createProcessResult(
       nodes,
       edges,
-      entryNodeId: conditionId,
-      exitPoints: [{ id: loopExitId }],
-      nodesConnectedToExit,
-    };
+      conditionId,
+      [{ id: loopExitId }],
+      bodyResult.nodesConnectedToExit
+    );
   }
 
   private processReturnStatement(
@@ -1038,12 +987,14 @@ export class PyAstParser extends AbstractParser {
 
           if (hofInfo.containerName) {
             const convertId = this.generateNodeId("convert");
-            allNodes.push({
-              id: convertId,
-              label: `Convert to ${hofInfo.containerName}`,
-              shape: "rect",
-              style: this.nodeStyles.process,
-            });
+            allNodes.push(
+              this.createSemanticNode(
+                convertId,
+                `Convert to ${hofInfo.containerName}`,
+                NodeType.PROCESS,
+                returnNode
+              )
+            );
             currentExits.forEach((ep) =>
               allEdges.push({ from: ep.id, to: convertId, label: ep.label })
             );
@@ -1051,12 +1002,14 @@ export class PyAstParser extends AbstractParser {
           }
 
           const returnId = this.generateNodeId("return_hof");
-          allNodes.push({
-            id: returnId,
-            label: "return result",
-            shape: "stadium",
-            style: this.nodeStyles.special,
-          });
+          allNodes.push(
+            this.createSemanticNode(
+              returnId,
+              "return result",
+              NodeType.RETURN,
+              returnNode
+            )
+          );
           this.locationMap.push({
             start: returnNode.startIndex,
             end: returnNode.endIndex,
@@ -1071,13 +1024,13 @@ export class PyAstParser extends AbstractParser {
             to: finallyContext ? finallyContext.finallyEntryId : exitId,
           });
 
-          return {
-            nodes: allNodes,
-            edges: allEdges,
-            entryNodeId: hofResult.entryNodeId,
-            exitPoints: [],
-            nodesConnectedToExit: new Set<string>([returnId]),
-          };
+          return this.createProcessResult(
+            allNodes,
+            allEdges,
+            hofResult.entryNodeId,
+            [],
+            new Set([returnId])
+          );
         }
       }
     }
@@ -1086,12 +1039,12 @@ export class PyAstParser extends AbstractParser {
     const labelText = valueNode
       ? `return ${this.escapeString(valueNode.text)}`
       : "return";
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      labelText,
+      NodeType.RETURN,
+      returnNode
+    );
     const edges: FlowchartEdge[] = [
       {
         from: nodeId,
@@ -1103,14 +1056,13 @@ export class PyAstParser extends AbstractParser {
       end: returnNode.endIndex,
       nodeId,
     });
-
-    return {
-      nodes: [node],
+    return this.createProcessResult(
+      [node],
       edges,
-      entryNodeId: nodeId,
-      exitPoints: [],
-      nodesConnectedToExit: new Set<string>([nodeId]),
-    };
+      nodeId,
+      [],
+      new Set([nodeId])
+    );
   }
 
   private processRaiseStatement(
@@ -1142,14 +1094,13 @@ export class PyAstParser extends AbstractParser {
       end: raiseNode.endIndex,
       nodeId,
     });
-
-    return {
-      nodes: [node],
+    return this.createProcessResult(
+      [node],
       edges,
-      entryNodeId: nodeId,
-      exitPoints: [],
-      nodesConnectedToExit: new Set<string>([nodeId]),
-    };
+      nodeId,
+      [],
+      new Set([nodeId])
+    );
   }
 
   private processBreakStatement(
@@ -1157,12 +1108,12 @@ export class PyAstParser extends AbstractParser {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("break");
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: "break",
-      shape: "stadium",
-      style: this.nodeStyles.break,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      "break",
+      NodeType.BREAK_CONTINUE,
+      breakNode
+    );
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.breakTargetId },
     ];
@@ -1171,14 +1122,13 @@ export class PyAstParser extends AbstractParser {
       end: breakNode.endIndex,
       nodeId,
     });
-
-    return {
-      nodes: [node],
+    return this.createProcessResult(
+      [node],
       edges,
-      entryNodeId: nodeId,
-      exitPoints: [],
-      nodesConnectedToExit: new Set<string>([nodeId]),
-    };
+      nodeId,
+      [],
+      new Set([nodeId])
+    );
   }
 
   private processContinueStatement(
@@ -1186,12 +1136,12 @@ export class PyAstParser extends AbstractParser {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("continue");
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: "continue",
-      shape: "stadium",
-      style: this.nodeStyles.break,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      "continue",
+      NodeType.BREAK_CONTINUE,
+      continueNode
+    );
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.continueTargetId },
     ];
@@ -1200,14 +1150,13 @@ export class PyAstParser extends AbstractParser {
       end: continueNode.endIndex,
       nodeId,
     });
-
-    return {
-      nodes: [node],
+    return this.createProcessResult(
+      [node],
       edges,
-      entryNodeId: nodeId,
-      exitPoints: [],
-      nodesConnectedToExit: new Set<string>([nodeId]),
-    };
+      nodeId,
+      [],
+      new Set([nodeId])
+    );
   }
 
   private processMatchStatement(
@@ -1302,14 +1251,13 @@ export class PyAstParser extends AbstractParser {
     }
 
     allExitPoints.push(lastConditionExit);
-
-    return {
+    return this.createProcessResult(
       nodes,
       edges,
-      entryNodeId: subjectId,
-      exitPoints: allExitPoints,
-      nodesConnectedToExit,
-    };
+      subjectId,
+      allExitPoints,
+      nodesConnectedToExit
+    );
   }
 
   private processTryStatement(
@@ -1435,13 +1383,13 @@ export class PyAstParser extends AbstractParser {
 
     if (finallyResult) allExitPoints.push(...finallyResult.exitPoints);
 
-    return {
+    return this.createProcessResult(
       nodes,
       edges,
-      entryNodeId: entryId,
-      exitPoints: allExitPoints,
-      nodesConnectedToExit,
-    };
+      entryId,
+      allExitPoints,
+      nodesConnectedToExit
+    );
   }
 
   private processWithStatement(
@@ -1483,25 +1431,20 @@ export class PyAstParser extends AbstractParser {
       if (bodyResult.entryNodeId)
         edges.push({ from: withEntryId, to: bodyResult.entryNodeId });
 
-      return {
+      return this.createProcessResult(
         nodes,
         edges,
-        entryNodeId: withEntryId,
-        exitPoints:
-          bodyResult.exitPoints.length > 0
-            ? bodyResult.exitPoints
-            : [{ id: withEntryId }],
-        nodesConnectedToExit: bodyResult.nodesConnectedToExit,
-      };
+        withEntryId,
+        bodyResult.exitPoints.length > 0
+          ? bodyResult.exitPoints
+          : [{ id: withEntryId }],
+        bodyResult.nodesConnectedToExit
+      );
     }
 
-    return {
-      nodes,
-      edges,
-      entryNodeId: withEntryId,
-      exitPoints: [{ id: withEntryId }],
-      nodesConnectedToExit: new Set<string>(),
-    };
+    return this.createProcessResult(nodes, edges, withEntryId, [
+      { id: withEntryId },
+    ]);
   }
 
   private processAssertStatement(
@@ -1548,13 +1491,13 @@ export class PyAstParser extends AbstractParser {
       },
     ];
 
-    return {
+    return this.createProcessResult(
       nodes,
       edges,
-      entryNodeId: conditionId,
-      exitPoints: [{ id: conditionId, label: "True" }],
-      nodesConnectedToExit: new Set<string>([raiseNodeId]),
-    };
+      conditionId,
+      [{ id: conditionId, label: "True" }],
+      new Set([raiseNodeId])
+    );
   }
 
   private processArgument(argNode: Parser.SyntaxNode): ProcessResult {
@@ -1573,13 +1516,7 @@ export class PyAstParser extends AbstractParser {
         end: argNode.endIndex,
         nodeId,
       });
-      return {
-        nodes: [node],
-        edges: [],
-        entryNodeId: nodeId,
-        exitPoints: [{ id: nodeId }],
-        nodesConnectedToExit: new Set<string>(),
-      };
+      return this.createProcessResult([node], [], nodeId, [{ id: nodeId }]);
     }
   }
 
@@ -1661,13 +1598,9 @@ export class PyAstParser extends AbstractParser {
     });
     edges.push({ from: mapId, to: resultId, label: "End of list" });
 
-    return {
-      nodes,
-      edges,
-      entryNodeId: iterableResult.entryNodeId,
-      exitPoints: [{ id: resultId }],
-      nodesConnectedToExit: new Set<string>(),
-    };
+    return this.createProcessResult(nodes, edges, iterableResult.entryNodeId, [
+      { id: resultId },
+    ]);
   }
 
   private processFilter(callNode: Parser.SyntaxNode): ProcessResult {
@@ -1742,13 +1675,9 @@ export class PyAstParser extends AbstractParser {
     });
     edges.push({ from: filterId, to: collectedId, label: "End of list" });
 
-    return {
-      nodes,
-      edges,
-      entryNodeId: iterableResult.entryNodeId,
-      exitPoints: [{ id: collectedId }],
-      nodesConnectedToExit: new Set<string>(),
-    };
+    return this.createProcessResult(nodes, edges, iterableResult.entryNodeId, [
+      { id: collectedId },
+    ]);
   }
 
   private processReduce(callNode: Parser.SyntaxNode): ProcessResult {
@@ -1819,12 +1748,41 @@ export class PyAstParser extends AbstractParser {
     });
     edges.push({ from: headerId, to: resultId, label: "End" });
 
-    return {
-      nodes,
-      edges,
-      entryNodeId: iterableResult.entryNodeId,
-      exitPoints: [{ id: resultId }],
-      nodesConnectedToExit: new Set<string>(),
+    return this.createProcessResult(nodes, edges, iterableResult.entryNodeId, [
+      { id: resultId },
+    ]);
+  }
+
+  private processReturnStatementForExpression(
+    exprNode: Parser.SyntaxNode,
+    exitId: string,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const nodeId = this.generateNodeId("return");
+    const labelText = `return ${this.escapeString(exprNode.text)}`;
+    const node: FlowchartNode = {
+      id: nodeId,
+      label: labelText,
+      shape: "stadium",
+      style: this.nodeStyles.special,
     };
+    const edges: FlowchartEdge[] = [
+      {
+        from: nodeId,
+        to: finallyContext ? finallyContext.finallyEntryId : exitId,
+      },
+    ];
+    this.locationMap.push({
+      start: exprNode.startIndex,
+      end: exprNode.endIndex,
+      nodeId,
+    });
+    return this.createProcessResult(
+      [node],
+      edges,
+      nodeId,
+      [],
+      new Set([nodeId])
+    );
   }
 }

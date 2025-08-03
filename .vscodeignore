@@ -1,15 +1,25 @@
+# Node modules except required WASM ones
 node_modules
-
 !node_modules/tree-sitter-*/
 
-
-# Exclude source code, old build artifacts, and tests.
+# Exclude source and build artifacts
 src/
 out/
 .vscode-test/
 test.cpp
 
-# Exclude config, git, and lock files.
+# Only include needed dist assets
+!dist/extension.js
+!dist/tree-sitter-python.wasm
+!dist/tree-sitter.wasm
+
+# Exclude all source maps
+*.map
+
+# Include media/icon
+!media/icon.png
+
+# Exclude config, git, and lock files
 .vscode/
 .git/
 .gitignore
@@ -17,7 +27,9 @@ test.cpp
 yarn.lock
 package-lock.json
 *.vsix
-*.map
 **/tsconfig.json
 **/webpack.config.js
 **/eslint.config.mjs
+
+# Optional: exclude large/unnecessary markdown files
+README.md

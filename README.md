@@ -1,42 +1,338 @@
-# visor: Real-time Code-to-Flowchart Visualization
+# Visor: Multi-Language Code-to-Flowchart Visualization
 
-visor is a VS Code extension that provides a live, interactive flowchart of your TypeScript or JavaScript code, helping you visualize its structure and flow as you work.
+**Visor** is a powerful VS Code extension that provides real-time, interactive flowchart visualization for your code across multiple programming languages. Transform complex code logic into clear, visual flowcharts that help you understand, debug, and document your code more effectively.
 
-## Features
+## ✨ Features
 
-- **Live Flowchart Generation**: Automatically generates a flowchart for the current function in view.
-- **Interactive Visualization**: Click on flowchart nodes to highlight the corresponding code, and as you move your cursor through the code, the corresponding node in the flowchart is highlighted.
-- **TypeScript & JavaScript Support**: Analyzes your code to create an accurate visual representation.
-- **Seamless Integration**: The flowchart appears in a dedicated view in the activity bar and adapts to your VS Code theme.
-- **Pan and Zoom**: The flowchart can be panned and zoomed for better navigation of complex code.
+### 🔄 **Real-Time Flowchart Generation**
 
-## How to Use
+- Automatically generates flowcharts for functions as you navigate your code
+- Live updates as you edit your code (500ms debounced for optimal performance)
+- Intelligent function detection based on cursor position
 
-1.  Open a TypeScript or JavaScript file.
-2.  Click on the visor icon in the activity bar to open the flowchart view.
-3.  As you click into different functions in your editor, the flowchart will automatically update to show the logic of the current function.
-4.  Move your cursor within a function to see the corresponding part of the flowchart highlighted.
-5.  Click on a node in the flowchart to jump to and highlight that code in the editor.
+### 🌐 **Multi-Language Support**
 
-## Requirements
+- **Python**: Functions, lambdas, higher-order functions (map, filter, reduce)
+- **TypeScript/JavaScript**: Functions, arrow functions, methods, classes
+- **Java**: Methods, classes, constructors
+- **C/C++**: Functions and methods
 
-- Visual Studio Code v1.85.0 or newer.
+### 🎯 **Interactive Visualization**
 
-## Development
+- **Bidirectional Navigation**: Click flowchart nodes to jump to code, cursor movement highlights corresponding nodes
+- **Smart Highlighting**: Real-time synchronization between code and flowchart
+- **Context-Aware**: Automatically detects the current function scope
 
-To contribute to visor:
+### 🎨 **Rich Visual Elements**
 
-1.  Clone the repository.
-2.  Install dependencies: `yarn install`.
-3.  Open the project in VS Code and press F5 to launch the Extension Development Host.
-4.  Open a TypeScript file in the new window to see the extension in action.
+- **Semantic Node Types**: Enhanced visual differentiation between entry/exit, decisions, processes, loops, exceptions, and assignments
+- **Subtle Theme-Aware Styling**: Professional color palette that adapts to VS Code light/dark themes without overwhelming visual noise
+- **Enhanced Typography**: Improved font weights and sizing for better text readability
+- **Smart Border Patterns**: Dashed borders for decisions, double borders for entry/exit, dotted for exceptions
+- **Interactive Enhancements**: Smooth hover effects and subtle drop shadows for better user experience
+- **Mermaid.js Powered**: High-quality, theme-aware diagrams with enhanced semantic styling
+- **Pan & Zoom**: Navigate complex flowcharts with smooth controls
+- **VS Code Theme Integration**: Automatically adapts to light/dark themes with subtle accent colors
 
-### Scripts
+### 📤 **Export Capabilities**
 
-- `yarn compile`: Compiles the extension.
-- `yarn watch`: Compiles in watch mode.
-- `yarn test`: Runs tests.
+- Export flowcharts as **SVG** (vector graphics) or **PNG** (raster images)
+- High-quality exports with proper background and styling
+- Perfect for documentation and presentations
 
-## License
+### ⚡ **Advanced Code Analysis**
 
-This extension is licensed under the MIT License.
+- **Tree-sitter Parsing**: Robust, syntax-aware code analysis
+- **Control Flow Analysis**: Accurately represents loops, conditionals, and branches
+- **Higher-Order Functions**: Special support for functional programming patterns
+- **Performance Optimized**: Efficient parsing with object pooling and caching
+
+## � Enhanced Node Readability
+
+### Semantic Node Categories
+
+Visor now provides enhanced visual differentiation through semantic node categorization:
+
+- **Entry/Exit Nodes** (Round with double borders): Function start and end points
+- **Decision Nodes** (Diamond with dashed borders): Conditionals, loops, and branching logic
+- **Process Nodes** (Rectangle with solid borders): Regular statements and assignments
+- **Loop Control** (Stadium): Loop end markers and control flow
+- **Exception Handling** (Stadium with dotted borders): Try/catch/finally blocks
+- **Assignment Nodes** (Rectangle): Variable assignments and declarations
+- **Function Calls** (Rectangle): External function invocations
+- **Return Nodes** (Stadium): Function return statements
+- **Break/Continue** (Rectangle with dashed borders): Control flow interruption
+
+### Subtle Visual Enhancement
+
+The design maintains professionalism while improving comprehension through:
+
+- **Theme-Aware Colors**: Subtle accent colors that respect VS Code's theme preferences
+- **Enhanced Typography**: Improved font weights and sizing for better legibility
+- **Smart Hover Effects**: Gentle visual feedback without overwhelming the interface
+- **Consistent Visual Hierarchy**: Different node types use consistent visual patterns
+- **Accessibility**: High contrast support and reduced motion options
+
+## �🚀 How to Use
+
+### Getting Started
+
+1. **Install the Extension**: Search for "Visor" in the VS Code Extensions marketplace
+2. **Open a Supported File**: Open any Python, TypeScript, JavaScript, Java, or C/C++ file
+3. **Access the Flowchart**: Click the Visor icon in the Activity Bar (left sidebar)
+
+### Navigation & Interaction
+
+1. **Function Selection**: Place your cursor inside any function - the flowchart updates automatically
+2. **Code Navigation**: Click any node in the flowchart to jump to the corresponding code
+3. **Live Highlighting**: Move your cursor through the code to see real-time highlighting in the flowchart
+4. **Export**: Use the export buttons (top-right of flowchart) to save as SVG or PNG
+
+### Supported Language Features
+
+#### Python
+
+- Function definitions (`def function_name():`)
+- Lambda expressions (`lambda x: x + 1`)
+- Higher-order functions (`map()`, `filter()`, `reduce()`)
+- Nested functions and closures
+
+#### TypeScript/JavaScript
+
+- Function declarations (`function name() {}`)
+- Arrow functions (`const name = () => {}`)
+- Method definitions in classes
+- Async/await patterns
+
+#### Java
+
+- Method definitions
+- Constructor methods
+- Class methods (static and instance)
+
+#### C/C++
+
+- Function definitions
+- Method definitions in classes
+- Function overloading
+
+## 🛠 Technical Architecture
+
+### Core Components
+
+- **AbstractParser**: Enhanced base class with semantic node creation and complexity analysis
+- **Language Services**: Specialized parsers for each supported language with semantic node type assignment
+- **FlowchartIR**: Enhanced intermediate representation with semantic node categorization
+- **EnhancedMermaidGenerator**: Advanced generator with theme-aware styling and visual enhancement
+- **SubtleThemeManager**: Professional color palette management for enhanced readability
+- **FlowchartViewProvider**: VS Code webview integration with enhanced CSS and interactions
+
+### Performance Features
+
+- **Object Pooling**: Reduces garbage collection overhead
+- **String Caching**: Optimized string processing with LRU cache
+- **Debounced Updates**: Prevents excessive re-rendering during typing
+- **Tree-sitter WASM**: Fast, incremental parsing
+
+## 📋 Requirements
+
+- **Visual Studio Code**: v1.102.0 or newer
+- **Node.js**: Required for development (not for end users)
+- **Supported Languages**: Python, TypeScript, JavaScript, Java, C, C++
+
+## 🔧 Development
+
+### Prerequisites
+
+- Node.js (v16 or higher)
+- Yarn package manager
+- VS Code (v1.102.0+)
+
+### Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/sidhant-sriv/sidvis.git
+cd sidvis
+
+# Install dependencies
+yarn install
+
+# Build the extension
+yarn compile
+```
+
+### Development Workflow
+
+```bash
+# Watch mode for development
+yarn watch
+
+# Launch Extension Development Host
+# Press F5 in VS Code or run:
+code --extensionDevelopmentPath=.
+```
+
+### Available Scripts
+
+- `yarn compile`: Compiles TypeScript to JavaScript
+- `yarn watch`: Compiles in watch mode for development
+- `yarn package`: Creates production build
+- `yarn lint`: Runs ESLint for code quality
+- `yarn test`: Runs test suite
+- `yarn publish:patch`: Publishes a patch version
+- `yarn release`: Full release workflow (test + publish + git tags)
+
+### Project Structure
+
+```
+src/
+├── extension.ts              # Extension entry point
+├── view/
+│   └── FlowchartViewProvider.ts  # Main webview provider
+├── logic/
+│   ├── analyzer.ts           # Language router
+│   ├── MermaidGenerator.ts   # Flowchart generation
+│   ├── language-services/   # Language-specific parsers
+│   │   ├── python/
+│   │   ├── typescript/
+│   │   ├── java/
+│   │   └── cpp/
+│   ├── common/
+│   │   ├── AbstractParser.ts    # Base parser class
+│   │   └── AstParserTypes.ts    # Shared types
+│   └── utils/
+│       └── StringProcessor.ts   # String utilities
+├── ir/
+│   └── ir.ts                # Intermediate representation
+└── types/                   # TypeScript declarations
+```
+
+### Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes
+4. Add tests for new functionality
+5. Ensure all tests pass (`yarn test`)
+6. Commit your changes (`git commit -m 'Add amazing feature'`)
+7. Push to the branch (`git push origin feature/amazing-feature`)
+8. Open a Pull Request
+
+### Language Parser Development
+
+To add support for a new language:
+
+1. **Add Tree-sitter Grammar**: Include the WASM file in `src/logic/language-services/[language]/`
+2. **Implement Parser**: Extend `AbstractParser` class
+3. **Register Language**: Add to `analyzer.ts` and `language-services/index.ts`
+4. **Update Webpack**: Add WASM file copy rule to `webpack.config.js`
+
+Example parser structure:
+
+```typescript
+export class NewLangParser extends AbstractParser {
+  public static async create(wasmPath: string): Promise<NewLangParser> {
+    // Initialize tree-sitter parser
+  }
+
+  public generateFlowchart(sourceCode: string, position?: number): FlowchartIR {
+    // Parse and generate flowchart IR
+  }
+}
+```
+
+### Testing
+
+```bash
+# Run all tests
+yarn test
+
+# Run specific test file
+yarn test --grep "parser"
+
+# Debug tests in VS Code
+# Use the "Run Extension Tests" configuration
+```
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**Flowchart not generating:**
+
+- Ensure your cursor is inside a function
+- Check that the file language is supported
+- Look for errors in the VS Code Developer Console (Help > Toggle Developer Tools)
+
+**Export not working:**
+
+- Ensure you have sufficient disk space
+- Check file permissions in the target directory
+- Try exporting to a different location
+
+**Performance issues:**
+
+- Large functions may take longer to process
+- Consider breaking down complex functions
+- Check if multiple heavy operations are running simultaneously
+
+### Debug Mode
+
+Enable debug logging by setting the `visor.debug` configuration in VS Code settings.
+
+## 📊 Supported Control Structures
+
+### All Languages
+
+- **Sequential**: Statements, assignments, function calls
+- **Conditional**: if/else, switch/case, ternary operators
+- **Loops**: for, while, do-while loops
+- **Jump Statements**: break, continue, return
+
+### Language-Specific Features
+
+#### Python
+
+- List comprehensions
+- Higher-order functions (`map`, `filter`, `reduce`)
+- Exception handling (`try`/`except`)
+- Context managers (`with` statements)
+
+#### TypeScript/JavaScript
+
+- Promise chains and async/await
+- Array methods (`forEach`, `map`, `filter`)
+- Class methods and constructors
+- Module imports/exports
+
+#### Java
+
+- Exception handling (`try`/`catch`)
+- Enhanced for loops
+- Method overloading
+- Constructor chaining
+
+#### C/C++
+
+- Pointer operations
+- Memory management
+- Function overloading
+- Template functions (basic support)
+
+## 🔒 Privacy & Security
+
+Visor processes your code locally within VS Code. No code is transmitted to external servers. All parsing and flowchart generation happens on your machine, ensuring your code remains private and secure.
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- **Tree-sitter**: For robust, incremental parsing
+- **Mermaid.js**: For beautiful diagram rendering
+- **VS Code API**: For seamless editor integration
+- **svg-pan-zoom**: For interactive flowchart navigation
+
+Code with <❤️> Visor

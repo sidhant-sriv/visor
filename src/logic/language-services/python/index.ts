@@ -1,23 +1,26 @@
 import { PyAstParser } from "./PyAstParser";
 import { FlowchartIR } from "../../../ir/ir";
 
+let parserPromise: Promise<PyAstParser> | null = null;
+
 /**
- * Orchestrates the analysis of a Python code string.
- * It uses tree-sitter to parse the code and find functions.
+ * Initializes the Python language service.
+ * @param wasmPath The absolute path to the tree-sitter-python.wasm file.
  */
-export function analyzePythonCode(
+export function initPythonLanguageService(wasmPath: string) {
+  parserPromise = PyAstParser.create(wasmPath);
+}
+
+/**
+ * Analyzes Python code.
+ */
+export async function analyzePythonCode(
   code: string,
   position: number
-): FlowchartIR {
-  try {
-    const parser = new PyAstParser();
-    return parser.generateFlowchart(code, undefined, position);
-  } catch (error: any) {
-    console.error("Error analyzing Python code:", error);
-    return { 
-      nodes: [{ id: 'A', label: `Error: Unable to parse code. ${error.message || error}`, shape: 'rect' }],
-      edges: [],
-      locationMap: []
-    };
+): Promise<FlowchartIR> {
+  if (!parserPromise) {
+    throw new Error("Python language service not initialized.");
   }
-} 
+  const parser = await parserPromise;
+  return parser.generateFlowchart(code, undefined, position);
+}
