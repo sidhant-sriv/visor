@@ -124,12 +124,14 @@ export class FlowchartPanelProvider extends BaseFlowchartProvider {
       this._disposables
     );
 
-    // Handle panel state changes to maintain better independence
+    // Handle panel state changes - avoid unnecessary updates
     this._panel.onDidChangeViewState(
       (e) => {
-        // Panel became active - could trigger updates or focus behaviors
+        // Panel state changed but don't trigger updates unless needed
+        // This prevents the panel from resetting when user interacts with it
         if (e.webviewPanel.active) {
-          this.updateView(vscode.window.activeTextEditor);
+          // Only update title or other UI elements, not the entire view
+          this.updateTitle();
         }
       },
       null,

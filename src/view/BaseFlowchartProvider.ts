@@ -48,6 +48,9 @@ export abstract class BaseFlowchartProvider {
   protected _locationMap: LocationMapEntry[] = [];
   protected _currentFunctionRange: vscode.Range | undefined;
   protected _debounceTimer?: NodeJS.Timeout;
+  protected _currentDocument?: vscode.TextDocument;
+  protected _currentPosition?: number;
+  protected _isUpdating: boolean = false;
 
   constructor(protected readonly _extensionUri: vscode.Uri) {
     // Listen for configuration changes to update themes
@@ -239,17 +242,41 @@ export abstract class BaseFlowchartProvider {
       return;
     }
 
+    // Prevent multiple simultaneous updates
+    if (this._isUpdating) {
+      return;
+    }
+
     if (!editor) {
       this.setWebviewHtml(
         this.getLoadingHtml("Please open a file to see the flowchart.")
       );
+      this._currentDocument = undefined;
+      this._currentPosition = undefined;
       return;
     }
 
-    this.setWebviewHtml(this.getLoadingHtml("Generating flowchart..."));
-
     const position = editor.document.offsetAt(editor.selection.active);
     const document = editor.document;
+
+    // Check if we need to update - avoid unnecessary regeneration
+    const shouldUpdate = this._shouldUpdate(document, position);
+    if (!shouldUpdate) {
+      // Just update highlighting if we're still in the same function
+      if (
+        this._currentFunctionRange &&
+        this._currentFunctionRange.contains(editor.selection.active)
+      ) {
+        const entry = this._locationMap.find(
+          (e) => position >= e.start && position <= e.end
+        );
+        this.highlightNode(entry ? entry.nodeId : null);
+      }
+      return;
+    }
+
+    this._isUpdating = true;
+    this.setWebviewHtml(this.getLoadingHtml("Generating flowchart..."));
 
     try {
       console.time("analyzeCode");
@@ -262,6 +289,9 @@ export abstract class BaseFlowchartProvider {
       console.timeEnd("analyzeCode");
 
       this._locationMap = flowchartIR.locationMap;
+      this._currentDocument = document;
+      this._currentPosition = position;
+
       if (flowchartIR.functionRange) {
         this._currentFunctionRange = new vscode.Range(
           document.positionAt(flowchartIR.functionRange.start),
@@ -318,7 +348,43 @@ export abstract class BaseFlowchartProvider {
       const errorMessage =
         error instanceof Error ? error.message : "An unknown error occurred";
       this.setWebviewHtml(this.getLoadingHtml(`Error: ${errorMessage}`));
+    } finally {
+      this._isUpdating = false;
     }
+  }
+
+  /**
+   * Determines if the view should be updated based on document and position changes
+   */
+  private _shouldUpdate(
+    document: vscode.TextDocument,
+    position: number
+  ): boolean {
+    // Always update if no current document
+    if (!this._currentDocument) {
+      return true;
+    }
+
+    // Update if document changed
+    if (this._currentDocument.uri.toString() !== document.uri.toString()) {
+      return true;
+    }
+
+    // Update if document version changed (content was modified)
+    if (this._currentDocument.version !== document.version) {
+      return true;
+    }
+
+    // Update if we moved to a different function
+    if (this._currentFunctionRange) {
+      const currentPos = document.positionAt(position);
+      if (!this._currentFunctionRange.contains(currentPos)) {
+        return true;
+      }
+    }
+
+    // Don't update if we're just moving within the same function
+    return false;
   }
 
   /**
@@ -1033,6 +1099,14 @@ ${flowchartSyntax}
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
     }
+
+    // Reset state
+    this._currentDocument = undefined;
+    this._currentPosition = undefined;
+    this._isUpdating = false;
+    this._locationMap = [];
+    this._currentFunctionRange = undefined;
+
     while (this._disposables.length) {
       const x = this._disposables.pop();
       if (x) {
