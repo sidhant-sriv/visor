@@ -4,6 +4,7 @@ import { analyzeCode } from "../logic/analyzer";
 import { LocationMapEntry } from "../ir/ir";
 import { EnhancedMermaidGenerator } from "../logic/EnhancedMermaidGenerator";
 import { SubtleThemeManager } from "../logic/utils/ThemeManager";
+import { getComplexityConfig } from "../logic/utils/ComplexityConfig";
 
 const MERMAID_VERSION = "11.8.0";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
@@ -28,14 +29,24 @@ type WebviewMessage = HighlightCodeMessage | ExportMessage | ExportErrorMessage;
 
 /**
  * Generates the complete HTML content for the webview panel.
- * This includes the Mermaid.js library, export controls, and the generated flowchart syntax.
+ * This includes the Mermaid.js library, export controls, complexity display, and the generated flowchart syntax.
  */
-function getWebviewContent(flowchartSyntax: string, nonce: string): string {
+function getWebviewContent(
+  flowchartSyntax: string,
+  nonce: string,
+  functionComplexity?: {
+    cyclomaticComplexity: number;
+    rating: "low" | "medium" | "high" | "very-high";
+    description: string;
+  }
+): string {
   const theme =
     vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
       ? "dark"
       : "default";
 
+  // Get complexity configuration for dynamic styling
+  const complexityConfig = getComplexityConfig();
   return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -132,6 +143,64 @@ function getWebviewContent(flowchartSyntax: string, nonce: string): string {
             #export-controls button:hover {
                 background-color: var(--vscode-button-hoverBackground);
             }
+            
+            /* Complexity display panel - positioned at bottom to not interfere with export buttons */
+            #complexity-panel {
+                position: fixed;
+                bottom: 10px;
+                left: 10px;
+                z-index: 1000;
+                background-color: var(--vscode-editor-background);
+                border: 1px solid var(--vscode-editorWidget-border);
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 12px;
+                color: var(--vscode-editor-foreground);
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+                max-width: 300px;
+                transition: opacity 0.3s ease;
+            }
+            
+            #complexity-panel.hidden {
+                display: none;
+            }
+            
+            #complexity-toggle {
+                position: fixed;
+                bottom: 10px;
+                right: 10px;
+                z-index: 1001;
+                background-color: var(--vscode-button-background);
+                color: var(--vscode-button-foreground);
+                border: 1px solid var(--vscode-button-border, transparent);
+                padding: 6px 10px;
+                cursor: pointer;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+            
+            #complexity-toggle:hover {
+                background-color: var(--vscode-button-hoverBackground);
+            }
+            
+            .complexity-rating {
+                font-weight: bold;
+                margin-left: 4px;
+            }
+            
+            .complexity-low { color: ${complexityConfig.colors.low}; }
+            .complexity-medium { color: ${complexityConfig.colors.medium}; }
+            .complexity-high { color: ${complexityConfig.colors.high}; }
+            .complexity-very-high { color: ${
+              complexityConfig.colors.veryHigh
+            }; }
+            
+            .complexity-description {
+                margin-top: 4px;
+                font-size: 11px;
+                opacity: 0.8;
+            }
+            
             /* Hidden element to store original mermaid source */
             #mermaid-source {
                 display: none;
@@ -139,6 +208,27 @@ function getWebviewContent(flowchartSyntax: string, nonce: string): string {
         </style>
     </head>
     <body>
+        ${
+          functionComplexity
+            ? `
+        <div id="complexity-panel">
+            <div>
+                <strong>Cyclomatic Complexity:</strong> 
+                ${functionComplexity.cyclomaticComplexity}
+                <span class="complexity-rating complexity-${
+                  functionComplexity.rating
+                }">
+                    (${functionComplexity.rating.toUpperCase()})
+                </span>
+            </div>
+            <div class="complexity-description">
+                ${functionComplexity.description}
+            </div>
+        </div>
+        <button id="complexity-toggle" title="Toggle complexity display">📊</button>
+        `
+            : ""
+        }
         <div id="export-controls">
             <button id="export-svg">Export as SVG</button>
             <button id="export-png">Export as PNG</button>
@@ -322,6 +412,37 @@ ${flowchartSyntax}
 
             document.getElementById('export-svg').addEventListener('click', () => exportFlowchart('svg'));
             document.getElementById('export-png').addEventListener('click', () => exportFlowchart('png'));
+            
+            // Complexity toggle functionality
+            const complexityToggle = document.getElementById('complexity-toggle');
+            const complexityPanel = document.getElementById('complexity-panel');
+            if (complexityToggle && complexityPanel) {
+                // Get initial state from localStorage or default to visible
+                const isHidden = localStorage.getItem('complexity-panel-hidden') === 'true';
+                if (isHidden) {
+                    complexityPanel.classList.add('hidden');
+                    complexityToggle.textContent = '📊';
+                    complexityToggle.title = 'Show complexity display';
+                } else {
+                    complexityToggle.textContent = '📊✓';
+                    complexityToggle.title = 'Hide complexity display';
+                }
+                
+                complexityToggle.addEventListener('click', () => {
+                    const isCurrentlyHidden = complexityPanel.classList.contains('hidden');
+                    if (isCurrentlyHidden) {
+                        complexityPanel.classList.remove('hidden');
+                        complexityToggle.textContent = '📊✓';
+                        complexityToggle.title = 'Hide complexity display';
+                        localStorage.setItem('complexity-panel-hidden', 'false');
+                    } else {
+                        complexityPanel.classList.add('hidden');
+                        complexityToggle.textContent = '📊';
+                        complexityToggle.title = 'Show complexity display';
+                        localStorage.setItem('complexity-panel-hidden', 'true');
+                    }
+                });
+            }
         </script>
     </body>
     </html>`;
@@ -562,7 +683,21 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
         vsCodeTheme
       );
       const mermaidCode = mermaidGenerator.generate(flowchartIR);
-      this._view.webview.html = getWebviewContent(mermaidCode, this.getNonce());
+
+      // Only pass complexity info if it's enabled and should be displayed in panel
+      const complexityConfig = getComplexityConfig();
+      const complexityToDisplay =
+        complexityConfig.enabled &&
+        complexityConfig.displayInPanel &&
+        flowchartIR.functionComplexity
+          ? flowchartIR.functionComplexity
+          : undefined;
+
+      this._view.webview.html = getWebviewContent(
+        mermaidCode,
+        this.getNonce(),
+        complexityToDisplay
+      );
 
       // After updating the view, immediately highlight the node for the current cursor
       const offset = editor.document.offsetAt(editor.selection.active);

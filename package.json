@@ -82,6 +82,39 @@
           ],
           "default": "monokai",
           "description": "Choose the color theme for flowchart nodes"
+        },
+        "visor.complexity.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable cyclomatic complexity analysis and display"
+        },
+        "visor.complexity.displayInNodes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show complexity indicators directly on flowchart nodes"
+        },
+        "visor.complexity.displayInPanel": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show complexity information in the dedicated panel"
+        },
+        "visor.complexity.thresholds.low": {
+          "type": "number",
+          "default": 5,
+          "minimum": 1,
+          "description": "Upper threshold for low complexity (1 to this value)"
+        },
+        "visor.complexity.thresholds.medium": {
+          "type": "number",
+          "default": 10,
+          "minimum": 2,
+          "description": "Upper threshold for medium complexity"
+        },
+        "visor.complexity.thresholds.high": {
+          "type": "number",
+          "default": 20,
+          "minimum": 3,
+          "description": "Upper threshold for high complexity (above this is very high)"
         }
       }
     }

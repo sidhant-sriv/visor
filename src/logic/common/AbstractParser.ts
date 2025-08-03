@@ -9,12 +9,17 @@ import {
   SemanticNodeInfo,
 } from "../../ir/ir";
 import { StringProcessor } from "../utils/StringProcessor";
+import {
+  ComplexityAnalyzer,
+  ComplexityResult,
+} from "../utils/ComplexityAnalyzer";
 import { ProcessResult, LoopContext } from "./AstParserTypes";
 
 export abstract class AbstractParser {
   protected nodeIdCounter = 0;
   protected locationMap: LocationMapEntry[] = [];
   protected debug = false;
+  protected language: "python" | "typescript" | "java" | "cpp";
 
   // The parser instance is now required by the constructor
   protected parser: Parser;
@@ -23,8 +28,12 @@ export abstract class AbstractParser {
   private static processResultPool: ProcessResult[] = [];
   private static readonly MAX_POOL_SIZE = 50;
 
-  protected constructor(parser: Parser) {
+  protected constructor(
+    parser: Parser,
+    language: "python" | "typescript" | "java" | "cpp"
+  ) {
     this.parser = parser;
+    this.language = language;
   }
 
   protected readonly nodeStyles = {
@@ -260,10 +269,19 @@ export abstract class AbstractParser {
   protected extractSemanticInfo(
     syntaxNode: Parser.SyntaxNode
   ): SemanticNodeInfo {
+    // Calculate cyclomatic complexity for this node
+    const complexityResult = ComplexityAnalyzer.calculateNodeComplexity(
+      syntaxNode,
+      this.language
+    );
+
     return {
       complexity: this.estimateComplexity(syntaxNode),
+      cyclomaticComplexity: complexityResult.cyclomaticComplexity,
+      complexityRating: complexityResult.rating,
       importance: this.estimateImportance(syntaxNode),
       codeType: this.detectCodeType(syntaxNode),
+      language: this.language,
     };
   }
 
@@ -515,6 +533,37 @@ export abstract class AbstractParser {
     }
 
     return node;
+  }
+
+  /**
+   * Calculate function-level complexity and add it to the FlowchartIR
+   */
+  protected addFunctionComplexity(
+    ir: FlowchartIR,
+    functionNode: Parser.SyntaxNode
+  ): void {
+    try {
+      const functionComplexityInfo =
+        ComplexityAnalyzer.calculateFunctionComplexity(
+          functionNode,
+          this.language
+        );
+
+      ir.functionComplexity = {
+        cyclomaticComplexity:
+          functionComplexityInfo.complexity.cyclomaticComplexity,
+        rating: functionComplexityInfo.complexity.rating,
+        description: functionComplexityInfo.complexity.description,
+      };
+    } catch (error) {
+      console.warn("Failed to calculate function complexity:", error);
+      // Fallback to basic complexity if calculation fails
+      ir.functionComplexity = {
+        cyclomaticComplexity: 1,
+        rating: "low",
+        description: "Complexity calculation unavailable",
+      };
+    }
   }
 
   abstract listFunctions(sourceCode: string): string[];

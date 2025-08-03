@@ -29,6 +29,8 @@ export enum NodeCategory {
 
 export interface SemanticNodeInfo {
   complexity?: "low" | "medium" | "high";
+  cyclomaticComplexity?: number;
+  complexityRating?: "low" | "medium" | "high" | "very-high";
   importance?: "low" | "medium" | "high";
   codeType?: "synchronous" | "asynchronous" | "callback";
   language?: string;
@@ -69,4 +71,9 @@ export interface FlowchartIR {
   locationMap: LocationMapEntry[];
   functionRange?: { start: number; end: number };
   title?: string;
+  functionComplexity?: {
+    cyclomaticComplexity: number;
+    rating: "low" | "medium" | "high" | "very-high";
+    description: string;
+  };
 }
