@@ -36,12 +36,13 @@ export interface Theme {
 }
 
 export class SubtleThemeManager {
-  // Unchanged: The style registry for shapes and borders remains the same.
+  // The style registry for shapes and borders.
+  // UPDATED: Changed ENTRY and EXIT nodes to be round.
   private static readonly nodeStyleRegistry = new Map<NodeType, NodeStyle>([
     [
       NodeType.ENTRY,
       {
-        shape: "rect",
+        shape: "round",
         borderStyle: "solid",
         fontWeight: "normal",
         emphasis: "low",
@@ -50,7 +51,7 @@ export class SubtleThemeManager {
     [
       NodeType.EXIT,
       {
-        shape: "rect",
+        shape: "round",
         borderStyle: "solid",
         fontWeight: "normal",
         emphasis: "low",
@@ -148,7 +149,7 @@ export class SubtleThemeManager {
     ],
   ]);
 
-  // NEW: A registry to hold all available themes
+  // A registry to hold all available themes
   private static readonly themeRegistry = new Map<string, Theme>([
     [
       "monokai",
@@ -169,7 +170,7 @@ export class SubtleThemeManager {
             stroke: "#F92672",
             textColor: "#F8F8F2",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#272822",
             stroke: "#5299d8",
             textColor: "#F8F8F2",
@@ -210,7 +211,7 @@ export class SubtleThemeManager {
             stroke: "#e61a64",
             textColor: "#2d2d2d",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#f0f0f0",
             stroke: "#3973ab",
             textColor: "#2d2d2d",
@@ -257,7 +258,7 @@ export class SubtleThemeManager {
             stroke: "#f85149",
             textColor: "#f0f6fc",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#0d1117",
             stroke: "#79c0ff",
             textColor: "#f0f6fc",
@@ -298,7 +299,7 @@ export class SubtleThemeManager {
             stroke: "#cf222e",
             textColor: "#24292f",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#ffffff",
             stroke: "#2188ff",
             textColor: "#24292f",
@@ -345,7 +346,7 @@ export class SubtleThemeManager {
             stroke: "#dc322f",
             textColor: "#839496",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#002b36",
             stroke: "#d33682",
             textColor: "#839496",
@@ -386,7 +387,7 @@ export class SubtleThemeManager {
             stroke: "#dc322f",
             textColor: "#657b83",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#fdf6e3",
             stroke: "#d33682",
             textColor: "#657b83",
@@ -433,7 +434,7 @@ export class SubtleThemeManager {
             stroke: "#e06c75",
             textColor: "#abb2bf",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#282c34",
             stroke: "#528bff",
             textColor: "#abb2bf",
@@ -474,7 +475,7 @@ export class SubtleThemeManager {
             stroke: "#e45649",
             textColor: "#383a42",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#fafafa",
             stroke: "#2962ff",
             textColor: "#383a42",
@@ -521,7 +522,7 @@ export class SubtleThemeManager {
             stroke: "#ff5555",
             textColor: "#f8f8f2",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#282a36",
             stroke: "#62f8e5",
             textColor: "#f8f8f2",
@@ -562,7 +563,7 @@ export class SubtleThemeManager {
             stroke: "#ef4444",
             textColor: "#44475a",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#f8f8f2",
             stroke: "#1f9c91",
             textColor: "#44475a",
@@ -609,7 +610,7 @@ export class SubtleThemeManager {
             stroke: "#f07178",
             textColor: "#eeffff",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#263238",
             stroke: "#ffd700",
             textColor: "#eeffff",
@@ -650,7 +651,7 @@ export class SubtleThemeManager {
             stroke: "#e53935",
             textColor: "#90a4ae",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#fafafa",
             stroke: "#ffc107",
             textColor: "#90a4ae",
@@ -697,7 +698,7 @@ export class SubtleThemeManager {
             stroke: "#bf616a",
             textColor: "#d8dee9",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#2e3440",
             stroke: "#8fbcbb",
             textColor: "#d8dee9",
@@ -738,7 +739,7 @@ export class SubtleThemeManager {
             stroke: "#bf616a",
             textColor: "#2e3440",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#eceff4",
             stroke: "#8fbcbb",
             textColor: "#2e3440",
@@ -785,7 +786,7 @@ export class SubtleThemeManager {
             stroke: "#f7768e",
             textColor: "#a9b1d6",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#1a1b26",
             stroke: "#c0caf5",
             textColor: "#a9b1d6",
@@ -826,7 +827,7 @@ export class SubtleThemeManager {
             stroke: "#8c4351",
             textColor: "#343b58",
           },
-          assignment: { // UPDATED
+          assignment: {
             fill: "#d5d6db",
             stroke: "#7a88b8",
             textColor: "#343b58",
@@ -857,7 +858,7 @@ export class SubtleThemeManager {
   ]);
 
   /**
-   * REFACTORED: Retrieves theme styles based on a theme key and the VS Code theme mode.
+   * Retrieves theme styles based on a theme key and the VS Code theme mode.
    * @param themeKey The identifier for the theme (e.g., 'catppuccin').
    * @param vsCodeTheme The current editor theme mode ('light' or 'dark').
    * @returns The appropriate ThemeStyles object for the selected theme and mode.
@@ -874,7 +875,7 @@ export class SubtleThemeManager {
   }
 
   /**
-   * NEW: Returns a list of available themes to populate a settings dropdown.
+   * Returns a list of available themes to populate a settings dropdown.
    * @returns An array of objects with theme keys and their user-friendly names.
    */
   public static getAvailableThemes(): { key: string; name: string }[] {
@@ -883,8 +884,6 @@ export class SubtleThemeManager {
       name: theme.name,
     }));
   }
-
-  // --- Unchanged Methods ---
 
   public static getNodeStyle(nodeType: NodeType): NodeStyle {
     return (
