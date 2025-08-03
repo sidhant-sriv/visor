@@ -304,14 +304,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **VS Code API**: For seamless editor integration
 - **svg-pan-zoom**: For interactive flowchart navigation
 
-## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/sidhant-sriv/sidvis/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/sidhant-sriv/sidvis/discussions)
-- **Documentation**: [Wiki](https://github.com/sidhant-sriv/sidvis/wiki)
-
----
-
-**Made with ❤️ by [Sidhant Srivastava](https://github.com/sidhant-sriv)**
-
-_Transforming code complexity into visual clarity, one flowchart at a time._
+Code with <❤️> Visor
