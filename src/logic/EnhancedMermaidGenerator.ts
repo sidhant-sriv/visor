@@ -1,6 +1,7 @@
 import { FlowchartIR, FlowchartNode, NodeType } from "../ir/ir";
 import { StringProcessor } from "./utils/StringProcessor";
 import { SubtleThemeManager, ThemeStyles } from "./utils/ThemeManager";
+import { getComplexityConfig } from "./utils/ComplexityConfig";
 
 // Optimized string building
 class StringBuilder {
@@ -26,6 +27,7 @@ class StringBuilder {
 export class EnhancedMermaidGenerator {
   private sb = new StringBuilder();
   private themeStyles: ThemeStyles;
+  private complexityConfig = getComplexityConfig();
 
   constructor(
     private themeKey: string = "monokai",
@@ -42,10 +44,32 @@ export class EnhancedMermaidGenerator {
       this.sb.appendLine(`%% ${ir.title}`);
     }
 
+    // Add function complexity information as a comment
+    if (ir.functionComplexity) {
+      this.sb.appendLine(
+        `%% Cyclomatic Complexity: ${ir.functionComplexity.cyclomaticComplexity} (${ir.functionComplexity.rating})`
+      );
+      this.sb.appendLine(`%% ${ir.functionComplexity.description}`);
+    }
+
     // Generate nodes efficiently
     for (const node of ir.nodes) {
       const shape = this.getShape(node);
-      const label = this.escapeString(node.label);
+      let label = this.escapeString(node.label);
+
+      // Add complexity annotation to nodes with complexity information
+      if (
+        this.complexityConfig.enabled &&
+        this.complexityConfig.displayInNodes &&
+        node.semanticInfo?.cyclomaticComplexity &&
+        node.semanticInfo.cyclomaticComplexity > 1
+      ) {
+        const complexityIndicator = this.getComplexityIndicator(
+          node.semanticInfo.complexityRating
+        );
+        label = `${label} ${complexityIndicator}`;
+      }
+
       this.sb.append("    ");
       this.sb.append(node.id);
       this.sb.append(shape[0]);
@@ -253,5 +277,29 @@ export class EnhancedMermaidGenerator {
 
   private escapeString(str: string): string {
     return StringProcessor.escapeString(str);
+  }
+
+  /**
+   * Get visual complexity indicator for nodes using configuration
+   */
+  private getComplexityIndicator(
+    rating?: "low" | "medium" | "high" | "very-high"
+  ): string {
+    if (!rating || !this.complexityConfig.enabled) {
+      return "";
+    }
+
+    switch (rating) {
+      case "low":
+        return this.complexityConfig.indicators.low;
+      case "medium":
+        return this.complexityConfig.indicators.medium;
+      case "high":
+        return this.complexityConfig.indicators.high;
+      case "very-high":
+        return this.complexityConfig.indicators.veryHigh;
+      default:
+        return "";
+    }
   }
 }

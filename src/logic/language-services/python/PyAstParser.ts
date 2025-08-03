@@ -11,6 +11,10 @@ import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 export class PyAstParser extends AbstractParser {
   private currentFunctionIsLambda = false;
 
+  private constructor(parser: Parser) {
+    super(parser, "python");
+  }
+
   /**
    * Asynchronously creates and initializes an instance of PyAstParser.
    * This is the required entry point for creating a parser instance.
@@ -250,7 +254,7 @@ export class PyAstParser extends AbstractParser {
       (e) => nodeIdSet.has(e.from) && nodeIdSet.has(e.to)
     );
 
-    return {
+    const ir: FlowchartIR = {
       nodes,
       edges: validEdges,
       locationMap: this.locationMap,
@@ -259,6 +263,11 @@ export class PyAstParser extends AbstractParser {
       entryNodeId: entryId,
       exitNodeId: exitId,
     };
+
+    // Add function complexity analysis
+    this.addFunctionComplexity(ir, targetNode);
+
+    return ir;
   }
 
   protected processStatement(

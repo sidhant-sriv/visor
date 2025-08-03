@@ -11,6 +11,10 @@ import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 export class CppAstParser extends AbstractParser {
   private currentFunctionIsLambda = false;
 
+  private constructor(parser: Parser) {
+    super(parser, "cpp");
+  }
+
   /**
    * Asynchronously creates and initializes an instance of CppAstParser.
    * This is the required entry point for creating a parser instance.
@@ -270,7 +274,7 @@ export class CppAstParser extends AbstractParser {
       (e) => nodeIdSet.has(e.from) && nodeIdSet.has(e.to)
     );
 
-    return {
+    const ir: FlowchartIR = {
       nodes,
       edges: validEdges,
       locationMap: this.locationMap,
@@ -279,6 +283,11 @@ export class CppAstParser extends AbstractParser {
       entryNodeId: entryId,
       exitNodeId: exitId,
     };
+
+    // Add function complexity analysis
+    this.addFunctionComplexity(ir, targetNode);
+
+    return ir;
   }
 
   protected processStatement(
@@ -1060,12 +1069,7 @@ export class CppAstParser extends AbstractParser {
 
       const caseId = this.generateNodeId("case");
       nodes.push(
-        this.createSemanticNode(
-          caseId,
-          caseLabel,
-          NodeType.DECISION,
-          caseNode
-        )
+        this.createSemanticNode(caseId, caseLabel, NodeType.DECISION, caseNode)
       );
       this.locationMap.push({
         start: caseNode.startIndex,

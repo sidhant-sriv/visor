@@ -11,6 +11,10 @@ import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 export class JavaAstParser extends AbstractParser {
   private currentMethodIsLambda = false;
 
+  private constructor(parser: Parser) {
+    super(parser, "java");
+  }
+
   /**
    * Asynchronously creates and initializes an instance of JavaAstParser.
    * This is the required entry point for creating a parser instance.
@@ -218,11 +222,7 @@ export class JavaAstParser extends AbstractParser {
     if (!bodyToProcess) {
       return {
         nodes: [
-          this.createSemanticNode(
-            "A",
-            "Method has no body.",
-            NodeType.PROCESS
-          ),
+          this.createSemanticNode("A", "Method has no body.", NodeType.PROCESS),
         ],
         edges: [],
         locationMap: [],
@@ -268,7 +268,7 @@ export class JavaAstParser extends AbstractParser {
       (e) => nodeIdSet.has(e.from) && nodeIdSet.has(e.to)
     );
 
-    return {
+    const ir: FlowchartIR = {
       nodes,
       edges: validEdges,
       locationMap: this.locationMap,
@@ -277,6 +277,11 @@ export class JavaAstParser extends AbstractParser {
       entryNodeId: entryId,
       exitNodeId: exitId,
     };
+
+    // Add function complexity analysis
+    this.addFunctionComplexity(ir, targetNode);
+
+    return ir;
   }
 
   protected processStatement(
