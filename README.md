@@ -66,6 +66,7 @@
 5. **Observe complexity metrics** in the bottom panel and node indicators
 
 **Try this Python example:**
+
 ```python
 def complex_function(data):
     result = 0
@@ -79,6 +80,7 @@ def complex_function(data):
             result += 1
     return result
 ```
+
 This function will show **Medium complexity (CC=6)** with ⚠️ indicators on decision nodes.
 
 ## � Enhanced Node Readability
@@ -150,6 +152,7 @@ Visor provides cyclomatic complexity analysis to help you write maintainable cod
 - **Thresholds**: Default ranges are 1-5 (Low), 6-10 (Medium), 11-20 (High), 21+ (Very High)
 
 **Example**: A function with many nested if-statements and loops will show:
+
 - High complexity rating in the panel
 - Red indicators 🔴 on decision nodes
 - Suggestion to consider refactoring
