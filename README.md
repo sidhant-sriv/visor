@@ -25,10 +25,14 @@
 
 ### 🎨 **Rich Visual Elements**
 
-- **Multiple Node Types**: Process blocks, decision diamonds, terminators, special nodes
-- **Mermaid.js Powered**: High-quality, theme-aware diagrams
+- **Semantic Node Types**: Enhanced visual differentiation between entry/exit, decisions, processes, loops, exceptions, and assignments
+- **Subtle Theme-Aware Styling**: Professional color palette that adapts to VS Code light/dark themes without overwhelming visual noise
+- **Enhanced Typography**: Improved font weights and sizing for better text readability
+- **Smart Border Patterns**: Dashed borders for decisions, double borders for entry/exit, dotted for exceptions
+- **Interactive Enhancements**: Smooth hover effects and subtle drop shadows for better user experience
+- **Mermaid.js Powered**: High-quality, theme-aware diagrams with enhanced semantic styling
 - **Pan & Zoom**: Navigate complex flowcharts with smooth controls
-- **VS Code Theme Integration**: Automatically adapts to light/dark themes
+- **VS Code Theme Integration**: Automatically adapts to light/dark themes with subtle accent colors
 
 ### 📤 **Export Capabilities**
 
@@ -43,7 +47,33 @@
 - **Higher-Order Functions**: Special support for functional programming patterns
 - **Performance Optimized**: Efficient parsing with object pooling and caching
 
-## 🚀 How to Use
+## � Enhanced Node Readability
+
+### Semantic Node Categories
+
+Visor now provides enhanced visual differentiation through semantic node categorization:
+
+- **Entry/Exit Nodes** (Round with double borders): Function start and end points
+- **Decision Nodes** (Diamond with dashed borders): Conditionals, loops, and branching logic
+- **Process Nodes** (Rectangle with solid borders): Regular statements and assignments
+- **Loop Control** (Stadium): Loop end markers and control flow
+- **Exception Handling** (Stadium with dotted borders): Try/catch/finally blocks
+- **Assignment Nodes** (Rectangle): Variable assignments and declarations
+- **Function Calls** (Rectangle): External function invocations
+- **Return Nodes** (Stadium): Function return statements
+- **Break/Continue** (Rectangle with dashed borders): Control flow interruption
+
+### Subtle Visual Enhancement
+
+The design maintains professionalism while improving comprehension through:
+
+- **Theme-Aware Colors**: Subtle accent colors that respect VS Code's theme preferences
+- **Enhanced Typography**: Improved font weights and sizing for better legibility
+- **Smart Hover Effects**: Gentle visual feedback without overwhelming the interface
+- **Consistent Visual Hierarchy**: Different node types use consistent visual patterns
+- **Accessibility**: High contrast support and reduced motion options
+
+## �🚀 How to Use
 
 ### Getting Started
 
@@ -90,11 +120,12 @@
 
 ### Core Components
 
-- **AbstractParser**: Base class providing common parsing functionality
-- **Language Services**: Specialized parsers for each supported language
-- **FlowchartIR**: Intermediate representation for language-agnostic flowchart generation
-- **MermaidGenerator**: Converts IR to Mermaid.js syntax
-- **FlowchartViewProvider**: VS Code webview integration
+- **AbstractParser**: Enhanced base class with semantic node creation and complexity analysis
+- **Language Services**: Specialized parsers for each supported language with semantic node type assignment
+- **FlowchartIR**: Enhanced intermediate representation with semantic node categorization
+- **EnhancedMermaidGenerator**: Advanced generator with theme-aware styling and visual enhancement
+- **SubtleThemeManager**: Professional color palette management for enhanced readability
+- **FlowchartViewProvider**: VS Code webview integration with enhanced CSS and interactions
 
 ### Performance Features
 
@@ -303,6 +334,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Mermaid.js**: For beautiful diagram rendering
 - **VS Code API**: For seamless editor integration
 - **svg-pan-zoom**: For interactive flowchart navigation
-
 
 Code with <❤️> Visor

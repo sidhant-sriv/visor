@@ -1,6 +1,11 @@
 import Parser from "web-tree-sitter";
 import { AbstractParser } from "../../common/AbstractParser";
-import { FlowchartIR, FlowchartNode, FlowchartEdge } from "../../../ir/ir";
+import {
+  FlowchartIR,
+  FlowchartNode,
+  FlowchartEdge,
+  NodeType,
+} from "../../../ir/ir";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 
 export class JavaAstParser extends AbstractParser {
@@ -212,7 +217,13 @@ export class JavaAstParser extends AbstractParser {
 
     if (!bodyToProcess) {
       return {
-        nodes: [{ id: "A", label: "Method has no body.", shape: "rect" }],
+        nodes: [
+          this.createSemanticNode(
+            "A",
+            "Method has no body.",
+            NodeType.PROCESS
+          ),
+        ],
         edges: [],
         locationMap: [],
       };
@@ -223,18 +234,13 @@ export class JavaAstParser extends AbstractParser {
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
-    nodes.push({
-      id: entryId,
-      label: "Start",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
-    nodes.push({
-      id: exitId,
-      label: "End",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
+    // Create semantic entry and exit nodes
+    nodes.push(
+      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
+    );
+    nodes.push(
+      this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
+    );
 
     // For lambda expressions with expression bodies, handle them differently
     const bodyResult =
@@ -406,12 +412,12 @@ export class JavaAstParser extends AbstractParser {
           const conditionId = this.generateNodeId("ternary_cond");
 
           const nodes: FlowchartNode[] = [
-            {
-              id: conditionId,
-              label: this.escapeString(conditionNode.text),
-              shape: "diamond",
-              style: this.nodeStyles.decision,
-            },
+            this.createSemanticNode(
+              conditionId,
+              conditionNode.text,
+              NodeType.DECISION,
+              conditionNode
+            ),
           ];
           const edges: FlowchartEdge[] = [];
 
@@ -422,12 +428,14 @@ export class JavaAstParser extends AbstractParser {
           });
 
           const consequenceId = this.generateNodeId("ternary_true");
-          nodes.push({
-            id: consequenceId,
-            label: `${targetText} = ${this.escapeString(consequenceNode.text)}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
-          });
+          nodes.push(
+            this.createSemanticNode(
+              consequenceId,
+              `${targetText} = ${this.escapeString(consequenceNode.text)}`,
+              NodeType.ASSIGNMENT,
+              statement
+            )
+          );
           this.locationMap.push({
             start: statement.startIndex,
             end: statement.endIndex,
@@ -436,12 +444,14 @@ export class JavaAstParser extends AbstractParser {
           edges.push({ from: conditionId, to: consequenceId, label: "true" });
 
           const alternativeId = this.generateNodeId("ternary_false");
-          nodes.push({
-            id: alternativeId,
-            label: `${targetText} = ${this.escapeString(alternativeNode.text)}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
-          });
+          nodes.push(
+            this.createSemanticNode(
+              alternativeId,
+              `${targetText} = ${this.escapeString(alternativeNode.text)}`,
+              NodeType.ASSIGNMENT,
+              statement
+            )
+          );
           this.locationMap.push({
             start: statement.startIndex,
             end: statement.endIndex,
@@ -485,12 +495,12 @@ export class JavaAstParser extends AbstractParser {
 
     const conditionId = this.generateNodeId("ternary_cond");
     const nodes: FlowchartNode[] = [
-      {
-        id: conditionId,
-        label: this.escapeString(conditionNode.text),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
+      this.createSemanticNode(
+        conditionId,
+        conditionNode.text,
+        NodeType.DECISION,
+        conditionNode
+      ),
     ];
     this.locationMap.push({
       start: conditionNode.startIndex,
@@ -560,12 +570,12 @@ export class JavaAstParser extends AbstractParser {
 
     const ifConditionId = this.generateNodeId("if_cond");
     const nodes: FlowchartNode[] = [
-      {
-        id: ifConditionId,
-        label: this.escapeString(ifConditionNode.text),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
+      this.createSemanticNode(
+        ifConditionId,
+        ifConditionNode.text,
+        NodeType.DECISION,
+        ifConditionNode
+      ),
     ];
     this.locationMap.push({
       start: ifConditionNode.startIndex,

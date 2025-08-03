@@ -1,6 +1,11 @@
 import Parser from "web-tree-sitter";
 import { AbstractParser } from "../../common/AbstractParser";
-import { FlowchartIR, FlowchartNode, FlowchartEdge } from "../../../ir/ir";
+import {
+  FlowchartIR,
+  FlowchartNode,
+  FlowchartEdge,
+  NodeType,
+} from "../../../ir/ir";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 
 export class CppAstParser extends AbstractParser {
@@ -214,7 +219,13 @@ export class CppAstParser extends AbstractParser {
 
     if (!bodyToProcess) {
       return {
-        nodes: [{ id: "A", label: "Function has no body.", shape: "rect" }],
+        nodes: [
+          this.createSemanticNode(
+            "A",
+            "Function has no body.",
+            NodeType.PROCESS
+          ),
+        ],
         edges: [],
         locationMap: [],
       };
@@ -225,18 +236,13 @@ export class CppAstParser extends AbstractParser {
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
-    nodes.push({
-      id: entryId,
-      label: "Start",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
-    nodes.push({
-      id: exitId,
-      label: "End",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
+    // Create semantic entry and exit nodes
+    nodes.push(
+      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
+    );
+    nodes.push(
+      this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
+    );
 
     // For lambda expressions with expression bodies, handle them differently
     const bodyResult =
@@ -405,12 +411,12 @@ export class CppAstParser extends AbstractParser {
           const conditionId = this.generateNodeId("ternary_cond");
 
           const nodes: FlowchartNode[] = [
-            {
-              id: conditionId,
-              label: this.escapeString(conditionNode.text),
-              shape: "diamond",
-              style: this.nodeStyles.decision,
-            },
+            this.createSemanticNode(
+              conditionId,
+              conditionNode.text,
+              NodeType.DECISION,
+              conditionNode
+            ),
           ];
           const edges: FlowchartEdge[] = [];
 
@@ -421,12 +427,14 @@ export class CppAstParser extends AbstractParser {
           });
 
           const consequenceId = this.generateNodeId("ternary_true");
-          nodes.push({
-            id: consequenceId,
-            label: `${targetText} = ${this.escapeString(consequenceNode.text)}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
-          });
+          nodes.push(
+            this.createSemanticNode(
+              consequenceId,
+              `${targetText} = ${this.escapeString(consequenceNode.text)}`,
+              NodeType.ASSIGNMENT,
+              statement
+            )
+          );
           this.locationMap.push({
             start: statement.startIndex,
             end: statement.endIndex,
@@ -435,12 +443,14 @@ export class CppAstParser extends AbstractParser {
           edges.push({ from: conditionId, to: consequenceId, label: "true" });
 
           const alternativeId = this.generateNodeId("ternary_false");
-          nodes.push({
-            id: alternativeId,
-            label: `${targetText} = ${this.escapeString(alternativeNode.text)}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
-          });
+          nodes.push(
+            this.createSemanticNode(
+              alternativeId,
+              `${targetText} = ${this.escapeString(alternativeNode.text)}`,
+              NodeType.ASSIGNMENT,
+              statement
+            )
+          );
           this.locationMap.push({
             start: statement.startIndex,
             end: statement.endIndex,
@@ -525,12 +535,12 @@ export class CppAstParser extends AbstractParser {
 
     const conditionId = this.generateNodeId("cond_expr");
     const nodes: FlowchartNode[] = [
-      {
-        id: conditionId,
-        label: this.escapeString(conditionNode.text),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
+      this.createSemanticNode(
+        conditionId,
+        conditionNode.text,
+        NodeType.DECISION,
+        conditionNode
+      ),
     ];
     this.locationMap.push({
       start: conditionNode.startIndex,
@@ -600,12 +610,12 @@ export class CppAstParser extends AbstractParser {
 
     const ifConditionId = this.generateNodeId("if_cond");
     const nodes: FlowchartNode[] = [
-      {
-        id: ifConditionId,
-        label: this.escapeString(ifConditionNode.text),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
+      this.createSemanticNode(
+        ifConditionId,
+        ifConditionNode.text,
+        NodeType.DECISION,
+        ifConditionNode
+      ),
     ];
     this.locationMap.push({
       start: ifConditionNode.startIndex,
@@ -707,13 +717,18 @@ export class CppAstParser extends AbstractParser {
     const loopExitId = this.generateNodeId("for_exit");
 
     const nodes: FlowchartNode[] = [
-      {
-        id: headerId,
-        label: this.escapeString(headerText),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      this.createSemanticNode(
+        headerId,
+        headerText,
+        NodeType.LOOP_START,
+        forNode
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        forNode
+      ),
     ];
     this.locationMap.push({
       start: forNode.startIndex,
@@ -781,13 +796,18 @@ export class CppAstParser extends AbstractParser {
     const loopExitId = this.generateNodeId("for_range_exit");
 
     const nodes: FlowchartNode[] = [
-      {
-        id: headerId,
-        label: this.escapeString(headerText),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      this.createSemanticNode(
+        headerId,
+        headerText,
+        NodeType.LOOP_START,
+        forNode
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        forNode
+      ),
     ];
     this.locationMap.push({
       start: forNode.startIndex,
@@ -858,13 +878,18 @@ export class CppAstParser extends AbstractParser {
     const loopExitId = this.generateNodeId("while_exit");
 
     const nodes: FlowchartNode[] = [
-      {
-        id: conditionId,
-        label: conditionText,
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      this.createSemanticNode(
+        conditionId,
+        conditionText,
+        NodeType.DECISION,
+        conditionNode
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        whileNode
+      ),
     ];
     this.locationMap.push({
       start: whileNode.startIndex,
@@ -927,13 +952,18 @@ export class CppAstParser extends AbstractParser {
     const loopExitId = this.generateNodeId("do_while_exit");
 
     const nodes: FlowchartNode[] = [
-      {
-        id: conditionId,
-        label: conditionText,
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      this.createSemanticNode(
+        conditionId,
+        conditionText,
+        NodeType.DECISION,
+        conditionNode || doWhileNode
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        doWhileNode
+      ),
     ];
     this.locationMap.push({
       start: doWhileNode.startIndex,
@@ -993,12 +1023,12 @@ export class CppAstParser extends AbstractParser {
 
     const switchId = this.generateNodeId("switch");
     const nodes: FlowchartNode[] = [
-      {
-        id: switchId,
-        label: `switch (${this.escapeString(conditionNode.text)})`,
-        shape: "rect",
-        style: this.nodeStyles.process,
-      },
+      this.createSemanticNode(
+        switchId,
+        `switch (${this.escapeString(conditionNode.text)})`,
+        NodeType.DECISION,
+        switchNode
+      ),
     ];
     this.locationMap.push({
       start: conditionNode.startIndex,
@@ -1029,12 +1059,14 @@ export class CppAstParser extends AbstractParser {
         : `case ${this.escapeString(valueNode?.text || "")}`;
 
       const caseId = this.generateNodeId("case");
-      nodes.push({
-        id: caseId,
-        label: caseLabel,
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      });
+      nodes.push(
+        this.createSemanticNode(
+          caseId,
+          caseLabel,
+          NodeType.DECISION,
+          caseNode
+        )
+      );
       this.locationMap.push({
         start: caseNode.startIndex,
         end: caseNode.endIndex,
@@ -1110,7 +1142,7 @@ export class CppAstParser extends AbstractParser {
   ): ProcessResult {
     const entryId = this.generateNodeId("try_entry");
     const nodes: FlowchartNode[] = [
-      { id: entryId, label: "try", shape: "stadium" },
+      this.createSemanticNode(entryId, "try", NodeType.EXCEPTION, tryNode),
     ];
     this.locationMap.push({
       start: tryNode.startIndex,
@@ -1196,12 +1228,12 @@ export class CppAstParser extends AbstractParser {
     const labelText = valueNode
       ? `return ${this.escapeString(valueNode.text)}`
       : "return";
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      labelText,
+      NodeType.RETURN,
+      returnNode
+    );
     const edges: FlowchartEdge[] = [
       {
         from: nodeId,
@@ -1232,12 +1264,12 @@ export class CppAstParser extends AbstractParser {
     const labelText = valueNode
       ? `throw ${this.escapeString(valueNode.text)}`
       : "throw";
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      labelText,
+      NodeType.EXCEPTION,
+      throwNode
+    );
     const edges: FlowchartEdge[] = [
       {
         from: nodeId,
@@ -1267,12 +1299,12 @@ export class CppAstParser extends AbstractParser {
     const labelText = labelNode
       ? `goto ${this.escapeString(labelNode.text)}`
       : "goto";
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      labelText,
+      NodeType.BREAK_CONTINUE,
+      gotoNode
+    );
     this.locationMap.push({
       start: gotoNode.startIndex,
       end: gotoNode.endIndex,
@@ -1336,12 +1368,12 @@ export class CppAstParser extends AbstractParser {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("break");
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: "break",
-      shape: "stadium",
-      style: this.nodeStyles.break,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      "break",
+      NodeType.BREAK_CONTINUE,
+      breakNode
+    );
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.breakTargetId },
     ];
@@ -1364,12 +1396,12 @@ export class CppAstParser extends AbstractParser {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("continue");
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: "continue",
-      shape: "stadium",
-      style: this.nodeStyles.break,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      "continue",
+      NodeType.BREAK_CONTINUE,
+      continueNode
+    );
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.continueTargetId },
     ];

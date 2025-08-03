@@ -2,29 +2,29 @@ import * as vscode from "vscode";
 import * as path from "path";
 import { analyzeCode } from "../logic/analyzer";
 import { LocationMapEntry } from "../ir/ir";
-import { MermaidGenerator } from "../logic/MermaidGenerator";
+import { EnhancedMermaidGenerator } from "../logic/EnhancedMermaidGenerator";
+import { SubtleThemeManager } from "../logic/utils/ThemeManager";
 
 const MERMAID_VERSION = "11.8.0";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
 
 // Define specific types for messages from the webview to avoid `any`
 type HighlightCodeMessage = {
-  command: 'highlightCode';
+  command: "highlightCode";
   payload: { start: number; end: number };
 };
 
 type ExportMessage = {
-  command: 'export';
-  payload: { fileType: 'svg' | 'png'; data: string };
+  command: "export";
+  payload: { fileType: "svg" | "png"; data: string };
 };
 
 type ExportErrorMessage = {
-  command: 'exportError';
+  command: "exportError";
   payload: { error: string };
 };
 
 type WebviewMessage = HighlightCodeMessage | ExportMessage | ExportErrorMessage;
-
 
 /**
  * Generates the complete HTML content for the webview panel.
@@ -77,6 +77,41 @@ function getWebviewContent(flowchartSyntax: string, nonce: string): string {
             .highlighted > path {
                 stroke: var(--vscode-editor-selectionBackground) !important;
                 stroke-width: 4px !important;
+            }
+            
+            /* Enhanced node styling - no animations */
+            .mermaid .node {
+                filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+            }
+            
+            /* Enhanced text readability */
+            .mermaid .node text {
+                font-family: var(--vscode-font-family), 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                font-size: 12px;
+                text-anchor: middle;
+                dominant-baseline: central;
+            }
+            
+            /* Subtle highlighting for current node */
+            .mermaid .node.highlighted {
+                filter: drop-shadow(0 0 8px var(--vscode-focusBorder));
+            }
+            
+            /* Edge styling for better flow visibility */
+            .mermaid .edgePath path {
+                stroke-width: 1.5px;
+                stroke: var(--vscode-editorWidget-border);
+                fill: none;
+            }
+            
+            .mermaid .edgeLabel {
+                background-color: transparent;
+                border: none;
+                border-radius: 0;
+                padding: 0;
+                font-size: 11px;
+                color: var(--vscode-editor-foreground);
+                font-weight: normal;
             }
             #export-controls {
                 position: absolute;
@@ -300,7 +335,24 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
   private _currentFunctionRange: vscode.Range | undefined;
   private _debounceTimer?: NodeJS.Timeout; // For live updates
 
-  constructor(private readonly _extensionUri: vscode.Uri) {}
+  /**
+   * Get available themes for configuration UI
+   */
+  public static getAvailableThemes() {
+    return SubtleThemeManager.getAvailableThemes();
+  }
+
+  constructor(private readonly _extensionUri: vscode.Uri) {
+    // Listen for configuration changes to update themes
+    this._disposables.push(
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration("visor.nodeReadability.theme")) {
+          // Refresh the current view when theme changes
+          this.updateView(vscode.window.activeTextEditor);
+        }
+      })
+    );
+  }
 
   public resolveWebviewView(
     webviewView: vscode.WebviewView,
@@ -370,7 +422,6 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
       null,
       this._disposables
     );
-
 
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(
@@ -493,8 +544,23 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
         this._currentFunctionRange = undefined;
       }
 
-      // Generate Mermaid diagram from FlowchartIR
-      const mermaidGenerator = new MermaidGenerator();
+      // Generate Mermaid diagram from FlowchartIR with enhanced styling
+      const vsCodeTheme =
+        vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+          ? "dark"
+          : "light";
+
+      // Read the selected theme from user configuration
+      const config = vscode.workspace.getConfiguration("visor");
+      const selectedTheme = config.get<string>(
+        "nodeReadability.theme",
+        "monokai"
+      );
+
+      const mermaidGenerator = new EnhancedMermaidGenerator(
+        selectedTheme,
+        vsCodeTheme
+      );
       const mermaidCode = mermaidGenerator.generate(flowchartIR);
       this._view.webview.html = getWebviewContent(mermaidCode, this.getNonce());
 
@@ -511,7 +577,8 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
       }
     } catch (error) {
       console.error("Failed to update view:", error);
-      const errorMessage = error instanceof Error ? error.message : "An unknown error occurred";
+      const errorMessage =
+        error instanceof Error ? error.message : "An unknown error occurred";
       this._view.webview.html = this.getLoadingHtml(`Error: ${errorMessage}`);
     }
   }
@@ -565,7 +632,7 @@ export class FlowchartViewProvider implements vscode.WebviewViewProvider {
   public dispose() {
     // Clear the timer when the provider is disposed
     if (this._debounceTimer) {
-        clearTimeout(this._debounceTimer);
+      clearTimeout(this._debounceTimer);
     }
     while (this._disposables.length) {
       const x = this._disposables.pop();
