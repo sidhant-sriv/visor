@@ -44,8 +44,42 @@
 
 - **Tree-sitter Parsing**: Robust, syntax-aware code analysis
 - **Control Flow Analysis**: Accurately represents loops, conditionals, and branches
+- **Cyclomatic Complexity Analysis**: Real-time complexity metrics with visual indicators
 - **Higher-Order Functions**: Special support for functional programming patterns
 - **Performance Optimized**: Efficient parsing with object pooling and caching
+
+### 📊 **Cyclomatic Complexity Analysis**
+
+- **Function-Level Metrics**: Shows overall function complexity with detailed descriptions
+- **Node-Level Indicators**: Visual complexity indicators (⚠️ 🔴 🚨) on flowchart nodes
+- **Configurable Thresholds**: Customizable complexity ratings (Low/Medium/High/Very High)
+- **Toggle Display**: 📊 button to show/hide complexity information
+- **Smart Analysis**: Follows McCabe's cyclomatic complexity calculation
+- **Multi-Language Support**: Works across Python, TypeScript, Java, and C++
+
+## 🚀 Quick Start
+
+1. **Install** the Visor extension from the VS Code marketplace
+2. **Open** any Python, TypeScript, Java, or C++ file
+3. **Click** the Visor icon in the Activity Bar (left sidebar)
+4. **Place your cursor** inside a function to see the flowchart
+5. **Observe complexity metrics** in the bottom panel and node indicators
+
+**Try this Python example:**
+```python
+def complex_function(data):
+    result = 0
+    for item in data:
+        if item > 10:
+            if item % 2 == 0:
+                result += item * 2
+            else:
+                result += item
+        elif item > 0:
+            result += 1
+    return result
+```
+This function will show **Medium complexity (CC=6)** with ⚠️ indicators on decision nodes.
 
 ## � Enhanced Node Readability
 
@@ -72,6 +106,23 @@ The design maintains professionalism while improving comprehension through:
 - **Smart Hover Effects**: Gentle visual feedback without overwhelming the interface
 - **Consistent Visual Hierarchy**: Different node types use consistent visual patterns
 - **Accessibility**: High contrast support and reduced motion options
+- **Complexity Indicators**: Visual markers (⚠️ 🔴 🚨) on nodes with high cyclomatic complexity
+
+### Configuration
+
+Access theme and complexity settings via VS Code Settings (`Cmd/Ctrl + ,`) under "Visor":
+
+```json
+{
+  "visor.nodeReadability.theme": "monokai",
+  "visor.complexity.enabled": true,
+  "visor.complexity.displayInNodes": true,
+  "visor.complexity.displayInPanel": true,
+  "visor.complexity.thresholds.low": 5,
+  "visor.complexity.thresholds.medium": 10,
+  "visor.complexity.thresholds.high": 20
+}
+```
 
 ## �🚀 How to Use
 
@@ -87,6 +138,21 @@ The design maintains professionalism while improving comprehension through:
 2. **Code Navigation**: Click any node in the flowchart to jump to the corresponding code
 3. **Live Highlighting**: Move your cursor through the code to see real-time highlighting in the flowchart
 4. **Export**: Use the export buttons (top-right of flowchart) to save as SVG or PNG
+5. **Complexity Analysis**: View function complexity in the bottom panel and node indicators
+
+### Understanding Complexity Metrics
+
+Visor provides cyclomatic complexity analysis to help you write maintainable code:
+
+- **Bottom Panel**: Shows overall function complexity with detailed description
+- **Visual Indicators**: Emoji markers on complex nodes (⚠️ Medium, 🔴 High, 🚨 Very High)
+- **Toggle Button**: Use the 📊 button (bottom-right) to show/hide complexity information
+- **Thresholds**: Default ranges are 1-5 (Low), 6-10 (Medium), 11-20 (High), 21+ (Very High)
+
+**Example**: A function with many nested if-statements and loops will show:
+- High complexity rating in the panel
+- Red indicators 🔴 on decision nodes
+- Suggestion to consider refactoring
 
 ### Supported Language Features
 
@@ -121,11 +187,13 @@ The design maintains professionalism while improving comprehension through:
 ### Core Components
 
 - **AbstractParser**: Enhanced base class with semantic node creation and complexity analysis
+- **ComplexityAnalyzer**: McCabe cyclomatic complexity calculation engine with language-specific support
+- **ComplexityConfig**: Configuration management for complexity thresholds, indicators, and display options
 - **Language Services**: Specialized parsers for each supported language with semantic node type assignment
-- **FlowchartIR**: Enhanced intermediate representation with semantic node categorization
-- **EnhancedMermaidGenerator**: Advanced generator with theme-aware styling and visual enhancement
+- **FlowchartIR**: Enhanced intermediate representation with semantic node categorization and complexity metrics
+- **EnhancedMermaidGenerator**: Advanced generator with theme-aware styling, visual enhancement, and complexity indicators
 - **SubtleThemeManager**: Professional color palette management for enhanced readability
-- **FlowchartViewProvider**: VS Code webview integration with enhanced CSS and interactions
+- **FlowchartViewProvider**: VS Code webview integration with enhanced CSS, interactions, and complexity display
 
 ### Performance Features
 
@@ -189,22 +257,25 @@ code --extensionDevelopmentPath=.
 src/
 ├── extension.ts              # Extension entry point
 ├── view/
-│   └── FlowchartViewProvider.ts  # Main webview provider
+│   └── FlowchartViewProvider.ts  # Main webview provider with complexity display
 ├── logic/
 │   ├── analyzer.ts           # Language router
-│   ├── MermaidGenerator.ts   # Flowchart generation
+│   ├── EnhancedMermaidGenerator.ts  # Advanced flowchart generation with complexity indicators
 │   ├── language-services/   # Language-specific parsers
 │   │   ├── python/
 │   │   ├── typescript/
 │   │   ├── java/
 │   │   └── cpp/
 │   ├── common/
-│   │   ├── AbstractParser.ts    # Base parser class
+│   │   ├── AbstractParser.ts    # Base parser class with complexity analysis
 │   │   └── AstParserTypes.ts    # Shared types
 │   └── utils/
-│       └── StringProcessor.ts   # String utilities
+│       ├── StringProcessor.ts   # String utilities
+│       ├── ComplexityAnalyzer.ts # McCabe complexity calculation
+│       ├── ComplexityConfig.ts   # Configuration management
+│       └── ThemeManager.ts      # Theme and styling management
 ├── ir/
-│   └── ir.ts                # Intermediate representation
+│   └── ir.ts                # Intermediate representation with complexity metrics
 └── types/                   # TypeScript declarations
 ```
 
@@ -286,9 +357,11 @@ Enable debug logging by setting the `visor.debug` configuration in VS Code setti
 ### All Languages
 
 - **Sequential**: Statements, assignments, function calls
-- **Conditional**: if/else, switch/case, ternary operators
-- **Loops**: for, while, do-while loops
+- **Conditional**: if/else, switch/case, ternary operators (+1 complexity each)
+- **Loops**: for, while, do-while loops (+1 complexity each)
 - **Jump Statements**: break, continue, return
+- **Exception Handling**: try/catch blocks (+1 complexity per catch)
+- **Logical Operators**: AND/OR operations (+1 complexity each)
 
 ### Language-Specific Features
 
@@ -334,5 +407,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Mermaid.js**: For beautiful diagram rendering
 - **VS Code API**: For seamless editor integration
 - **svg-pan-zoom**: For interactive flowchart navigation
+- **McCabe**: For foundational work on cyclomatic complexity metrics
 
-Code with <❤️> Visor
+---
+
+# Code with <❤️> Visor
