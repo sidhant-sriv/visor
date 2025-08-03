@@ -650,65 +650,116 @@ export class TsAstParser extends AbstractParser {
     exitId: string,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    const init = forNode.childForFieldName("init");
-    const condition = forNode.childForFieldName("condition");
-    const update = forNode.childForFieldName("update");
+    const initNode = forNode.childForFieldName("init");
+    const conditionNode = forNode.childForFieldName("condition");
+    const updateNode = forNode.childForFieldName("update");
+    const bodyNode = forNode.childForFieldName("body");
 
-    const headerText = `for (${init?.text || ""}; ${condition?.text || ""}; ${
-      update?.text || ""
-    })`;
-    const headerId = this.generateNodeId("for_header");
-    const loopExitId = this.generateNodeId("for_exit");
+    if (!bodyNode) {
+      return this.createProcessResult();
+    }
 
-    const nodes: FlowchartNode[] = [
-      {
-        id: headerId,
-        label: this.escapeString(headerText),
-        shape: "diamond",
-        nodeType: NodeType.LOOP_START,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium", nodeType: NodeType.LOOP_END },
-    ];
-    this.locationMap.push({
-      start: forNode.startIndex,
-      end: forNode.endIndex,
-      nodeId: headerId,
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+    let entryPointId: string | undefined;
+    let lastProcessedId: string | undefined;
+
+    // 1. Initializer Node
+    if (initNode) {
+      const initId = this.generateNodeId("for_init");
+      nodes.push({
+        id: initId,
+        label: this.escapeString(initNode.text),
+        shape: "rect",
+        nodeType: NodeType.PROCESS,
+      });
+      this.locationMap.push({ start: initNode.startIndex, end: initNode.endIndex, nodeId: initId });
+      entryPointId = initId;
+      lastProcessedId = initId;
+    }
+
+    // 2. Condition Node
+    const conditionId = this.generateNodeId("for_cond");
+    nodes.push({
+      id: conditionId,
+      label: this.escapeString(conditionNode?.text || "true"),
+      shape: "diamond",
+      nodeType: NodeType.DECISION,
     });
+    if (conditionNode) {
+        this.locationMap.push({ start: conditionNode.startIndex, end: conditionNode.endIndex, nodeId: conditionId });
+    }
 
+    if (lastProcessedId) {
+      edges.push({ from: lastProcessedId, to: conditionId });
+    } else {
+      entryPointId = conditionId;
+    }
+    
+    // 3. Update Node
+    let updateId: string | undefined;
+    if (updateNode) {
+        updateId = this.generateNodeId("for_update");
+        nodes.push({
+            id: updateId,
+            label: this.escapeString(updateNode.text),
+            shape: "rect",
+            nodeType: NodeType.PROCESS,
+        });
+        this.locationMap.push({ start: updateNode.startIndex, end: updateNode.endIndex, nodeId: updateId });
+        // Connect update back to condition
+        edges.push({ from: updateId, to: conditionId });
+    }
+    
+    // Add the loop exit node
+    const loopExitId = this.generateNodeId("for_exit");
+    nodes.push({ id: loopExitId, label: "end for", shape: "stadium", nodeType: NodeType.LOOP_END });
+
+
+    // Loop Context for break/continue
+    const continueTargetId = updateId || conditionId;
     const loopContext: LoopContext = {
       breakTargetId: loopExitId,
-      continueTargetId: headerId,
+      continueTargetId: continueTargetId,
     };
+
+    // 4. Loop Body
     const bodyResult = this.processBlock(
-      forNode.childForFieldName("body")!,
+      bodyNode,
       exitId,
       loopContext,
       finallyContext
     );
     nodes.push(...bodyResult.nodes);
-    const edges: FlowchartEdge[] = [...bodyResult.edges];
+    edges.push(...bodyResult.edges);
+    bodyResult.nodesConnectedToExit.forEach(n => nodesConnectedToExit.add(n));
 
+    // 5. Connect the parts
     if (bodyResult.entryNodeId) {
-      edges.push({
-        from: headerId,
-        to: bodyResult.entryNodeId,
-        label: "continue",
+      // Condition (true) -> Body
+      edges.push({ from: conditionId, to: bodyResult.entryNodeId, label: "true" });
+      
+      // Body -> Update (or Condition)
+      bodyResult.exitPoints.forEach((ep) => {
+        edges.push({ from: ep.id, to: continueTargetId });
       });
+
     } else {
-      edges.push({ from: headerId, to: headerId, label: "continue" });
+        // Empty loop body, loop goes from condition straight to update
+        edges.push({ from: conditionId, to: continueTargetId, label: "true" });
     }
+    
+    // Condition (false) -> Exit
+    edges.push({ from: conditionId, to: loopExitId, label: "false" });
 
-    bodyResult.exitPoints.forEach((ep) =>
-      edges.push({ from: ep.id, to: headerId })
-    );
-    edges.push({ from: headerId, to: loopExitId, label: "exit" });
-
+    // The exit point for the whole for-loop construct is the loopExitId
     return this.createProcessResult(
       nodes,
       edges,
-      headerId,
+      entryPointId,
       [{ id: loopExitId }],
-      bodyResult.nodesConnectedToExit
+      nodesConnectedToExit
     );
   }
 
@@ -728,7 +779,7 @@ export class TsAstParser extends AbstractParser {
         id: headerId,
         label: this.escapeString(headerText),
         shape: "diamond",
-        nodeType: NodeType.LOOP_START,
+        nodeType: NodeType.DECISION,
       },
       { id: loopExitId, label: "end loop", shape: "stadium", nodeType: NodeType.LOOP_END },
     ];
@@ -791,7 +842,7 @@ export class TsAstParser extends AbstractParser {
         id: conditionId,
         label: conditionText,
         shape: "diamond",
-        nodeType: NodeType.LOOP_START,
+        nodeType: NodeType.DECISION,
       },
       { id: loopExitId, label: "end loop", shape: "stadium", nodeType: NodeType.LOOP_END },
     ];
@@ -853,7 +904,7 @@ export class TsAstParser extends AbstractParser {
         id: conditionId,
         label: conditionText,
         shape: "diamond",
-        nodeType: NodeType.LOOP_START,
+        nodeType: NodeType.DECISION,
       },
       { id: loopExitId, label: "end loop", shape: "stadium", nodeType: NodeType.LOOP_END },
     ];
