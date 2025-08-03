@@ -41,7 +41,7 @@ export class SubtleThemeManager {
     [
       NodeType.ENTRY,
       {
-        shape: "rect",
+        shape: "round", // CHANGED from "rect"
         borderStyle: "solid",
         fontWeight: "normal",
         emphasis: "low",
@@ -50,7 +50,7 @@ export class SubtleThemeManager {
     [
       NodeType.EXIT,
       {
-        shape: "rect",
+        shape: "round", // CHANGED from "rect"
         borderStyle: "solid",
         fontWeight: "normal",
         emphasis: "low",
@@ -68,7 +68,7 @@ export class SubtleThemeManager {
     [
       NodeType.DECISION,
       {
-        shape: "rect",
+        shape: "diamond", // CHANGED from "rect"
         borderStyle: "solid",
         fontWeight: "normal",
         emphasis: "low",
@@ -131,7 +131,7 @@ export class SubtleThemeManager {
     [
       NodeType.RETURN,
       {
-        shape: "rect",
+        shape: "stadium",
         borderStyle: "solid",
         fontWeight: "normal",
         emphasis: "low",
@@ -191,7 +191,7 @@ export class SubtleThemeManager {
           },
           returnNode: {
             fill: "#272822",
-            stroke: "#A6E22E",
+            stroke: "#FD971F",
             textColor: "#F8F8F2",
           },
         },
@@ -232,7 +232,7 @@ export class SubtleThemeManager {
           },
           returnNode: {
             fill: "#f0f0f0",
-            stroke: "#7fb42b",
+            stroke: "#f0750c",
             textColor: "#2d2d2d",
           },
         },
