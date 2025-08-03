@@ -165,7 +165,7 @@ export class ComplexityAnalyzer {
       }
     }
 
-    return Math.max(count, 1); // At least 1 for the expression itself
+    return count; // Only count actual logical operators, no minimum
   }
 
   private static countCaseClauses(
@@ -221,7 +221,73 @@ export class ComplexityAnalyzer {
         : "name";
 
     const nameNode = functionNode.childForFieldName(nameField);
-    return nameNode?.text || "[anonymous]";
+
+    if (!nameNode) {
+      return "[anonymous]";
+    }
+
+    // Special handling for C++ declarator nodes
+    if (language === "cpp" && nameField === "declarator") {
+      return this.extractCppFunctionName(nameNode);
+    }
+
+    return nameNode.text || "[anonymous]";
+  }
+
+  /**
+   * Extract function name from C++ declarator node by finding the identifier
+   */
+  private static extractCppFunctionName(
+    declaratorNode: Parser.SyntaxNode
+  ): string {
+    // Common patterns in C++ function declarators:
+    // - function_declarator with identifier
+    // - qualified_identifier (for MyClass::method)
+    // - identifier (simple function names)
+
+    const queue: Parser.SyntaxNode[] = [declaratorNode];
+
+    while (queue.length > 0) {
+      const currentNode = queue.shift()!;
+
+      // Direct identifier
+      if (currentNode.type === "identifier") {
+        return currentNode.text;
+      }
+
+      // Qualified identifier (e.g., MyClass::method)
+      if (currentNode.type === "qualified_identifier") {
+        // Get the last identifier in the qualified name
+        const nameChild = currentNode.childForFieldName("name");
+        if (nameChild && nameChild.type === "identifier") {
+          return nameChild.text;
+        }
+      }
+
+      // Function declarator - look for the declarator field
+      if (currentNode.type === "function_declarator") {
+        const declarator = currentNode.childForFieldName("declarator");
+        if (declarator) {
+          queue.push(declarator);
+          continue;
+        }
+      }
+
+      // Add all children to queue for further searching
+      for (let i = 0; i < currentNode.childCount; i++) {
+        const child = currentNode.child(i);
+        if (
+          child &&
+          (child.type === "identifier" ||
+            child.type === "qualified_identifier" ||
+            child.type === "function_declarator")
+        ) {
+          queue.push(child);
+        }
+      }
+    }
+
+    return "[anonymous]";
   }
 
   private static analyzeStatementBlocks(
