@@ -105,6 +105,13 @@ export class MermaidGenerator {
 
       const shape = this.getShape(node);
       const label = this.generateNodeLabel(node);
+
+      // Add CSS class for syntax highlighting if node has source code
+      const cssClass =
+        node.sourceCode && this.settings.enabled
+          ? `:::syntax-${node.sourceCode.language}`
+          : "";
+
       this.sb.append("    ");
       this.sb.append(node.id);
       this.sb.append(shape[0]);
@@ -112,6 +119,7 @@ export class MermaidGenerator {
       this.sb.append(label);
       this.sb.append('"');
       this.sb.append(shape[1]);
+      this.sb.append(cssClass);
       this.sb.appendLine("");
     }
     this.log("=== END PROCESSING NODES ===");
@@ -168,24 +176,12 @@ export class MermaidGenerator {
    * Generate the label for a node, with optional syntax highlighting
    */
   private generateNodeLabel(node: FlowchartNode): string {
-    this.log("=== GENERATING NODE LABEL ===");
-    this.log(`Node ID: ${node.id}`);
-    this.log(`Settings enabled: ${this.settings.enabled}`);
-    this.log(`Has sourceCode: ${!!node.sourceCode}`);
-
     if (!this.settings.enabled || !node.sourceCode) {
-      this.log(`Returning escaped string: ${this.escapeString(node.label)}`);
       return this.escapeString(node.label);
     }
 
-    this.log(`Source code language: ${node.sourceCode.language}`);
-    this.log(
-      `Supported languages: ${this.settings.supportedLanguages.join(", ")}`
-    );
-
     // Check if the language is supported
     if (!this.settings.supportedLanguages.includes(node.sourceCode.language)) {
-      this.log("Language not supported, returning escaped string");
       return this.escapeString(node.label);
     }
 
@@ -195,8 +191,6 @@ export class MermaidGenerator {
           ? this.detectTheme()
           : (this.settings.theme as "light" | "dark");
 
-      this.log(`Detected theme: ${theme}`);
-
       const options: HighlightOptions = {
         language: node.sourceCode.language,
         theme,
@@ -205,36 +199,25 @@ export class MermaidGenerator {
         maxCharacters: this.settings.maxCharacters,
       };
 
-      this.log(`Highlighting options: ${JSON.stringify(options)}`);
-      this.log(`Source code text: ${node.sourceCode.text}`);
-
       const result = this.syntaxHighlighter.highlight(
         node.sourceCode.text,
         options
       );
 
-      this.log(`Highlight result HTML: ${result.html}`);
-
-      // Create HTML template for the highlighted code
-      let htmlContent = result.html;
+      // Instead of HTML, use plain text with syntax-aware node styling
+      // Store the highlighted content for CSS class application
+      let textContent = node.sourceCode.text;
 
       if (result.truncated) {
-        htmlContent +=
-          '<br/><em style="color: #888; font-size: 10px;">...</em>';
+        textContent =
+          textContent.substring(0, this.settings.maxCharacters) + "...";
       }
 
-      // For Mermaid HTML labels, wrap content in a way that preserves HTML
-      // Use backticks for HTML content in Mermaid
-      const finalLabel = `\`${htmlContent}\``;
-      this.log(`Final label: ${finalLabel}`);
-      this.log("=== END NODE LABEL ===");
-
-      return finalLabel;
+      // Return clean text content for Mermaid
+      // The styling will be applied via CSS classes
+      return this.escapeString(textContent);
     } catch (error) {
       // Fallback to regular escaped text if highlighting fails
-      this.log(
-        `Syntax highlighting failed for node: ${node.id}, error: ${error}`
-      );
       return this.escapeString(node.label);
     }
   }
@@ -291,12 +274,40 @@ export class MermaidGenerator {
 
     const finalCSS = `
             <style>
-                /* Syntax highlighting for code in flowchart nodes */
-                .node .label {
+                /* Base syntax highlighting for flowchart nodes */
+                .syntax-python .nodeLabel,
+                .syntax-typescript .nodeLabel,
+                .syntax-javascript .nodeLabel,
+                .syntax-java .nodeLabel,
+                .syntax-cpp .nodeLabel {
                     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
-                    font-size: 12px !important;
-                    line-height: 1.4 !important;
+                    font-size: 11px !important;
+                    line-height: 1.3 !important;
                     text-align: left !important;
+                    white-space: pre !important;
+                    background-color: ${
+                      theme === "dark" ? "#1e1e1e" : "#ffffff"
+                    } !important;
+                    color: ${
+                      theme === "dark" ? "#d4d4d4" : "#000000"
+                    } !important;
+                    padding: 4px 6px !important;
+                    border-radius: 3px !important;
+                }
+                
+                /* Style the actual node containers for code nodes */
+                .syntax-python rect,
+                .syntax-typescript rect,
+                .syntax-javascript rect,
+                .syntax-java rect,
+                .syntax-cpp rect {
+                    fill: ${
+                      theme === "dark" ? "#1e1e1e" : "#f8f8f8"
+                    } !important;
+                    stroke: ${
+                      theme === "dark" ? "#569cd6" : "#0066cc"
+                    } !important;
+                    stroke-width: 2px !important;
                 }
 
                 /* Token-based syntax highlighting */
@@ -316,7 +327,7 @@ export class MermaidGenerator {
                   theme === "dark" ? "#dcdcaa" : "#795e26"
                 } !important; }
                 
-                /* Additional highlighting support */
+                /* Fallback for generic node text */
                 .mermaid .node text {
                     font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace !important;
                 }
