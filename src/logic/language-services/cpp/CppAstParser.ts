@@ -397,6 +397,22 @@ export class CppAstParser extends AbstractParser {
               loopContext,
               finallyContext
             );
+          } else if (child?.type === "call_expression") {
+            const nodeId = this.generateNodeId("call");
+            const node: FlowchartNode = this.createSemanticNode(
+              nodeId,
+              this.escapeString(child.text),
+              NodeType.FUNCTION_CALL,
+              child
+            );
+            this.locationMap.push({
+              start: child.startIndex,
+              end: child.endIndex,
+              nodeId,
+            });
+            return this.createProcessResult([node], [], nodeId, [
+              { id: nodeId },
+            ]);
           }
           expressionNode = child ?? undefined;
         }
@@ -471,6 +487,26 @@ export class CppAstParser extends AbstractParser {
             { id: consequenceId },
             { id: alternativeId },
           ]);
+        }
+
+        // Handle assignment expressions
+        if (assignmentTargetNode && expressionNode) {
+          const nodeId = this.generateNodeId("assign");
+          const labelText = `${this.escapeString(
+            assignmentTargetNode.text
+          )} = ${this.escapeString(expressionNode.text)}`;
+          const node: FlowchartNode = this.createSemanticNode(
+            nodeId,
+            labelText,
+            NodeType.ASSIGNMENT,
+            statement
+          );
+          this.locationMap.push({
+            start: statement.startIndex,
+            end: statement.endIndex,
+            nodeId,
+          });
+          return this.createProcessResult([node], [], nodeId, [{ id: nodeId }]);
         }
 
         // For lambda expressions, treat expressions as return statements
@@ -719,17 +755,32 @@ export class CppAstParser extends AbstractParser {
     const condition = forNode.childForFieldName("condition");
     const update = forNode.childForFieldName("update");
 
-    const headerText = `for (${init?.text || ""}; ${condition?.text || ""}; ${
-      update?.text || ""
-    })`;
-    const headerId = this.generateNodeId("for_header");
+    const initText = init?.text || "";
+    const conditionText = condition?.text || "true";
+    const updateText = update?.text || "";
+
+    const initId = this.generateNodeId("for_init");
+    const conditionId = this.generateNodeId("for_cond");
+    const updateId = this.generateNodeId("for_update");
     const loopExitId = this.generateNodeId("for_exit");
 
     const nodes: FlowchartNode[] = [
       this.createSemanticNode(
-        headerId,
-        headerText,
-        NodeType.LOOP_START,
+        initId,
+        initText || "for init",
+        NodeType.PROCESS,
+        forNode
+      ),
+      this.createSemanticNode(
+        conditionId,
+        conditionText,
+        NodeType.DECISION,
+        forNode
+      ),
+      this.createSemanticNode(
+        updateId,
+        updateText || "for update",
+        NodeType.PROCESS,
         forNode
       ),
       this.createSemanticNode(
@@ -742,18 +793,26 @@ export class CppAstParser extends AbstractParser {
     this.locationMap.push({
       start: forNode.startIndex,
       end: forNode.endIndex,
-      nodeId: headerId,
+      nodeId: initId,
     });
 
     const loopContext: LoopContext = {
       breakTargetId: loopExitId,
-      continueTargetId: headerId,
+      continueTargetId: updateId,
     };
 
     // Handle body - could be single statement or compound statement
     const bodyNode = forNode.childForFieldName("body");
     if (!bodyNode) {
-      return this.createProcessResult();
+      return this.createProcessResult(
+        [nodes[0], nodes[1], nodes[3]], // init, condition, exit
+        [
+          { from: initId, to: conditionId },
+          { from: conditionId, to: loopExitId, label: "false" },
+        ],
+        initId,
+        [{ id: loopExitId }]
+      );
     }
 
     const bodyResult =
@@ -762,30 +821,34 @@ export class CppAstParser extends AbstractParser {
         : this.processStatement(bodyNode, exitId, loopContext, finallyContext);
 
     nodes.push(...bodyResult.nodes);
-    const edges: FlowchartEdge[] = [...bodyResult.edges];
+    const edges: FlowchartEdge[] = [
+      ...bodyResult.edges,
+      { from: initId, to: conditionId }, // init to condition
+      { from: conditionId, to: loopExitId, label: "false" }, // condition false exits
+      { from: updateId, to: conditionId }, // update back to condition
+    ];
 
     if (bodyResult.entryNodeId) {
       edges.push({
-        from: headerId,
+        from: conditionId,
         to: bodyResult.entryNodeId,
-        label: "continue",
+        label: "true",
       });
     } else {
-      edges.push({ from: headerId, to: headerId, label: "continue" });
+      edges.push({ from: conditionId, to: updateId, label: "true" });
     }
 
-    // Connect all body exit points back to header for loop continuation
+    // Connect all body exit points to update
     bodyResult.exitPoints.forEach((ep) => {
       if (!bodyResult.nodesConnectedToExit.has(ep.id)) {
-        edges.push({ from: ep.id, to: headerId, label: ep.label });
+        edges.push({ from: ep.id, to: updateId, label: ep.label });
       }
     });
-    edges.push({ from: headerId, to: loopExitId, label: "exit" });
 
     return this.createProcessResult(
       nodes,
       edges,
-      headerId,
+      initId,
       [{ id: loopExitId }],
       bodyResult.nodesConnectedToExit
     );
@@ -832,7 +895,12 @@ export class CppAstParser extends AbstractParser {
     // Handle body - could be single statement or compound statement
     const bodyNode = forNode.childForFieldName("body");
     if (!bodyNode) {
-      return this.createProcessResult();
+      return this.createProcessResult(
+        nodes,
+        [{ from: headerId, to: loopExitId, label: "no items" }],
+        headerId,
+        [{ id: loopExitId }]
+      );
     }
 
     const bodyResult =
@@ -841,7 +909,10 @@ export class CppAstParser extends AbstractParser {
         : this.processStatement(bodyNode, exitId, loopContext, finallyContext);
 
     nodes.push(...bodyResult.nodes);
-    const edges: FlowchartEdge[] = [...bodyResult.edges];
+    const edges: FlowchartEdge[] = [
+      ...bodyResult.edges,
+      { from: headerId, to: loopExitId, label: "no more items" },
+    ];
 
     if (bodyResult.entryNodeId) {
       edges.push({
@@ -850,6 +921,7 @@ export class CppAstParser extends AbstractParser {
         label: "next item",
       });
     } else {
+      // Empty body - loop back to itself
       edges.push({ from: headerId, to: headerId, label: "next item" });
     }
 
@@ -859,7 +931,6 @@ export class CppAstParser extends AbstractParser {
         edges.push({ from: ep.id, to: headerId, label: ep.label });
       }
     });
-    edges.push({ from: headerId, to: loopExitId, label: "no more items" });
 
     return this.createProcessResult(
       nodes,
@@ -901,8 +972,8 @@ export class CppAstParser extends AbstractParser {
       ),
     ];
     this.locationMap.push({
-      start: whileNode.startIndex,
-      end: whileNode.endIndex,
+      start: conditionNode.startIndex,
+      end: conditionNode.endIndex,
       nodeId: conditionId,
     });
 
@@ -918,7 +989,10 @@ export class CppAstParser extends AbstractParser {
         : this.processStatement(bodyNode, exitId, loopContext, finallyContext);
 
     nodes.push(...bodyResult.nodes);
-    const edges: FlowchartEdge[] = [...bodyResult.edges];
+    const edges: FlowchartEdge[] = [
+      ...bodyResult.edges,
+      { from: conditionId, to: loopExitId, label: "false" },
+    ];
 
     if (bodyResult.entryNodeId) {
       edges.push({
@@ -927,7 +1001,7 @@ export class CppAstParser extends AbstractParser {
         label: "true",
       });
     } else {
-      // If body has no entry (e.g., empty or just comments), loop back to condition
+      // Empty body - loop back to condition
       edges.push({ from: conditionId, to: conditionId, label: "true" });
     }
 
@@ -937,9 +1011,6 @@ export class CppAstParser extends AbstractParser {
         edges.push({ from: ep.id, to: conditionId, label: ep.label });
       }
     });
-
-    // Condition false exits the loop
-    edges.push({ from: conditionId, to: loopExitId, label: "false" });
 
     return this.createProcessResult(
       nodes,
@@ -1094,6 +1165,30 @@ export class CppAstParser extends AbstractParser {
         ];
 
         for (const stmt of caseBody) {
+          // Handle break statements specially in switch context
+          if (stmt.type === "break_statement") {
+            const breakResult = this.processBreakStatement(stmt, {
+              breakTargetId: exitId,
+              continueTargetId: loopContext?.continueTargetId || exitId,
+            });
+            nodes.push(...breakResult.nodes);
+            edges.push(...breakResult.edges);
+            caseExitPoints.forEach((ep) => {
+              if (breakResult.entryNodeId) {
+                edges.push({
+                  from: ep.id,
+                  to: breakResult.entryNodeId,
+                  label: ep.label,
+                });
+              }
+            });
+            caseExitPoints = [];
+            breakResult.nodesConnectedToExit.forEach((n) =>
+              nodesConnectedToExit.add(n)
+            );
+            break; // No more statements after break
+          }
+
           const stmtResult = this.processStatement(
             stmt,
             exitId,
@@ -1119,7 +1214,8 @@ export class CppAstParser extends AbstractParser {
         }
 
         allExitPoints.push(...caseExitPoints);
-        lastCaseExitPoints = [{ id: caseId, label: "no match" }];
+        lastCaseExitPoints =
+          caseExitPoints.length > 0 ? [] : [{ id: caseId, label: "no match" }];
       } else {
         lastCaseExitPoints = [{ id: caseId, label: "no match" }];
         allExitPoints.push({ id: caseId, label: "match" });
