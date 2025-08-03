@@ -176,7 +176,7 @@ export class TsAstParser extends AbstractParser {
           {
             id: "A",
             label: "Place cursor inside a function to generate a flowchart.",
-            shape: "rect",
+            nodeType: NodeType.PROCESS,
           },
         ],
         edges: [],
@@ -396,8 +396,7 @@ export class TsAstParser extends AbstractParser {
             {
               id: conditionId,
               label: this.escapeString(conditionNode.text),
-              shape: "diamond",
-              style: this.nodeStyles.decision,
+              nodeType: NodeType.DECISION,
             },
           ];
           const edges: FlowchartEdge[] = [];
@@ -412,8 +411,7 @@ export class TsAstParser extends AbstractParser {
           nodes.push({
             id: consequenceId,
             label: `${targetText} = ${this.escapeString(consequenceNode.text)}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
+            nodeType: NodeType.ASSIGNMENT,
           });
           this.locationMap.push({
             start: statement.startIndex,
@@ -426,8 +424,7 @@ export class TsAstParser extends AbstractParser {
           nodes.push({
             id: alternativeId,
             label: `${targetText} = ${this.escapeString(alternativeNode.text)}`,
-            shape: "rect",
-            style: this.nodeStyles.process,
+            nodeType: NodeType.ASSIGNMENT,
           });
           this.locationMap.push({
             start: statement.startIndex,
@@ -455,6 +452,26 @@ export class TsAstParser extends AbstractParser {
   }
 
   // --- PRIVATE HELPER AND PROCESSING METHODS --- //
+  
+  /**
+   * Overridden to ensure all default-handled statements are assigned a NodeType for consistent styling.
+   * @param statement The syntax node for the statement.
+   * @returns A ProcessResult containing the new flowchart node.
+   */
+  protected processDefaultStatement(statement: Parser.SyntaxNode): ProcessResult {
+    const nodeId = this.generateNodeId("stmt");
+    const node: FlowchartNode = {
+        id: nodeId,
+        label: this.escapeString(statement.text),
+        nodeType: NodeType.PROCESS,
+    };
+    this.locationMap.push({
+        start: statement.startIndex,
+        end: statement.endIndex,
+        nodeId,
+    });
+    return this.createProcessResult([node], [], nodeId, [{ id: nodeId }]);
+  }
 
   private processConditionalExpression(
     condExprNode: Parser.SyntaxNode,
@@ -472,8 +489,7 @@ export class TsAstParser extends AbstractParser {
       {
         id: conditionId,
         label: this.escapeString(conditionNode.text),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
+        nodeType: NodeType.DECISION,
       },
     ];
     this.locationMap.push({
@@ -547,8 +563,7 @@ export class TsAstParser extends AbstractParser {
       {
         id: ifConditionId,
         label: this.escapeString(ifConditionNode.text),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
+        nodeType: NodeType.DECISION,
       },
     ];
     this.locationMap.push({
@@ -639,10 +654,9 @@ export class TsAstParser extends AbstractParser {
       {
         id: headerId,
         label: this.escapeString(headerText),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
+        nodeType: NodeType.LOOP_START,
       },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      { id: loopExitId, label: "end loop", nodeType: NodeType.LOOP_END },
     ];
     this.locationMap.push({
       start: forNode.startIndex,
@@ -702,10 +716,9 @@ export class TsAstParser extends AbstractParser {
       {
         id: headerId,
         label: this.escapeString(headerText),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
+        nodeType: NodeType.LOOP_START,
       },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      { id: loopExitId, label: "end loop", nodeType: NodeType.LOOP_END },
     ];
     this.locationMap.push({
       start: forInNode.startIndex,
@@ -765,10 +778,9 @@ export class TsAstParser extends AbstractParser {
       {
         id: conditionId,
         label: conditionText,
-        shape: "diamond",
-        style: this.nodeStyles.decision,
+        nodeType: NodeType.DECISION,
       },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      { id: loopExitId, label: "end loop", nodeType: NodeType.LOOP_END },
     ];
     this.locationMap.push({
       start: whileNode.startIndex,
@@ -827,10 +839,9 @@ export class TsAstParser extends AbstractParser {
       {
         id: conditionId,
         label: conditionText,
-        shape: "diamond",
-        style: this.nodeStyles.decision,
+        nodeType: NodeType.DECISION,
       },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      { id: loopExitId, label: "end loop", nodeType: NodeType.LOOP_END },
     ];
     this.locationMap.push({
       start: doWhileNode.startIndex,
@@ -885,8 +896,7 @@ export class TsAstParser extends AbstractParser {
       {
         id: switchId,
         label: `switch (${this.escapeString(discriminantNode.text)})`,
-        shape: "rect",
-        style: this.nodeStyles.process,
+        nodeType: NodeType.PROCESS,
       },
     ];
     this.locationMap.push({
@@ -921,8 +931,7 @@ export class TsAstParser extends AbstractParser {
       nodes.push({
         id: caseId,
         label: caseLabel,
-        shape: "diamond",
-        style: this.nodeStyles.decision,
+        nodeType: NodeType.DECISION,
       });
       this.locationMap.push({
         start: caseNode.startIndex,
@@ -999,7 +1008,7 @@ export class TsAstParser extends AbstractParser {
   ): ProcessResult {
     const entryId = this.generateNodeId("try_entry");
     const nodes: FlowchartNode[] = [
-      { id: entryId, label: "try", shape: "stadium" },
+      { id: entryId, label: "try", nodeType: NodeType.PROCESS },
     ];
     this.locationMap.push({
       start: tryNode.startIndex,
@@ -1127,8 +1136,7 @@ export class TsAstParser extends AbstractParser {
     const node: FlowchartNode = {
       id: nodeId,
       label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
+      nodeType: NodeType.RETURN,
     };
     const edges: FlowchartEdge[] = [
       {
@@ -1163,8 +1171,7 @@ export class TsAstParser extends AbstractParser {
     const node: FlowchartNode = {
       id: nodeId,
       label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
+      nodeType: NodeType.EXCEPTION,
     };
     const edges: FlowchartEdge[] = [
       {
@@ -1194,8 +1201,7 @@ export class TsAstParser extends AbstractParser {
     const node: FlowchartNode = {
       id: nodeId,
       label: "break",
-      shape: "stadium",
-      style: this.nodeStyles.break,
+      nodeType: NodeType.BREAK_CONTINUE,
     };
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.breakTargetId },
@@ -1222,8 +1228,7 @@ export class TsAstParser extends AbstractParser {
     const node: FlowchartNode = {
       id: nodeId,
       label: "continue",
-      shape: "stadium",
-      style: this.nodeStyles.break,
+      nodeType: NodeType.BREAK_CONTINUE,
     };
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.continueTargetId },
@@ -1278,8 +1283,7 @@ export class TsAstParser extends AbstractParser {
       const node: FlowchartNode = {
         id: nodeId,
         label: labelText,
-        shape: "rect",
-        style: this.nodeStyles.process,
+        nodeType: NodeType.ASSIGNMENT,
       };
       this.locationMap.push({
         start: declNode.startIndex,
@@ -1306,8 +1310,7 @@ export class TsAstParser extends AbstractParser {
       const node: FlowchartNode = {
         id: nodeId,
         label: labelText,
-        shape: "rect",
-        style: this.nodeStyles.process,
+        nodeType: NodeType.ASSIGNMENT,
       };
       nodes.push(node);
       this.locationMap.push({
@@ -1341,8 +1344,7 @@ export class TsAstParser extends AbstractParser {
     const node: FlowchartNode = {
       id: nodeId,
       label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
+      nodeType: NodeType.RETURN,
     };
     const edges: FlowchartEdge[] = [
       {
