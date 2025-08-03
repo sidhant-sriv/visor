@@ -1,6 +1,11 @@
 import Parser from "web-tree-sitter";
 import { AbstractParser } from "../../common/AbstractParser";
-import { FlowchartIR, FlowchartNode, FlowchartEdge } from "../../../ir/ir";
+import {
+  FlowchartIR,
+  FlowchartNode,
+  FlowchartEdge,
+  NodeType,
+} from "../../../ir/ir";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
 
 export class TsAstParser extends AbstractParser {
@@ -209,7 +214,13 @@ export class TsAstParser extends AbstractParser {
 
     if (!bodyToProcess) {
       return {
-        nodes: [{ id: "A", label: "Function has no body.", shape: "rect" }],
+        nodes: [
+          this.createSemanticNode(
+            "A",
+            "Function has no body.",
+            NodeType.PROCESS
+          ),
+        ],
         edges: [],
         locationMap: [],
       };
@@ -220,18 +231,13 @@ export class TsAstParser extends AbstractParser {
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
-    nodes.push({
-      id: entryId,
-      label: "Start",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
-    nodes.push({
-      id: exitId,
-      label: "End",
-      shape: "round",
-      style: this.nodeStyles.terminator,
-    });
+    // Create semantic entry and exit nodes
+    nodes.push(
+      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
+    );
+    nodes.push(
+      this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
+    );
 
     // For arrow functions with expression bodies, handle them differently
     const bodyResult =
