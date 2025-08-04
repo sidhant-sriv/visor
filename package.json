@@ -1,7 +1,7 @@
 {
   "name": "visor",
   "displayName": "Visor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "sidhantsriv",
   "description": "Makes a flowchart on the side for your code for better visualization.",
   "repository": {
@@ -42,6 +42,26 @@
       {
         "command": "visor.generateFlowchart",
         "title": "Generate Flowchart"
+      },
+      {
+        "command": "visor.openFlowchartInPanel",
+        "title": "Open Flowchart in New Window",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "visor.openFlowchartToSide",
+        "title": "Open Flowchart to the Side",
+        "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "visor.openFlowchartInNewColumn",
+        "title": "Open Flowchart in New Column",
+        "icon": "$(split-vertical)"
+      },
+      {
+        "command": "visor.maximizeFlowchartPanel",
+        "title": "Maximize Flowchart Panel",
+        "icon": "$(screen-full)"
       }
     ],
     "menus": {
@@ -50,6 +70,36 @@
           "command": "visor.generateFlowchart",
           "when": "editorTextFocus && editorHasSelection",
           "group": "navigation"
+        },
+        {
+          "command": "visor.openFlowchartInPanel",
+          "when": "editorTextFocus",
+          "group": "navigation"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "visor.openFlowchartInPanel",
+          "when": "view == visor.flowchartView",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "visor.openFlowchartInPanel",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "visor.openFlowchartToSide",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "visor.openFlowchartInNewColumn",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "visor.maximizeFlowchartPanel",
+          "when": "editorTextFocus"
         }
       ]
     },
@@ -115,6 +165,31 @@
           "default": 20,
           "minimum": 3,
           "description": "Upper threshold for high complexity (above this is very high)"
+        },
+        "visor.panel.defaultPosition": {
+          "type": "string",
+          "enum": [
+            "beside",
+            "two",
+            "three"
+          ],
+          "enumDescriptions": [
+            "Open beside the current editor",
+            "Open in the second column",
+            "Open in the third column"
+          ],
+          "default": "two",
+          "description": "Default position for new flowchart panels"
+        },
+        "visor.panel.retainWhenHidden": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep panel content when hidden to improve performance"
+        },
+        "visor.panel.enableFindWidget": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable find/search functionality in panel view"
         }
       }
     }
