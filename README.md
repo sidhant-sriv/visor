@@ -22,6 +22,8 @@
 - **Bidirectional Navigation**: Click flowchart nodes to jump to code, cursor movement highlights corresponding nodes
 - **Smart Highlighting**: Real-time synchronization between code and flowchart
 - **Context-Aware**: Automatically detects the current function scope
+- **External Window Support**: Open flowcharts in dedicated panel windows for multi-monitor setups
+- **Window State Management**: Robust event handling ensures graphs generate reliably across window switches
 
 ### 🎨 **Rich Visual Elements**
 
@@ -33,6 +35,7 @@
 - **Mermaid.js Powered**: High-quality, theme-aware diagrams with enhanced semantic styling
 - **Pan & Zoom**: Navigate complex flowcharts with smooth controls
 - **VS Code Theme Integration**: Automatically adapts to light/dark themes with subtle accent colors
+- **Dual View Options**: Choose between sidebar integration or dedicated external windows
 
 ### 📤 **Export Capabilities**
 
@@ -83,7 +86,7 @@ def complex_function(data):
 
 This function will show **Medium complexity (CC=6)** with ⚠️ indicators on decision nodes.
 
-## � Enhanced Node Readability
+## Enhanced Node Readability
 
 ### Semantic Node Categories
 
@@ -126,21 +129,27 @@ Access theme and complexity settings via VS Code Settings (`Cmd/Ctrl + ,`) under
 }
 ```
 
-## �🚀 How to Use
+## 🚀 How to Use
 
 ### Getting Started
 
 1. **Install the Extension**: Search for "Visor" in the VS Code Extensions marketplace
 2. **Open a Supported File**: Open any Python, TypeScript, JavaScript, Java, or C/C++ file
-3. **Access the Flowchart**: Click the Visor icon in the Activity Bar (left sidebar)
+3. **Access the Flowchart**:
+   - **Sidebar View**: Click the Visor icon in the Activity Bar (left sidebar)
+   - **External Window**: Use the command palette (`Cmd/Ctrl + Shift + P`) and run "Visor: Generate Flowchart" or click the 🚀 "Open in New Window" button
 
 ### Navigation & Interaction
 
 1. **Function Selection**: Place your cursor inside any function - the flowchart updates automatically
 2. **Code Navigation**: Click any node in the flowchart to jump to the corresponding code
 3. **Live Highlighting**: Move your cursor through the code to see real-time highlighting in the flowchart
-4. **Export**: Use the export buttons (top-right of flowchart) to save as SVG or PNG
-5. **Complexity Analysis**: View function complexity in the bottom panel and node indicators
+4. **Window Management**:
+   - **Switch to External**: Click the 🚀 button in the sidebar view to open in a dedicated window
+   - **Multi-Monitor Support**: Drag external windows to secondary monitors for enhanced workflow
+   - **Automatic Updates**: External windows stay synchronized with your code changes
+5. **Export**: Use the export buttons to save as SVG or PNG (available in both views)
+6. **Complexity Analysis**: View function complexity in the bottom panel and node indicators
 
 ### Understanding Complexity Metrics
 
@@ -150,6 +159,33 @@ Visor provides cyclomatic complexity analysis to help you write maintainable cod
 - **Visual Indicators**: Emoji markers on complex nodes (⚠️ Medium, 🔴 High, 🚨 Very High)
 - **Toggle Button**: Use the 📊 button (bottom-right) to show/hide complexity information
 - **Thresholds**: Default ranges are 1-5 (Low), 6-10 (Medium), 11-20 (High), 21+ (Very High)
+- **Multi-Window Support**: Complexity information is available in both sidebar and external window views
+
+### Working with External Windows
+
+Visor supports opening flowcharts in dedicated external windows for enhanced productivity:
+
+**Benefits:**
+
+- **Multi-Monitor Workflows**: Place flowchart on secondary monitor while coding on primary
+- **Larger View Area**: More space for complex flowcharts without sacrificing code editor space
+- **Independent Navigation**: Pan and zoom without affecting your code editor
+- **Persistent State**: Windows remember their position and zoom level
+
+**Usage:**
+
+1. **From Sidebar**: Click the 🚀 "Open in New Window" button in the sidebar view
+2. **From Command Palette**: Run "Visor: Generate Flowchart" (`Cmd/Ctrl + Shift + P`)
+3. **Automatic Sync**: External windows automatically update when you navigate to different functions
+4. **Reliable Updates**: Enhanced event handling ensures flowcharts generate consistently across window switches
+
+**Features in External Windows:**
+
+- Full pan and zoom controls
+- Export functionality (SVG/PNG)
+- Complexity metrics display
+- Real-time code synchronization
+- Professional panel header with function information
 
 **Example**: A function with many nested if-statements and loops will show:
 
@@ -196,7 +232,9 @@ Visor provides cyclomatic complexity analysis to help you write maintainable cod
 - **FlowchartIR**: Enhanced intermediate representation with semantic node categorization and complexity metrics
 - **EnhancedMermaidGenerator**: Advanced generator with theme-aware styling, visual enhancement, and complexity indicators
 - **SubtleThemeManager**: Professional color palette management for enhanced readability
-- **FlowchartViewProvider**: VS Code webview integration with enhanced CSS, interactions, and complexity display
+- **BaseFlowchartProvider**: Shared webview logic with robust event handling and window state management
+- **FlowchartViewProvider**: Sidebar integration with complexity display and external window launcher
+- **FlowchartPanelProvider**: Dedicated external window management with singleton pattern and proper cleanup
 
 ### Performance Features
 
@@ -258,9 +296,11 @@ code --extensionDevelopmentPath=.
 
 ```
 src/
-├── extension.ts              # Extension entry point
+├── extension.ts              # Extension entry point with command registration
 ├── view/
-│   └── FlowchartViewProvider.ts  # Main webview provider with complexity display
+│   ├── BaseFlowchartProvider.ts    # Shared webview logic with event handling
+│   ├── FlowchartViewProvider.ts    # Sidebar view integration
+│   └── FlowchartPanelProvider.ts   # External window management
 ├── logic/
 │   ├── analyzer.ts           # Language router
 │   ├── EnhancedMermaidGenerator.ts  # Advanced flowchart generation with complexity indicators
@@ -338,12 +378,21 @@ yarn test --grep "parser"
 - Ensure your cursor is inside a function
 - Check that the file language is supported
 - Look for errors in the VS Code Developer Console (Help > Toggle Developer Tools)
+- Try using the "Visor: Generate Flowchart" command from the command palette
+- If using external windows, ensure the window has focus when switching between functions
+
+**External window issues:**
+
+- If external windows stop updating, close and reopen them using the 🚀 button
+- For multi-monitor setups, ensure VS Code has proper focus when navigating code
+- External windows automatically dispose when VS Code closes
 
 **Export not working:**
 
 - Ensure you have sufficient disk space
 - Check file permissions in the target directory
 - Try exporting to a different location
+- Export functionality works in both sidebar and external window views
 
 **Performance issues:**
 
