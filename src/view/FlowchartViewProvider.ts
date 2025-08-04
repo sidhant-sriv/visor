@@ -53,7 +53,7 @@ export class FlowchartViewProvider
       localResourceRoots: [this._extensionUri],
     };
 
-    // Set up event listeners
+    // Set up event listeners (will only set up once due to the flag)
     this.setupEventListeners();
 
     // Handle messages from the webview
@@ -65,6 +65,15 @@ export class FlowchartViewProvider
 
     // Initial update
     this.updateView(vscode.window.activeTextEditor);
+  }
+
+  /**
+   * Public method to refresh the sidebar content
+   */
+  public refresh(): void {
+    if (this._view) {
+      this.forceUpdateView(vscode.window.activeTextEditor);
+    }
   }
 
   /**

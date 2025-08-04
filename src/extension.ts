@@ -90,16 +90,16 @@ export async function activate(context: vscode.ExtensionContext) {
     ),
 
     vscode.commands.registerCommand("visor.generateFlowchart", () => {
-      // Update both sidebar and panel if they exist
+      // Force update both sidebar and panel if they exist
       const activeEditor = vscode.window.activeTextEditor;
       if (activeEditor) {
-        sidebarProvider.updateView(activeEditor);
+        sidebarProvider.refresh();
 
         const panelProvider = FlowchartPanelProvider.getInstance(
           context.extensionUri
         );
         if (panelProvider.isVisible()) {
-          panelProvider.updateView(activeEditor);
+          panelProvider.refresh();
         }
       }
     })

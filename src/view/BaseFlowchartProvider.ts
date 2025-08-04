@@ -51,6 +51,7 @@ export abstract class BaseFlowchartProvider {
   protected _currentDocument?: vscode.TextDocument;
   protected _currentPosition?: number;
   protected _isUpdating: boolean = false;
+  protected _eventListenersSetup: boolean = false;
 
   constructor(protected readonly _extensionUri: vscode.Uri) {
     // Listen for configuration changes to update themes
@@ -75,6 +76,11 @@ export abstract class BaseFlowchartProvider {
    * Set up event listeners for editor changes and selection changes
    */
   protected setupEventListeners(): void {
+    // Prevent setting up listeners multiple times
+    if (this._eventListenersSetup) {
+      return;
+    }
+
     // Listen for changes to the active editor
     vscode.window.onDidChangeActiveTextEditor(
       async (editor) => {
@@ -126,6 +132,8 @@ export abstract class BaseFlowchartProvider {
       null,
       this._disposables
     );
+
+    this._eventListenersSetup = true;
   }
 
   /**
@@ -229,6 +237,23 @@ export abstract class BaseFlowchartProvider {
         payload: { nodeId },
       });
     }
+  }
+
+  /**
+   * Force update the view, ignoring the shouldUpdate check
+   */
+  public async forceUpdateView(
+    editor: vscode.TextEditor | undefined
+  ): Promise<void> {
+    // Reset the updating flag to ensure we can proceed
+    this._isUpdating = false;
+
+    // Clear current state to force regeneration
+    this._currentDocument = undefined;
+    this._currentPosition = undefined;
+    this._currentFunctionRange = undefined;
+
+    await this.updateView(editor);
   }
 
   /**
@@ -365,7 +390,7 @@ export abstract class BaseFlowchartProvider {
       return true;
     }
 
-    // Update if document changed
+    // Update if document changed (different file)
     if (this._currentDocument.uri.toString() !== document.uri.toString()) {
       return true;
     }
@@ -375,12 +400,14 @@ export abstract class BaseFlowchartProvider {
       return true;
     }
 
-    // Update if we moved to a different function
-    if (this._currentFunctionRange) {
-      const currentPos = document.positionAt(position);
-      if (!this._currentFunctionRange.contains(currentPos)) {
-        return true;
-      }
+    // Update if we moved to a different function or there's no current function range
+    if (!this._currentFunctionRange) {
+      return true;
+    }
+
+    const currentPos = document.positionAt(position);
+    if (!this._currentFunctionRange.contains(currentPos)) {
+      return true;
     }
 
     // Don't update if we're just moving within the same function
@@ -421,7 +448,7 @@ export abstract class BaseFlowchartProvider {
             body, html {
                 background-color: var(--vscode-editor-background);
                 color: var(--vscode-editor-foreground);
-                font-family: var(--vscode-font-family);
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                 margin: 0;
                 padding: 0;
                 width: 100%;
@@ -463,7 +490,7 @@ export abstract class BaseFlowchartProvider {
             
             /* Enhanced text readability */
             .mermaid .node text {
-                font-family: var(--vscode-font-family), 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                 font-size: 12px;
                 text-anchor: middle;
                 dominant-baseline: central;
@@ -542,39 +569,7 @@ export abstract class BaseFlowchartProvider {
                 opacity: 0.5;
             }
 
-            /* Enhanced zoom controls for detached experience */
-            .zoom-controls {
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
-                background: var(--vscode-editor-background);
-                border: 1px solid var(--vscode-panel-border);
-                border-radius: 6px;
-                padding: 8px;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            }
 
-            .zoom-btn {
-                background-color: var(--vscode-button-background);
-                color: var(--vscode-button-foreground);
-                border: none;
-                width: 32px;
-                height: 32px;
-                border-radius: 4px;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                font-size: 16px;
-                font-weight: bold;
-            }
-
-            .zoom-btn:hover {
-                background-color: var(--vscode-button-hoverBackground);
-            }
             `
                 : ""
             }
@@ -714,13 +709,6 @@ export abstract class BaseFlowchartProvider {
                 </div>
             </div>
         </div>
-        
-        <!-- Enhanced zoom controls for detached experience -->
-        <div class="zoom-controls">
-            <button class="zoom-btn" id="zoom-in" title="Zoom In">+</button>
-            <button class="zoom-btn" id="zoom-reset" title="Reset Zoom">⌂</button>
-            <button class="zoom-btn" id="zoom-out" title="Zoom Out">−</button>
-        </div>
         `
             : ""
         }
@@ -831,60 +819,6 @@ ${flowchartSyntax}
                         maxZoom: 10,
                         zoomScaleSensitivity: 0.2
                     });
-
-                    // Enhanced zoom controls for panel view
-                    ${
-                      context.isPanel
-                        ? `
-                    const zoomInBtn = document.getElementById('zoom-in');
-                    const zoomOutBtn = document.getElementById('zoom-out');
-                    const zoomResetBtn = document.getElementById('zoom-reset');
-
-                    if (zoomInBtn) {
-                        zoomInBtn.addEventListener('click', () => {
-                            panZoomInstance.zoomIn();
-                        });
-                    }
-
-                    if (zoomOutBtn) {
-                        zoomOutBtn.addEventListener('click', () => {
-                            panZoomInstance.zoomOut();
-                        });
-                    }
-
-                    if (zoomResetBtn) {
-                        zoomResetBtn.addEventListener('click', () => {
-                            panZoomInstance.resetZoom();
-                            panZoomInstance.center();
-                            panZoomInstance.fit();
-                        });
-                    }
-
-                    // Add keyboard shortcuts for detached window experience
-                    document.addEventListener('keydown', (e) => {
-                        if (e.ctrlKey || e.metaKey) {
-                            switch(e.key) {
-                                case '=':
-                                case '+':
-                                    e.preventDefault();
-                                    panZoomInstance.zoomIn();
-                                    break;
-                                case '-':
-                                    e.preventDefault();
-                                    panZoomInstance.zoomOut();
-                                    break;
-                                case '0':
-                                    e.preventDefault();
-                                    panZoomInstance.resetZoom();
-                                    panZoomInstance.center();
-                                    panZoomInstance.fit();
-                                    break;
-                            }
-                        }
-                    });
-                    `
-                        : ""
-                    }
                 }
             });
 
@@ -1061,7 +995,7 @@ ${flowchartSyntax}
                 body, html {
                     background-color: var(--vscode-editor-background);
                     color: var(--vscode-editor-foreground);
-                    font-family: var(--vscode-font-family);
+                    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                     display: flex;
                     justify-content: center;
                     align-items: center;
@@ -1106,6 +1040,7 @@ ${flowchartSyntax}
     this._isUpdating = false;
     this._locationMap = [];
     this._currentFunctionRange = undefined;
+    this._eventListenersSetup = false;
 
     while (this._disposables.length) {
       const x = this._disposables.pop();

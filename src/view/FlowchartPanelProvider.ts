@@ -58,12 +58,14 @@ export class FlowchartPanelProvider extends BaseFlowchartProvider {
     viewColumn?: vscode.ViewColumn,
     moveToNewWindow: boolean = false
   ): void {
-    // If panel already exists, just reveal it
+    // If panel already exists, just reveal it and update if needed
     if (this._panel) {
       this._panel.reveal(viewColumn);
       if (moveToNewWindow) {
         this.moveToNewWindow();
       }
+      // Force an update to ensure the panel shows current content
+      this.forceUpdateView(vscode.window.activeTextEditor);
       return;
     }
 
@@ -119,19 +121,23 @@ export class FlowchartPanelProvider extends BaseFlowchartProvider {
     this._panel.onDidDispose(
       () => {
         this._panel = undefined;
+        // Reset the singleton instance when panel is disposed
+        FlowchartPanelProvider._instance = undefined;
       },
       null,
       this._disposables
     );
 
-    // Handle panel state changes - avoid unnecessary updates
+    // Handle panel state changes - ensure updates when panel becomes active
     this._panel.onDidChangeViewState(
       (e) => {
-        // Panel state changed but don't trigger updates unless needed
-        // This prevents the panel from resetting when user interacts with it
         if (e.webviewPanel.active) {
-          // Only update title or other UI elements, not the entire view
+          // Update title and force a view update when panel becomes active
           this.updateTitle();
+          // Use setTimeout to ensure proper timing
+          setTimeout(() => {
+            this.forceUpdateView(vscode.window.activeTextEditor);
+          }, 50);
         }
       },
       null,
@@ -244,6 +250,15 @@ export class FlowchartPanelProvider extends BaseFlowchartProvider {
     }
 
     await super.updateView(editor);
+  }
+
+  /**
+   * Public method to refresh the panel content (useful for external triggers)
+   */
+  public refresh(): void {
+    if (this._panel) {
+      this.forceUpdateView(vscode.window.activeTextEditor);
+    }
   }
 
   /**
