@@ -15,7 +15,8 @@
 - **Python**: Functions, lambdas, higher-order functions (map, filter, reduce)
 - **TypeScript/JavaScript**: Functions, arrow functions, methods, classes
 - **Java**: Methods, classes, constructors
-- **C/C++**: Functions and methods
+- **C++**: Functions and methods
+- **C**: Functions with comprehensive control flow support (if/else, loops, switch, goto)
 
 ### 🎯 **Interactive Visualization**
 
@@ -63,7 +64,7 @@
 ## 🚀 Quick Start
 
 1. **Install** the Visor extension from the VS Code marketplace
-2. **Open** any Python, TypeScript, Java, or C++ file
+2. **Open** any Python, TypeScript, Java, C, or C++ file
 3. **Click** the Visor icon in the Activity Bar (left sidebar)
 4. **Place your cursor** inside a function to see the flowchart
 5. **Observe complexity metrics** in the bottom panel and node indicators
@@ -134,7 +135,7 @@ Access theme and complexity settings via VS Code Settings (`Cmd/Ctrl + ,`) under
 ### Getting Started
 
 1. **Install the Extension**: Search for "Visor" in the VS Code Extensions marketplace
-2. **Open a Supported File**: Open any Python, TypeScript, JavaScript, Java, or C/C++ file
+2. **Open a Supported File**: Open any Python, TypeScript, JavaScript, Java, C, or C++ file
 3. **Access the Flowchart**:
    - **Sidebar View**: Click the Visor icon in the Activity Bar (left sidebar)
    - **External Window**: Use the command palette (`Cmd/Ctrl + Shift + P`) and run "Visor: Generate Flowchart" or click the 🚀 "Open in New Window" button
@@ -215,11 +216,20 @@ Visor supports opening flowcharts in dedicated external windows for enhanced pro
 - Constructor methods
 - Class methods (static and instance)
 
-#### C/C++
+#### C++
 
 - Function definitions
 - Method definitions in classes
 - Function overloading
+
+#### C
+
+- Function definitions (`int function_name() {}`)
+- Control flow structures (if/else, for, while, do-while)
+- Switch statements with case labels
+- Goto statements and labels
+- Break and continue statements
+- Pointer operations and function pointers
 
 ## 🛠 Technical Architecture
 
