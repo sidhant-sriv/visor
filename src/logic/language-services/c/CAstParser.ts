@@ -7,6 +7,7 @@ import {
   NodeType,
 } from "../../../ir/ir";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
+import { ensureParserInit } from "../common/ParserInit";
 
 export class CAstParser extends AbstractParser {
   private constructor(parser: Parser) {
@@ -20,7 +21,7 @@ export class CAstParser extends AbstractParser {
    * @returns A promise that resolves to a new CAstParser instance.
    */
   public static async create(wasmPath: string): Promise<CAstParser> {
-    await Parser.init();
+    await ensureParserInit();
     const language = await Parser.Language.load(wasmPath);
     const parser = new Parser();
     parser.setLanguage(language);

@@ -19,7 +19,7 @@ export abstract class AbstractParser {
   protected nodeIdCounter = 0;
   protected locationMap: LocationMapEntry[] = [];
   protected debug = false;
-  protected language: "python" | "typescript" | "java" | "cpp" | "c";
+  protected language: "python" | "typescript" | "java" | "cpp" | "c" | "rust";
 
   // The parser instance is now required by the constructor
   protected parser: Parser;
@@ -30,7 +30,7 @@ export abstract class AbstractParser {
 
   protected constructor(
     parser: Parser,
-    language: "python" | "typescript" | "java" | "cpp" | "c"
+    language: "python" | "typescript" | "java" | "cpp" | "c" | "rust"
   ) {
     this.parser = parser;
     this.language = language;
