@@ -86,6 +86,17 @@ const config = {
         {
           from: path.resolve(
             __dirname,
+            "src",
+            "logic",
+            "language-services",
+            "c",
+            "tree-sitter-c.wasm"
+          ),
+          to: ".",
+        },
+        {
+          from: path.resolve(
+            __dirname,
             "node_modules",
             "web-tree-sitter",
             "tree-sitter.wasm"

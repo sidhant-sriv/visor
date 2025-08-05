@@ -162,6 +162,22 @@ export const COMPLEXITY_NODE_TYPES = {
     "case_statement",
     "default_statement",
   ]),
+
+  c: new Set([
+    "if_statement",
+    "else_clause",
+    "for_statement",
+    "while_statement",
+    "do_statement",
+    "binary_expression",
+    "logical_expression",
+    "conditional_expression",
+    "switch_statement",
+    "case_statement",
+    "default_statement",
+    "goto_statement",
+    "labeled_statement",
+  ]),
 } as const;
 
 /**
