@@ -6,7 +6,7 @@
   "description": "Makes a flowchart on the side for your code for better visualization.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sidhant-sriv/sidvis.git"
+    "url": "https://github.com/sidhant-sriv/visor.git"
   },
   "license": "MIT",
   "engines": {
