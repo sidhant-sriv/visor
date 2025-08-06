@@ -28,7 +28,6 @@ export type OpenInPanelMessage = {
   payload: {};
 };
 
-// --- ADDED ---
 // New message type for copying mermaid code
 export type CopyMermaidMessage = {
   command: "copyMermaid";
@@ -40,7 +39,7 @@ export type WebviewMessage =
   | ExportMessage
   | ExportErrorMessage
   | OpenInPanelMessage
-  | CopyMermaidMessage; // --- MODIFIED ---
+  | CopyMermaidMessage;
 
 export interface FlowchartViewContext {
   isPanel: boolean;
@@ -181,7 +180,6 @@ export abstract class BaseFlowchartProvider {
         break;
       }
 
-      // --- ADDED ---
       // Handle the new copy command
       case "copyMermaid": {
         await vscode.env.clipboard.writeText(message.payload.code);
@@ -721,7 +719,7 @@ export abstract class BaseFlowchartProvider {
             <div id="panel-actions">
                 <div id="export-controls">
                     <!-- --- MODIFIED --- -->
-                    <button id="copy-mermaid" title="Copy Mermaid Code">📋 Copy</button>
+                    <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
                     <button id="export-svg" title="Export as SVG">💾 SVG</button>
                     <button id="export-png" title="Export as PNG">🖼️ PNG</button>
                 </div>
@@ -953,30 +951,26 @@ ${flowchartSyntax}
                     });
             }
 
-            // --- ADDED ---
+            // --- MODIFIED ---
             // Event listener for the new copy button
             const copyBtn = document.getElementById('copy-mermaid');
             if (copyBtn) {
                 copyBtn.addEventListener('click', () => {
                     const mermaidSourceElement = document.getElementById('mermaid-source');
-                    if (mermaidSourceElement && mermaidSourceElement.innerHTML) {
-                        const mermaidSource = mermaidSourceElement.innerHTML
-                            .replace(/&lt;/g, '<')
-                            .replace(/&gt;/g, '>')
-                            .replace(/&amp;/g, '&')
-                            .trim();
-                        
+                    const mermaidSource = (mermaidSourceElement?.textContent || '').trim();
+
+                    if (mermaidSource) {
                         vscode.postMessage({
                             command: 'copyMermaid',
                             payload: { code: mermaidSource }
                         });
 
                         // Visual feedback
-                        const originalText = copyBtn.innerHTML;
-                        copyBtn.innerHTML = '✅ Copied!';
+                        const originalText = copyBtn.textContent;
+                        copyBtn.textContent = '✅ Copied!';
                         copyBtn.disabled = true;
                         setTimeout(() => {
-                            copyBtn.innerHTML = originalText;
+                            copyBtn.textContent = originalText;
                             copyBtn.disabled = false;
                         }, 2000);
                     } else {
