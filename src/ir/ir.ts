@@ -16,6 +16,12 @@ export enum NodeType {
   ASSIGNMENT = "assignment",
   RETURN = "return",
   ASYNC_OPERATION = "async_operation",
+  // New Rust-specific node types
+  AWAIT = "await",
+  PANIC = "panic",
+  EARLY_RETURN_ERROR = "early_return_error",
+  METHOD_CALL = "method_call",
+  MACRO_CALL = "macro_call",
 }
 
 export enum NodeCategory {

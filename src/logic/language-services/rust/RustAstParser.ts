@@ -302,7 +302,15 @@ export class RustAstParser extends AbstractParser {
     // Process statements with improved loop
     for (let i = 0; i < statements.length; i++) {
       const statement = statements[i];
-      const result = this.processStatement(statement, exitId, loopContext);
+      const isLastStatement = i === statements.length - 1;
+
+      // Check if this is an implicit return (last statement is an expression without semicolon)
+      let result: ProcessResult;
+      if (isLastStatement && this.isImplicitReturn(statement, blockNode)) {
+        result = this.processImplicitReturn(statement, exitId, loopContext);
+      } else {
+        result = this.processStatement(statement, exitId, loopContext);
+      }
 
       nodes.push(...result.nodes);
       edges.push(...result.edges);
@@ -328,6 +336,73 @@ export class RustAstParser extends AbstractParser {
       lastExitPoints,
       nodesConnectedToExit
     );
+  }
+
+  /**
+   * Check if a statement is an implicit return (expression without semicolon at end of block)
+   */
+  private isImplicitReturn(
+    statement: Parser.SyntaxNode,
+    blockNode: Parser.SyntaxNode
+  ): boolean {
+    // Check if this is an expression that's not terminated by a semicolon
+    // and is the last statement in the block
+    if (statement.type === "expression_statement") {
+      return false; // expression_statement means it has a semicolon
+    }
+
+    // Check if it's an expression type that can be a return value
+    const returnableExpressions = [
+      "if_expression",
+      "match_expression",
+      "call_expression",
+      "method_call_expression",
+      "binary_expression",
+      "identifier",
+      "literal",
+      "field_expression",
+      "index_expression",
+      "try_expression",
+      "await_expression",
+      "block",
+    ];
+
+    return returnableExpressions.includes(statement.type);
+  }
+
+  /**
+   * Process an implicit return statement
+   */
+  private processImplicitReturn(
+    statement: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext
+  ): ProcessResult {
+    // First process the expression normally
+    const exprResult = this.processStatement(statement, exitId, loopContext);
+
+    // If the expression has exit points, connect them to the function exit
+    if (exprResult.exitPoints.length > 0) {
+      const edges = [...exprResult.edges];
+      const nodesConnectedToExit = new Set(exprResult.nodesConnectedToExit);
+
+      exprResult.exitPoints.forEach((ep) => {
+        if (!exprResult.nodesConnectedToExit.has(ep.id)) {
+          edges.push({ from: ep.id, to: exitId, label: ep.label || "return" });
+          nodesConnectedToExit.add(ep.id);
+        }
+      });
+
+      return this.createProcessResult(
+        exprResult.nodes,
+        edges,
+        exprResult.entryNodeId,
+        [], // No exit points since they're connected to function exit
+        nodesConnectedToExit
+      );
+    }
+
+    return exprResult;
   }
 
   protected processStatement(
@@ -382,50 +457,19 @@ export class RustAstParser extends AbstractParser {
         return this.processAssignmentExpression(statement, exitId);
       case "call_expression":
         return this.processCallExpression(statement, exitId);
+      case "method_call_expression":
+        return this.processMethodCallExpression(statement, exitId);
+      case "macro_invocation":
+        return this.processMacroInvocation(statement, exitId);
+      case "try_expression":
+        return this.processTryExpression(statement, exitId);
+      case "await_expression":
+        return this.processAwaitExpression(statement, exitId);
       case "block":
         return this.processBlock(statement, exitId, loopContext);
       default:
         return this.processGenericStatement(statement, exitId);
     }
-  }
-
-  private processLetDeclaration(
-    node: Parser.SyntaxNode,
-    exitId: string
-  ): ProcessResult {
-    const pattern = node.childForFieldName("pattern");
-    const value = node.childForFieldName("value");
-
-    let label = "let ";
-    if (pattern) {
-      label += pattern.text;
-    }
-    if (value) {
-      label += " = " + this.truncateText(value.text);
-    }
-
-    const declId = this.generateNodeId("let");
-    const declNode = this.createSemanticNode(
-      declId,
-      label,
-      NodeType.ASSIGNMENT,
-      node
-    );
-
-    // Add location mapping
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: declId,
-    });
-
-    return this.createProcessResult(
-      [declNode],
-      [],
-      declId,
-      [{ id: declId }],
-      new Set()
-    );
   }
 
   private processGenericStatement(
@@ -475,6 +519,11 @@ export class RustAstParser extends AbstractParser {
           "break_expression",
           "continue_expression",
           "return_expression",
+          "try_expression",
+          "await_expression",
+          "method_call_expression",
+          "call_expression",
+          "macro_invocation",
         ].includes(expr.type)
       ) {
         return this.processStatement(expr, exitId, loopContext);
@@ -494,7 +543,7 @@ export class RustAstParser extends AbstractParser {
         [],
         stmtId,
         [{ id: stmtId }],
-        new Set()
+        new Set<string>()
       );
     }
 
@@ -507,11 +556,126 @@ export class RustAstParser extends AbstractParser {
       case "assignment_expression":
         return NodeType.ASSIGNMENT;
       case "call_expression":
-      case "method_call_expression":
         return NodeType.FUNCTION_CALL;
+      case "method_call_expression":
+        return NodeType.METHOD_CALL;
+      case "macro_invocation":
+        return NodeType.MACRO_CALL;
+      case "try_expression":
+        return NodeType.EARLY_RETURN_ERROR;
+      case "await_expression":
+        return NodeType.AWAIT;
       default:
         return NodeType.PROCESS;
     }
+  }
+
+  private processLetDeclaration(
+    node: Parser.SyntaxNode,
+    exitId: string
+  ): ProcessResult {
+    const pattern = node.childForFieldName("pattern");
+    const value = node.childForFieldName("value");
+
+    let label = "let ";
+    if (pattern) {
+      label += pattern.text;
+    }
+
+    const declId = this.generateNodeId("let");
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const exitPoints: { id: string; label?: string }[] = [];
+    const nodesConnectedToExit = new Set<string>();
+
+    // If the value is a complex expression (if, match), process it and link to declaration
+    if (value && this.isComplexExpression(value)) {
+      const valueResult = this.processStatement(value, exitId);
+      nodes.push(...valueResult.nodes);
+      edges.push(...valueResult.edges);
+      valueResult.nodesConnectedToExit.forEach((id) =>
+        nodesConnectedToExit.add(id)
+      );
+
+      // Create the declaration node
+      const declNode = this.createSemanticNode(
+        declId,
+        `${label} = <expression result>`,
+        NodeType.ASSIGNMENT,
+        node
+      );
+      nodes.push(declNode);
+
+      // Connect value expression exit points to declaration
+      if (valueResult.exitPoints.length > 0) {
+        valueResult.exitPoints.forEach((ep) => {
+          if (!valueResult.nodesConnectedToExit.has(ep.id)) {
+            edges.push({ from: ep.id, to: declId, label: ep.label });
+          }
+        });
+      } else if (valueResult.entryNodeId) {
+        edges.push({ from: valueResult.entryNodeId, to: declId });
+      }
+
+      exitPoints.push({ id: declId });
+
+      // Add location mapping
+      this.locationMap.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        nodeId: declId,
+      });
+
+      return this.createProcessResult(
+        nodes,
+        edges,
+        valueResult.entryNodeId,
+        exitPoints,
+        nodesConnectedToExit
+      );
+    } else {
+      // Simple assignment
+      if (value) {
+        label += " = " + this.truncateText(value.text);
+      }
+
+      const declNode = this.createSemanticNode(
+        declId,
+        label,
+        NodeType.ASSIGNMENT,
+        node
+      );
+
+      // Add location mapping
+      this.locationMap.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        nodeId: declId,
+      });
+
+      return this.createProcessResult(
+        [declNode],
+        [],
+        declId,
+        [{ id: declId }],
+        new Set()
+      );
+    }
+  }
+
+  /**
+   * Check if an expression is complex enough to warrant separate processing
+   * Updated to align with our semantic unit approach for await/try expressions
+   */
+  private isComplexExpression(expr: Parser.SyntaxNode): boolean {
+    return [
+      "if_expression",
+      "match_expression", 
+      "while_expression",
+      "loop_expression",
+      "for_expression",
+      "block",
+    ].includes(expr.type);
   }
 
   private processIfExpression(
@@ -663,11 +827,50 @@ export class RustAstParser extends AbstractParser {
       const arms = body.descendantsOfType("match_arm");
       arms.forEach((arm, index) => {
         const pattern = arm.childForFieldName("pattern");
+        const guard = arm.childForFieldName("guard");
         const armValue = arm.childForFieldName("value");
 
         const patternText = pattern
           ? this.truncateText(pattern.text)
           : `arm_${index}`;
+
+        let currentNodeId = matchId;
+        let currentLabel = patternText;
+
+        // Handle match guard if present
+        if (guard) {
+          const guardCondition = guard.namedChild(0); // The condition after 'if'
+          if (guardCondition) {
+            const guardId = this.generateNodeId("guard");
+            const guardText = this.truncateText(guardCondition.text);
+            const guardNode = this.createSemanticNode(
+              guardId,
+              `${patternText} if ${guardText}`,
+              NodeType.DECISION,
+              guard
+            );
+
+            nodes.push(guardNode);
+            edges.push({
+              from: matchId,
+              to: guardId,
+              label: patternText,
+            });
+
+            // Add location mapping for the guard
+            this.locationMap.push({
+              start: guard.startIndex,
+              end: guard.endIndex,
+              nodeId: guardId,
+            });
+
+            currentNodeId = guardId;
+            currentLabel = "true";
+
+            // Guard failure should continue to next arm (represented by not connecting to this arm)
+            // In a real implementation, this would need more sophisticated handling
+          }
+        }
 
         if (armValue) {
           const armResult = this.processStatementOrBlock(
@@ -680,9 +883,9 @@ export class RustAstParser extends AbstractParser {
 
           if (armResult.entryNodeId) {
             edges.push({
-              from: matchId,
+              from: currentNodeId,
               to: armResult.entryNodeId,
-              label: patternText,
+              label: currentLabel,
             });
           }
           exitPoints.push(...armResult.exitPoints);
@@ -699,7 +902,7 @@ export class RustAstParser extends AbstractParser {
             arm
           );
           nodes.push(armNode);
-          edges.push({ from: matchId, to: armId, label: patternText });
+          edges.push({ from: currentNodeId, to: armId, label: currentLabel });
           exitPoints.push({ id: armId });
 
           // Add location mapping for the arm
@@ -1118,6 +1321,248 @@ export class RustAstParser extends AbstractParser {
       nodeId: callId,
     });
 
+    // Check for closures in arguments and process them
+    const closureNodes = this.findClosuresInArguments(arguments_node);
+    const nodes: FlowchartNode[] = [callNode];
+    const edges: FlowchartEdge[] = [];
+
+    // Process closure arguments recursively
+    closureNodes.forEach((closure, index) => {
+      const closureBody = closure.childForFieldName("body");
+      if (closureBody) {
+        const closureId = this.generateNodeId(`closure_${index}`);
+        const closureHeaderNode = this.createSemanticNode(
+          closureId,
+          `closure ${index + 1}`,
+          NodeType.FUNCTION_CALL,
+          closure
+        );
+        nodes.push(closureHeaderNode);
+        edges.push({ from: callId, to: closureId, label: `arg ${index + 1}` });
+
+        const closureResult = this.processBlock(closureBody, exitId);
+        nodes.push(...closureResult.nodes);
+        edges.push(...closureResult.edges);
+
+        if (closureResult.entryNodeId) {
+          edges.push({ from: closureId, to: closureResult.entryNodeId });
+        }
+      }
+    });
+
+    return this.createProcessResult(
+      nodes,
+      edges,
+      callId,
+      [{ id: callId }],
+      new Set<string>()
+    );
+  }
+
+  private processMethodCallExpression(
+    node: Parser.SyntaxNode,
+    exitId: string
+  ): ProcessResult {
+    const receiver = node.childForFieldName("receiver");
+    const method = node.childForFieldName("method");
+    const arguments_node = node.childForFieldName("arguments");
+
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+    let entryNodeId: string | undefined;
+    let lastNodeId: string | undefined;
+
+    // Process the receiver (which might be a method chain)
+    if (receiver) {
+      if (receiver.type === "method_call_expression") {
+        // Recursive method chaining
+        const receiverResult = this.processMethodCallExpression(
+          receiver,
+          exitId
+        );
+        nodes.push(...receiverResult.nodes);
+        edges.push(...receiverResult.edges);
+        receiverResult.nodesConnectedToExit.forEach((id) =>
+          nodesConnectedToExit.add(id)
+        );
+
+        entryNodeId = receiverResult.entryNodeId;
+        // Get the last node from the receiver chain
+        if (receiverResult.exitPoints.length > 0) {
+          lastNodeId = receiverResult.exitPoints[0].id;
+        }
+      } else if (receiver.type === "call_expression") {
+        // Handle function call as receiver
+        const receiverResult = this.processCallExpression(receiver, exitId);
+        nodes.push(...receiverResult.nodes);
+        edges.push(...receiverResult.edges);
+        receiverResult.nodesConnectedToExit.forEach((id) =>
+          nodesConnectedToExit.add(id)
+        );
+
+        entryNodeId = receiverResult.entryNodeId;
+        if (receiverResult.exitPoints.length > 0) {
+          lastNodeId = receiverResult.exitPoints[0].id;
+        }
+      } else {
+        // Simple receiver (identifier, literal, etc.)
+        const receiverId = this.generateNodeId("receiver");
+        const receiverNode = this.createSemanticNode(
+          receiverId,
+          this.truncateText(receiver.text),
+          NodeType.PROCESS,
+          receiver
+        );
+        nodes.push(receiverNode);
+        entryNodeId = receiverId;
+        lastNodeId = receiverId;
+
+        this.locationMap.push({
+          start: receiver.startIndex,
+          end: receiver.endIndex,
+          nodeId: receiverId,
+        });
+      }
+    }
+
+    // Create the method call node
+    let label = "";
+    if (method) {
+      label += method.text;
+    }
+    if (arguments_node) {
+      label += arguments_node.text;
+    }
+
+    const callId = this.generateNodeId("method_call");
+    const callNode = this.createSemanticNode(
+      callId,
+      this.truncateText(label),
+      NodeType.METHOD_CALL,
+      node
+    );
+    nodes.push(callNode);
+
+    // Add location mapping
+    this.locationMap.push({
+      start: node.startIndex,
+      end: node.endIndex,
+      nodeId: callId,
+    });
+
+    // Connect receiver to method call
+    if (lastNodeId) {
+      edges.push({ from: lastNodeId, to: callId });
+    } else {
+      entryNodeId = callId;
+    }
+
+    // Check for closures in arguments and process them
+    const closureNodes = this.findClosuresInArguments(arguments_node);
+
+    // Process closure arguments recursively
+    closureNodes.forEach((closure, index) => {
+      const closureBody = closure.childForFieldName("body");
+      if (closureBody) {
+        const closureId = this.generateNodeId(`method_closure_${index}`);
+        const closureHeaderNode = this.createSemanticNode(
+          closureId,
+          `closure ${index + 1}`,
+          NodeType.FUNCTION_CALL,
+          closure
+        );
+        nodes.push(closureHeaderNode);
+        edges.push({ from: callId, to: closureId, label: `arg ${index + 1}` });
+
+        const closureResult = this.processBlock(closureBody, exitId);
+        nodes.push(...closureResult.nodes);
+        edges.push(...closureResult.edges);
+
+        if (closureResult.entryNodeId) {
+          edges.push({ from: closureId, to: closureResult.entryNodeId });
+        }
+      }
+    });
+
+    return this.createProcessResult(
+      nodes,
+      edges,
+      entryNodeId,
+      [{ id: callId }],
+      nodesConnectedToExit
+    );
+  }
+
+  private processMacroInvocation(
+    node: Parser.SyntaxNode,
+    exitId: string
+  ): ProcessResult {
+    const macro_name = node.childForFieldName("macro");
+    const token_tree = node.childForFieldName("token_tree");
+
+    const macroName = macro_name?.text || "unknown_macro";
+    let label = macroName;
+    if (token_tree) {
+      label += token_tree.text;
+    }
+
+    // Handle panic! macros specially
+    if (macroName === "panic!") {
+      const panicId = this.generateNodeId("panic");
+      const panicNode = this.createSemanticNode(
+        panicId,
+        `panic!${token_tree?.text || "()"}`,
+        NodeType.PANIC,
+        node
+      );
+
+      // Add location mapping
+      this.locationMap.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        nodeId: panicId,
+      });
+
+      // panic! connects directly to exit (terminates function)
+      const edges: FlowchartEdge[] = [{ from: panicId, to: exitId }];
+      const nodesConnectedToExit = new Set([panicId]);
+
+      return this.createProcessResult(
+        [panicNode],
+        edges,
+        panicId,
+        [],
+        nodesConnectedToExit
+      );
+    }
+
+    // Handle other macros as function calls
+    const callId = this.generateNodeId("macro");
+    const nodeType = [
+      "println!",
+      "print!",
+      "eprintln!",
+      "eprint!",
+      "dbg!",
+    ].includes(macroName)
+      ? NodeType.FUNCTION_CALL
+      : NodeType.MACRO_CALL;
+
+    const callNode = this.createSemanticNode(
+      callId,
+      this.truncateText(label),
+      nodeType,
+      node
+    );
+
+    // Add location mapping
+    this.locationMap.push({
+      start: node.startIndex,
+      end: node.endIndex,
+      nodeId: callId,
+    });
+
     return this.createProcessResult(
       [callNode],
       [],
@@ -1125,6 +1570,286 @@ export class RustAstParser extends AbstractParser {
       [{ id: callId }],
       new Set()
     );
+  }
+
+  private processTryExpression(
+    node: Parser.SyntaxNode,
+    exitId: string
+  ): ProcessResult {
+    const expr = node.namedChild(0); // The expression being tried
+
+    if (!expr) {
+      return this.createProcessResult();
+    }
+
+    // For most cases, treat the entire try expression as a single node
+    // Only decompose if the inner expression is complex control flow
+    if (this.shouldDecomposeExpression(expr)) {
+      // First process the underlying expression
+      const exprResult = this.processComplexExpression(expr, exitId);
+
+      const tryId = this.generateNodeId("try");
+      const tryNode = this.createSemanticNode(
+        tryId,
+        `${this.truncateText(expr.text)}?`,
+        NodeType.EARLY_RETURN_ERROR,
+        node
+      );
+
+      const nodes: FlowchartNode[] = [...exprResult.nodes, tryNode];
+      const edges: FlowchartEdge[] = [...exprResult.edges];
+      const exitPoints: { id: string; label?: string }[] = [
+        { id: tryId, label: "Ok" },
+      ];
+      const nodesConnectedToExit = new Set<string>();
+      exprResult.nodesConnectedToExit.forEach((id) =>
+        nodesConnectedToExit.add(id)
+      );
+
+      // Add location mapping
+      this.locationMap.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        nodeId: tryId,
+      });
+
+      // Connect the expression result to the try node
+      if (exprResult.exitPoints.length > 0) {
+        exprResult.exitPoints.forEach((ep: { id: string; label?: string }) => {
+          if (!exprResult.nodesConnectedToExit.has(ep.id)) {
+            edges.push({ from: ep.id, to: tryId, label: ep.label });
+          }
+        });
+      } else if (exprResult.entryNodeId) {
+        edges.push({ from: exprResult.entryNodeId, to: tryId });
+      }
+
+      // The "Err" path connects directly to function exit (early return)
+      edges.push({ from: tryId, to: exitId, label: "Err" });
+      nodesConnectedToExit.add(tryId);
+
+      return this.createProcessResult(
+        nodes,
+        edges,
+        exprResult.entryNodeId || tryId,
+        exitPoints,
+        nodesConnectedToExit
+      );
+    } else {
+      // Simple case: create a single try node for the entire expression
+      const tryId = this.generateNodeId("try");
+      const tryNode = this.createSemanticNode(
+        tryId,
+        `${this.truncateText(expr.text)}?`,
+        NodeType.EARLY_RETURN_ERROR,
+        node
+      );
+
+      const exitPoints: { id: string; label?: string }[] = [
+        { id: tryId, label: "Ok" },
+      ];
+      const nodesConnectedToExit = new Set<string>();
+
+      // Add location mapping
+      this.locationMap.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        nodeId: tryId,
+      });
+
+      // The "Err" path connects directly to function exit (early return)
+      const edges: FlowchartEdge[] = [
+        { from: tryId, to: exitId, label: "Err" },
+      ];
+      nodesConnectedToExit.add(tryId);
+
+      return this.createProcessResult(
+        [tryNode],
+        edges,
+        tryId,
+        exitPoints,
+        nodesConnectedToExit
+      );
+    }
+  }
+
+  /**
+   * Helper method to process complex expressions that might need special handling
+   */
+  private processComplexExpression(
+    expr: Parser.SyntaxNode,
+    exitId: string
+  ): ProcessResult {
+    // For expressions that should be processed as statements, delegate to processStatement
+    if (
+      [
+        "call_expression",
+        "method_call_expression",
+        "await_expression",
+        "try_expression",
+        "if_expression",
+        "match_expression",
+        "macro_invocation",
+      ].includes(expr.type)
+    ) {
+      return this.processStatement(expr, exitId);
+    }
+
+    // For truly simple expressions, create a basic node
+    if (
+      [
+        "identifier",
+        "literal",
+        "field_expression",
+        "index_expression",
+        "binary_expression",
+        "unary_expression",
+      ].includes(expr.type)
+    ) {
+      const exprId = this.generateNodeId("expr");
+      const exprNode = this.createSemanticNode(
+        exprId,
+        this.truncateText(expr.text),
+        NodeType.PROCESS,
+        expr
+      );
+
+      this.locationMap.push({
+        start: expr.startIndex,
+        end: expr.endIndex,
+        nodeId: exprId,
+      });
+
+      return this.createProcessResult(
+        [exprNode],
+        [],
+        exprId,
+        [{ id: exprId }],
+        new Set<string>()
+      );
+    }
+
+    // For other complex expressions, process them as statements
+    return this.processStatement(expr, exitId);
+  }
+
+  /**
+   * Determine if an expression should be decomposed into separate nodes
+   * Only decompose truly complex control flow expressions
+   */
+  private shouldDecomposeExpression(expr: Parser.SyntaxNode): boolean {
+    return [
+      "if_expression",
+      "match_expression",
+      "while_expression",
+      "loop_expression",
+      "for_expression",
+      "block",
+    ].includes(expr.type);
+  }
+
+  private processAwaitExpression(
+    node: Parser.SyntaxNode,
+    exitId: string
+  ): ProcessResult {
+    const expr = node.namedChild(0); // The expression being awaited
+
+    if (!expr) {
+      return this.createProcessResult();
+    }
+
+    // For most cases, treat the entire await expression as a single node
+    // Only decompose if the inner expression is complex (like if/match)
+    if (this.shouldDecomposeExpression(expr)) {
+      // First process the underlying expression
+      const exprResult = this.processComplexExpression(expr, exitId);
+
+      const awaitId = this.generateNodeId("await");
+      const awaitNode = this.createSemanticNode(
+        awaitId,
+        `await ${this.truncateText(expr.text)}`,
+        NodeType.AWAIT,
+        node
+      );
+
+      const nodes: FlowchartNode[] = [...exprResult.nodes, awaitNode];
+      const edges: FlowchartEdge[] = [...exprResult.edges];
+      const nodesConnectedToExit = new Set<string>();
+      exprResult.nodesConnectedToExit.forEach((id) =>
+        nodesConnectedToExit.add(id)
+      );
+
+      // Add location mapping
+      this.locationMap.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        nodeId: awaitId,
+      });
+
+      // Connect the expression result to the await node
+      if (exprResult.exitPoints.length > 0) {
+        exprResult.exitPoints.forEach((ep: { id: string; label?: string }) => {
+          if (!exprResult.nodesConnectedToExit.has(ep.id)) {
+            edges.push({ from: ep.id, to: awaitId, label: ep.label });
+          }
+        });
+      } else if (exprResult.entryNodeId) {
+        edges.push({ from: exprResult.entryNodeId, to: awaitId });
+      }
+
+      return this.createProcessResult(
+        nodes,
+        edges,
+        exprResult.entryNodeId || awaitId,
+        [{ id: awaitId }],
+        nodesConnectedToExit
+      );
+    } else {
+      // Simple case: create a single await node
+      const awaitId = this.generateNodeId("await");
+      const awaitNode = this.createSemanticNode(
+        awaitId,
+        `await ${this.truncateText(expr.text)}`,
+        NodeType.AWAIT,
+        node
+      );
+
+      // Add location mapping
+      this.locationMap.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        nodeId: awaitId,
+      });
+
+      return this.createProcessResult(
+        [awaitNode],
+        [],
+        awaitId,
+        [{ id: awaitId }],
+        new Set<string>()
+      );
+    }
+  }
+
+  /**
+   * Helper method to find closure expressions in function/method arguments
+   */
+  private findClosuresInArguments(
+    argumentsNode: Parser.SyntaxNode | null
+  ): Parser.SyntaxNode[] {
+    if (!argumentsNode) return [];
+
+    const closures: Parser.SyntaxNode[] = [];
+
+    // Look for closure_expression nodes in the arguments
+    for (let i = 0; i < argumentsNode.namedChildCount; i++) {
+      const arg = argumentsNode.namedChild(i);
+      if (arg?.type === "closure_expression") {
+        closures.push(arg);
+      }
+    }
+
+    return closures;
   }
 
   private truncateText(text: string, maxLength: number = 30): string {
