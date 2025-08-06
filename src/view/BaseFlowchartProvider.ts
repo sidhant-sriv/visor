@@ -28,11 +28,19 @@ export type OpenInPanelMessage = {
   payload: {};
 };
 
+// --- ADDED ---
+// New message type for copying mermaid code
+export type CopyMermaidMessage = {
+  command: "copyMermaid";
+  payload: { code: string };
+};
+
 export type WebviewMessage =
   | HighlightCodeMessage
   | ExportMessage
   | ExportErrorMessage
-  | OpenInPanelMessage;
+  | OpenInPanelMessage
+  | CopyMermaidMessage; // --- MODIFIED ---
 
 export interface FlowchartViewContext {
   isPanel: boolean;
@@ -170,6 +178,14 @@ export abstract class BaseFlowchartProvider {
       case "openInPanel": {
         // This will be handled by the FlowchartPanelProvider
         vscode.commands.executeCommand("visor.openFlowchartInNewWindow");
+        break;
+      }
+
+      // --- ADDED ---
+      // Handle the new copy command
+      case "copyMermaid": {
+        await vscode.env.clipboard.writeText(message.payload.code);
+        vscode.window.showInformationMessage("Mermaid code copied to clipboard!");
         break;
       }
     }
@@ -704,6 +720,8 @@ export abstract class BaseFlowchartProvider {
             </div>
             <div id="panel-actions">
                 <div id="export-controls">
+                    <!-- --- MODIFIED --- -->
+                    <button id="copy-mermaid" title="Copy Mermaid Code">📋 Copy</button>
                     <button id="export-svg" title="Export as SVG">💾 SVG</button>
                     <button id="export-png" title="Export as PNG">🖼️ PNG</button>
                 </div>
@@ -722,6 +740,8 @@ export abstract class BaseFlowchartProvider {
                 ? '<button id="open-panel-btn">🚀 Open in New Window</button>'
                 : ""
             }
+            <!-- --- MODIFIED --- -->
+            <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
             <button id="export-svg">Export as SVG</button>
             <button id="export-png">Export as PNG</button>
         </div>
@@ -931,6 +951,41 @@ ${flowchartSyntax}
                             payload: { error: 'Export failed: ' + errorMessage }
                         });
                     });
+            }
+
+            // --- ADDED ---
+            // Event listener for the new copy button
+            const copyBtn = document.getElementById('copy-mermaid');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', () => {
+                    const mermaidSourceElement = document.getElementById('mermaid-source');
+                    if (mermaidSourceElement && mermaidSourceElement.innerHTML) {
+                        const mermaidSource = mermaidSourceElement.innerHTML
+                            .replace(/&lt;/g, '<')
+                            .replace(/&gt;/g, '>')
+                            .replace(/&amp;/g, '&')
+                            .trim();
+                        
+                        vscode.postMessage({
+                            command: 'copyMermaid',
+                            payload: { code: mermaidSource }
+                        });
+
+                        // Visual feedback
+                        const originalText = copyBtn.innerHTML;
+                        copyBtn.innerHTML = '✅ Copied!';
+                        copyBtn.disabled = true;
+                        setTimeout(() => {
+                            copyBtn.innerHTML = originalText;
+                            copyBtn.disabled = false;
+                        }, 2000);
+                    } else {
+                        vscode.postMessage({
+                            command: 'exportError',
+                            payload: { error: "Could not find Mermaid source code to copy." }
+                        });
+                    }
+                });
             }
 
             document.getElementById('export-svg').addEventListener('click', () => exportFlowchart('svg'));
