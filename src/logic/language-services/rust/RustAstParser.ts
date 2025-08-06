@@ -588,7 +588,7 @@ export class RustAstParser extends AbstractParser {
     const exitPoints: { id: string; label?: string }[] = [];
     const nodesConnectedToExit = new Set<string>();
 
-    // If the value is a complex expression (if, match), process it and link to declaration
+    // If the value is a complex expression (if, match, loops), process it and link to declaration
     if (value && this.isComplexExpression(value)) {
       const valueResult = this.processStatement(value, exitId);
       nodes.push(...valueResult.nodes);
@@ -633,6 +633,79 @@ export class RustAstParser extends AbstractParser {
         exitPoints,
         nodesConnectedToExit
       );
+    } else if (value && this.isSemanticUnit(value)) {
+      // For semantic units (await, try, method chains), process them but integrate into single assignment
+      const valueResult = this.processStatement(value, exitId);
+
+      // Create a combined assignment node that includes the semantic operation
+      let assignmentLabel = `${label} = ${this.truncateText(value.text)}`;
+
+      const declNode = this.createSemanticNode(
+        declId,
+        assignmentLabel,
+        NodeType.ASSIGNMENT,
+        node
+      );
+
+      // Add location mapping
+      this.locationMap.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        nodeId: declId,
+      });
+
+      // If the value expression has nodes and is truly multi-step (like method chains), include them in the flow
+      if (valueResult.nodes.length > 1) {
+        nodes.push(...valueResult.nodes);
+        nodes.push(declNode);
+        edges.push(...valueResult.edges);
+        valueResult.nodesConnectedToExit.forEach((id) =>
+          nodesConnectedToExit.add(id)
+        );
+
+        // Connect value expression to assignment
+        if (valueResult.exitPoints.length > 0) {
+          valueResult.exitPoints.forEach((ep) => {
+            if (!valueResult.nodesConnectedToExit.has(ep.id)) {
+              edges.push({ from: ep.id, to: declId, label: ep.label });
+            }
+          });
+        } else if (valueResult.entryNodeId) {
+          edges.push({ from: valueResult.entryNodeId, to: declId });
+        }
+
+        return this.createProcessResult(
+          nodes,
+          edges,
+          valueResult.entryNodeId,
+          [{ id: declId }],
+          nodesConnectedToExit
+        );
+      } else {
+        // Single semantic unit - use the semantic node directly instead of creating a separate assignment
+        if (valueResult.nodes.length === 1) {
+          const semanticNode = valueResult.nodes[0];
+          // Update the existing semantic node to include the assignment context
+          semanticNode.label = `${label} = ${semanticNode.label}`;
+
+          return this.createProcessResult(
+            [semanticNode],
+            valueResult.edges,
+            valueResult.entryNodeId,
+            valueResult.exitPoints,
+            valueResult.nodesConnectedToExit
+          );
+        } else {
+          // No nodes from value processing - create simple assignment
+          return this.createProcessResult(
+            [declNode],
+            [],
+            declId,
+            [{ id: declId }],
+            new Set()
+          );
+        }
+      }
     } else {
       // Simple assignment
       if (value) {
@@ -670,7 +743,7 @@ export class RustAstParser extends AbstractParser {
   private isComplexExpression(expr: Parser.SyntaxNode): boolean {
     return [
       "if_expression",
-      "match_expression", 
+      "match_expression",
       "while_expression",
       "loop_expression",
       "for_expression",
@@ -1391,6 +1464,9 @@ export class RustAstParser extends AbstractParser {
         // Get the last node from the receiver chain
         if (receiverResult.exitPoints.length > 0) {
           lastNodeId = receiverResult.exitPoints[0].id;
+        } else if (receiverResult.entryNodeId) {
+          // Fallback to entry node if no explicit exit points
+          lastNodeId = receiverResult.entryNodeId;
         }
       } else if (receiver.type === "call_expression") {
         // Handle function call as receiver
@@ -1404,6 +1480,9 @@ export class RustAstParser extends AbstractParser {
         entryNodeId = receiverResult.entryNodeId;
         if (receiverResult.exitPoints.length > 0) {
           lastNodeId = receiverResult.exitPoints[0].id;
+        } else if (receiverResult.entryNodeId) {
+          // Fallback to entry node if no explicit exit points
+          lastNodeId = receiverResult.entryNodeId;
         }
       } else {
         // Simple receiver (identifier, literal, etc.)
@@ -1454,7 +1533,10 @@ export class RustAstParser extends AbstractParser {
     // Connect receiver to method call
     if (lastNodeId) {
       edges.push({ from: lastNodeId, to: callId });
-    } else {
+    }
+
+    // Set entry node - preserve receiver's entry, or use this call if no receiver
+    if (!entryNodeId) {
       entryNodeId = callId;
     }
 
@@ -1580,6 +1662,51 @@ export class RustAstParser extends AbstractParser {
 
     if (!expr) {
       return this.createProcessResult();
+    }
+
+    // Special handling for await? pattern - this is common in async Rust code
+    if (expr.type === "await_expression") {
+      // Get the inner expression being awaited
+      const innerExpr = expr.namedChild(0);
+      if (!innerExpr) {
+        return this.createProcessResult();
+      }
+
+      // Create a combined await? node that represents both operations
+      const awaitTryId = this.generateNodeId("await_try");
+      const awaitTryNode = this.createSemanticNode(
+        awaitTryId,
+        `${this.truncateText(innerExpr.text)}.await?`,
+        NodeType.AWAIT,
+        node
+      );
+
+      // Add location mapping for the entire await? expression
+      this.locationMap.push({
+        start: node.startIndex,
+        end: node.endIndex,
+        nodeId: awaitTryId,
+      });
+
+      // Create exit points - Ok continues, Err goes to function exit
+      const exitPoints: { id: string; label?: string }[] = [
+        { id: awaitTryId, label: "Ok" },
+      ];
+      const nodesConnectedToExit = new Set<string>();
+
+      // Add the Err edge that goes to function exit (early return)
+      const edges: FlowchartEdge[] = [
+        { from: awaitTryId, to: exitId, label: "Err" },
+      ];
+      nodesConnectedToExit.add(awaitTryId);
+
+      return this.createProcessResult(
+        [awaitTryNode],
+        edges,
+        awaitTryId,
+        exitPoints,
+        nodesConnectedToExit
+      );
     }
 
     // For most cases, treat the entire try expression as a single node
@@ -1731,6 +1858,16 @@ export class RustAstParser extends AbstractParser {
 
     // For other complex expressions, process them as statements
     return this.processStatement(expr, exitId);
+  }
+
+  /**
+   * Check if an expression represents a semantic unit that should be handled specially
+   * but not decomposed like complex control flow expressions
+   */
+  private isSemanticUnit(node: Parser.SyntaxNode): boolean {
+    return ["await_expression", "try_expression", "call_expression"].includes(
+      node.type
+    );
   }
 
   /**
