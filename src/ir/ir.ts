@@ -22,6 +22,7 @@ export enum NodeType {
   EARLY_RETURN_ERROR = "early_return_error",
   METHOD_CALL = "method_call",
   MACRO_CALL = "macro_call",
+  SUBROUTINE = "subroutine", // Added for impl method headers
 }
 
 export enum NodeCategory {
