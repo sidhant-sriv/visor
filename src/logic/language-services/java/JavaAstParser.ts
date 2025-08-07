@@ -284,6 +284,71 @@ export class JavaAstParser extends AbstractParser {
     return ir;
   }
 
+  protected processBlock(
+    blockNode: Parser.SyntaxNode,
+    exitId: string,
+    loopContext?: LoopContext,
+    finallyContext?: { finallyEntryId: string }
+  ): ProcessResult {
+    const allNodes: FlowchartNode[] = [];
+    const allEdges: FlowchartEdge[] = [];
+    const allNodesConnectedToExit = new Set<string>();
+
+    let blockEntryNodeId: string | undefined;
+    let lastExitPoints: { id: string; label?: string }[] = [];
+
+    // Use `children` instead of `namedChildren` to include comments
+    const statements = blockNode.children;
+
+    for (const statement of statements) {
+      const result = this.processStatement(
+        statement,
+        exitId,
+        loopContext,
+        finallyContext
+      );
+
+      // Skip empty results (from comments or empty statements)
+      // The key is not clearing lastExitPoints, which preserves the connection.
+      if (!result.entryNodeId) {
+        continue;
+      }
+
+      allNodes.push(...result.nodes);
+      allEdges.push(...result.edges);
+      result.nodesConnectedToExit.forEach((id) =>
+        allNodesConnectedToExit.add(id)
+      );
+
+      // If this is the first valid statement, it's the entry to the block.
+      if (!blockEntryNodeId) {
+        blockEntryNodeId = result.entryNodeId;
+      }
+
+      // Connect the previous statement's exit points to the current statement's entry.
+      if (lastExitPoints.length > 0) {
+        lastExitPoints.forEach((ep) => {
+          allEdges.push({
+            from: ep.id,
+            to: result.entryNodeId!,
+            label: ep.label,
+          });
+        });
+      }
+
+      // The current statement's exits are now the new connection points.
+      lastExitPoints = result.exitPoints;
+    }
+
+    return this.createProcessResult(
+      allNodes,
+      allEdges,
+      blockEntryNodeId,
+      lastExitPoints, // These are the final exit points of the whole block
+      allNodesConnectedToExit
+    );
+  }
+
   protected processStatement(
     statement: Parser.SyntaxNode,
     exitId: string,
@@ -314,6 +379,13 @@ export class JavaAstParser extends AbstractParser {
     }
 
     switch (statement.type) {
+      // ADDED: Cases to ignore curly braces and other non-statement tokens.
+      case "{":
+      case "}":
+      case "line_comment":
+      case "block_comment":
+        return this.createProcessResult();
+
       case "if_statement":
         return this.processIfStatement(
           statement,
@@ -667,13 +739,18 @@ export class JavaAstParser extends AbstractParser {
     const loopExitId = this.generateNodeId("for_exit");
 
     const nodes: FlowchartNode[] = [
-      {
-        id: headerId,
-        label: this.escapeString(headerText),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      this.createSemanticNode(
+        headerId,
+        headerText,
+        NodeType.LOOP_START,
+        forNode
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        forNode
+      ),
     ];
     this.locationMap.push({
       start: forNode.startIndex,
@@ -732,13 +809,18 @@ export class JavaAstParser extends AbstractParser {
     const loopExitId = this.generateNodeId("enhanced_for_exit");
 
     const nodes: FlowchartNode[] = [
-      {
-        id: headerId,
-        label: this.escapeString(headerText),
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      this.createSemanticNode(
+        headerId,
+        headerText,
+        NodeType.LOOP_START,
+        forNode
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        forNode
+      ),
     ];
     this.locationMap.push({
       start: forNode.startIndex,
@@ -788,20 +870,24 @@ export class JavaAstParser extends AbstractParser {
     exitId: string,
     finallyContext?: { finallyEntryId: string }
   ): ProcessResult {
-    const conditionText = this.escapeString(
-      whileNode.childForFieldName("condition")!.text
-    );
+    const conditionNode = whileNode.childForFieldName("condition")!;
+    const conditionText = this.escapeString(conditionNode.text);
     const conditionId = this.generateNodeId("while_cond");
     const loopExitId = this.generateNodeId("while_exit");
 
     const nodes: FlowchartNode[] = [
-      {
-        id: conditionId,
-        label: conditionText,
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      this.createSemanticNode(
+        conditionId,
+        conditionText,
+        NodeType.LOOP_START,
+        conditionNode
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        whileNode
+      ),
     ];
     this.locationMap.push({
       start: whileNode.startIndex,
@@ -857,13 +943,18 @@ export class JavaAstParser extends AbstractParser {
     const loopExitId = this.generateNodeId("do_while_exit");
 
     const nodes: FlowchartNode[] = [
-      {
-        id: conditionId,
-        label: conditionText,
-        shape: "diamond",
-        style: this.nodeStyles.decision,
-      },
-      { id: loopExitId, label: "end loop", shape: "stadium" },
+      this.createSemanticNode(
+        conditionId,
+        conditionText,
+        NodeType.DECISION,
+        conditionNode!
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        doWhileNode
+      ),
     ];
     this.locationMap.push({
       start: doWhileNode.startIndex,
@@ -915,12 +1006,12 @@ export class JavaAstParser extends AbstractParser {
 
     const switchId = this.generateNodeId("switch");
     const nodes: FlowchartNode[] = [
-      {
-        id: switchId,
-        label: `switch (${this.escapeString(discriminantNode.text)})`,
-        shape: "rect",
-        style: this.nodeStyles.process,
-      },
+      this.createSemanticNode(
+        switchId,
+        `switch (${this.escapeString(discriminantNode.text)})`,
+        NodeType.DECISION,
+        discriminantNode
+      ),
     ];
     this.locationMap.push({
       start: discriminantNode.startIndex,
@@ -961,12 +1052,14 @@ export class JavaAstParser extends AbstractParser {
           : `case ${this.escapeString(valueNode?.text || "")}`;
 
         const caseId = this.generateNodeId("case");
-        nodes.push({
-          id: caseId,
-          label: caseLabel,
-          shape: "diamond",
-          style: this.nodeStyles.decision,
-        });
+        nodes.push(
+          this.createSemanticNode(
+            caseId,
+            caseLabel,
+            NodeType.DECISION,
+            label
+          )
+        );
         this.locationMap.push({
           start: label.startIndex,
           end: label.endIndex,
@@ -1052,7 +1145,7 @@ export class JavaAstParser extends AbstractParser {
   ): ProcessResult {
     const entryId = this.generateNodeId("try_entry");
     const nodes: FlowchartNode[] = [
-      { id: entryId, label: "try", shape: "stadium" },
+      this.createSemanticNode(entryId, "try", NodeType.PROCESS, tryNode),
     ];
     this.locationMap.push({
       start: tryNode.startIndex,
@@ -1189,12 +1282,12 @@ export class JavaAstParser extends AbstractParser {
     const labelText = valueNode
       ? `return ${this.escapeString(valueNode.text)}`
       : "return";
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      labelText,
+      NodeType.RETURN,
+      returnNode
+    );
     const edges: FlowchartEdge[] = [
       {
         from: nodeId,
@@ -1225,12 +1318,12 @@ export class JavaAstParser extends AbstractParser {
     const labelText = valueNode
       ? `throw ${this.escapeString(valueNode.text)}`
       : "throw";
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      labelText,
+      NodeType.EXCEPTION,
+      throwNode
+    );
     const edges: FlowchartEdge[] = [
       {
         from: nodeId,
@@ -1269,12 +1362,12 @@ export class JavaAstParser extends AbstractParser {
       }
     }
 
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "rect",
-      style: this.nodeStyles.process,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      labelText,
+      NodeType.DECISION,
+      assertNode
+    );
     this.locationMap.push({
       start: assertNode.startIndex,
       end: assertNode.endIndex,
@@ -1288,12 +1381,12 @@ export class JavaAstParser extends AbstractParser {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("break");
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: "break",
-      shape: "stadium",
-      style: this.nodeStyles.break,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      "break",
+      NodeType.BREAK_CONTINUE,
+      breakNode
+    );
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.breakTargetId },
     ];
@@ -1316,12 +1409,12 @@ export class JavaAstParser extends AbstractParser {
     loopContext: LoopContext
   ): ProcessResult {
     const nodeId = this.generateNodeId("continue");
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: "continue",
-      shape: "stadium",
-      style: this.nodeStyles.break,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      "continue",
+      NodeType.BREAK_CONTINUE,
+      continueNode
+    );
     const edges: FlowchartEdge[] = [
       { from: nodeId, to: loopContext.continueTargetId },
     ];
@@ -1373,12 +1466,13 @@ export class JavaAstParser extends AbstractParser {
       const labelText = `${type} ${name?.text || "variable"}${
         value ? ` = ${this.escapeString(value.text)}` : ""
       }`;
-      const node: FlowchartNode = {
-        id: nodeId,
-        label: labelText,
-        shape: "rect",
-        style: this.nodeStyles.process,
-      };
+      const nodeType = value ? NodeType.ASSIGNMENT : NodeType.PROCESS;
+      const node: FlowchartNode = this.createSemanticNode(
+        nodeId,
+        labelText,
+        nodeType,
+        declNode
+      );
       this.locationMap.push({
         start: declNode.startIndex,
         end: declNode.endIndex,
@@ -1402,12 +1496,13 @@ export class JavaAstParser extends AbstractParser {
       const labelText = `${type} ${name?.text || "variable"}${
         value ? ` = ${this.escapeString(value.text)}` : ""
       }`;
-      const node: FlowchartNode = {
-        id: nodeId,
-        label: labelText,
-        shape: "rect",
-        style: this.nodeStyles.process,
-      };
+      const nodeType = value ? NodeType.ASSIGNMENT : NodeType.PROCESS;
+      const node: FlowchartNode = this.createSemanticNode(
+        nodeId,
+        labelText,
+        nodeType,
+        declarator
+      );
       nodes.push(node);
       this.locationMap.push({
         start: declarator.startIndex,
@@ -1437,12 +1532,12 @@ export class JavaAstParser extends AbstractParser {
   ): ProcessResult {
     const nodeId = this.generateNodeId("return");
     const labelText = `return ${this.escapeString(exprNode.text)}`;
-    const node: FlowchartNode = {
-      id: nodeId,
-      label: labelText,
-      shape: "stadium",
-      style: this.nodeStyles.special,
-    };
+    const node: FlowchartNode = this.createSemanticNode(
+      nodeId,
+      labelText,
+      NodeType.RETURN,
+      exprNode
+    );
     const edges: FlowchartEdge[] = [
       {
         from: nodeId,
