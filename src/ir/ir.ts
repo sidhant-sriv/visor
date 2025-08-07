@@ -8,6 +8,7 @@ export enum NodeType {
   EXIT = "exit",
   PROCESS = "process",
   DECISION = "decision",
+  MERGE = "merge", // Added to represent a merge point in control flow
   LOOP_START = "loop_start",
   LOOP_END = "loop_end",
   EXCEPTION = "exception",

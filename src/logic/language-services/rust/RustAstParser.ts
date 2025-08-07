@@ -975,6 +975,10 @@ protected processBlock(
     return this.processStatement(statementOrBlock, exitId, loopContext);
   }
 
+  /**
+   * Correctly processes a match expression by modeling its sequential evaluation of arms.
+   * Handles guard clauses by creating fall-through logic.
+   */
   private processMatchExpression(
     node: Parser.SyntaxNode,
     exitId: string,
@@ -983,119 +987,96 @@ protected processBlock(
     const value = node.childForFieldName("value");
     const body = node.childForFieldName("body");
 
-    if (!value) {
+    if (!value || !body) {
       return this.createProcessResult();
     }
 
     const valueText = this.truncateText(value.text);
-    const matchId = this.generateNodeId("match");
-    const matchNode = this.createSemanticNode(
-      matchId,
-      `match ${valueText}`,
-      NodeType.DECISION,
-      value
+    const matchStartId = this.generateNodeId("match_start");
+    const matchStartNode = this.createSemanticNode(
+        matchStartId,
+        `match ${valueText}`,
+        NodeType.PROCESS, // A setup step, not a decision itself
+        value
     );
-
-    const nodes: FlowchartNode[] = [matchNode];
-    const edges: FlowchartEdge[] = [];
-    const exitPoints: { id: string; label?: string }[] = [];
-    const nodesConnectedToExit = new Set<string>();
 
     this.locationMap.push({
       start: value.startIndex,
       end: value.endIndex,
-      nodeId: matchId,
+      nodeId: matchStartId,
     });
 
-    if (body) {
-      const arms = body.descendantsOfType("match_arm");
-      arms.forEach((arm, index) => {
+    const nodes: FlowchartNode[] = [matchStartNode];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
+
+    const mergeId = this.generateNodeId("match_merge");
+    nodes.push(this.createSemanticNode(mergeId, "", NodeType.MERGE, node));
+
+    const arms = body.descendantsOfType("match_arm");
+    let fallthroughSourceId = matchStartId;
+
+    for (let i = 0; i < arms.length; i++) {
+        const arm = arms[i];
         const pattern = arm.childForFieldName("pattern");
         const guard = arm.childForFieldName("guard");
         const armValue = arm.childForFieldName("value");
 
-        const patternText = pattern
-          ? this.truncateText(pattern.text)
-          : `arm_${index}`;
+        if (!armValue) continue; // Skip arms with no value/body
 
-        let currentNodeId = matchId;
-        let currentLabel = patternText;
+        const patternText = pattern ? this.truncateText(pattern.text) : `arm_${i}`;
 
+        // Process the arm's body subgraph first
+        const armResult = this.processStatementOrBlock(armValue, exitId, loopContext);
+        nodes.push(...armResult.nodes);
+        edges.push(...armResult.edges);
+        armResult.nodesConnectedToExit.forEach((id) => nodesConnectedToExit.add(id));
+        
+        // Connect all successful exits from the arm's body to the common merge point
+        armResult.exitPoints.forEach(ep => {
+            if (!armResult.nodesConnectedToExit.has(ep.id)) {
+                edges.push({ from: ep.id, to: mergeId, label: ep.label });
+            }
+        });
+
+        // Create the decision node for this arm
+        const armDecisionId = this.generateNodeId("match_arm_decision");
+        let decisionLabel: string;
         if (guard) {
-          const guardCondition = guard.namedChild(0);
-          if (guardCondition) {
-            const guardId = this.generateNodeId("guard");
-            const guardText = this.truncateText(guardCondition.text);
-            const guardNode = this.createSemanticNode(
-              guardId,
-              `${patternText} if ${guardText}`,
-              NodeType.DECISION,
-              guard
-            );
-
-            nodes.push(guardNode);
-            edges.push({
-              from: matchId,
-              to: guardId,
-              label: patternText,
-            });
-
-            this.locationMap.push({
-              start: guard.startIndex,
-              end: guard.endIndex,
-              nodeId: guardId,
-            });
-
-            currentNodeId = guardId;
-            currentLabel = "true";
-          }
-        }
-
-        if (armValue) {
-          const armResult = this.processStatementOrBlock(
-            armValue,
-            exitId,
-            loopContext
-          );
-          nodes.push(...armResult.nodes);
-          edges.push(...armResult.edges);
-
-          if (armResult.entryNodeId) {
-            edges.push({
-              from: currentNodeId,
-              to: armResult.entryNodeId,
-              label: currentLabel,
-            });
-          }
-          exitPoints.push(...armResult.exitPoints);
-          armResult.nodesConnectedToExit.forEach((id) =>
-            nodesConnectedToExit.add(id)
-          );
+            const guardCondition = guard.childForFieldName("condition");
+            const guardText = guardCondition ? this.truncateText(guardCondition.text) : '...';
+            decisionLabel = `${patternText} if ${guardText}`;
         } else {
-          const armId = this.generateNodeId("arm");
-          const armNode = this.createSemanticNode(
-            armId,
-            patternText,
-            NodeType.PROCESS,
-            arm
-          );
-          nodes.push(armNode);
-          edges.push({ from: currentNodeId, to: armId, label: currentLabel });
-          exitPoints.push({ id: armId });
-
-          this.locationMap.push({
-            start: arm.startIndex,
-            end: arm.endIndex,
-            nodeId: armId,
-          });
+            decisionLabel = patternText;
         }
-      });
+        const armDecisionNode = this.createSemanticNode(armDecisionId, decisionLabel, NodeType.DECISION, arm);
+        nodes.push(armDecisionNode);
+
+        // Connect from the previous fallthrough point to this arm's decision
+        // The label is empty for the first arm, and "false" for subsequent fallthroughs.
+        edges.push({ from: fallthroughSourceId, to: armDecisionId, label: fallthroughSourceId === matchStartId ? undefined : "false" });
+
+        // Connect the 'true' path of the decision to the arm's body
+        if (armResult.entryNodeId) {
+            edges.push({ from: armDecisionId, to: armResult.entryNodeId, label: "true" });
+        } else {
+            // If arm body is empty, its true path goes directly to the merge point
+            edges.push({ from: armDecisionId, to: mergeId, label: "true" });
+        }
+        
+        // The new fallthrough point is the 'false' path of the current arm's decision
+        fallthroughSourceId = armDecisionId;
     }
+
+    // Connect the final fallthrough (if all arms fail) to the merge point
+    edges.push({ from: fallthroughSourceId, to: mergeId, label: "false" });
+    
+    const exitPoints: { id: string; label?: string }[] = [{ id: mergeId }];
 
     return this.createProcessResult(
       nodes,
       edges,
-      matchId,
+      matchStartId,
       exitPoints,
       nodesConnectedToExit
     );
@@ -1575,129 +1556,79 @@ protected processBlock(
     return false;
   }
 
+  /**
+   * Parses the AST for a method call chain to extract the base object and the sequence of calls.
+   * @param node The starting node of the method call chain.
+   * @returns An object containing the base receiver node and an array of call information.
+   */
+  private _buildMethodCallChain(node: Parser.SyntaxNode): {
+    baseReceiver: Parser.SyntaxNode | null;
+    calls: {
+        node: Parser.SyntaxNode;
+        method: string;
+        args: string;
+    }[];
+  } {
+      const methodCalls: { node: Parser.SyntaxNode; method: string; args: string }[] = [];
+      let currentNode: Parser.SyntaxNode | null = node;
+
+      while (currentNode) {
+          if (currentNode.type === 'method_call_expression') {
+              const methodField = currentNode.childForFieldName('method');
+              const argsField = currentNode.childForFieldName('arguments');
+              
+              const methodName = methodField?.text || 'unknown';
+              const argsText = argsField ? this.truncateText(argsField.text, 15) : '()';
+
+              methodCalls.unshift({ node: currentNode, method: methodName, args: argsText });
+              currentNode = currentNode.childForFieldName('receiver');
+          } else if (currentNode.type === 'call_expression') {
+              const functionField = currentNode.childForFieldName('function');
+              const argsField = currentNode.childForFieldName('arguments');
+              
+              if (functionField?.type === 'field_expression') {
+                  const fieldName = functionField.childForFieldName('field');
+                  const methodName = fieldName?.text || 'unknown';
+                  const argsText = argsField ? this.truncateText(argsField.text, 15) : '()';
+                  
+                  methodCalls.unshift({ node: currentNode, method: methodName, args: argsText });
+                  currentNode = functionField.childForFieldName('value');
+              } else {
+                  break;
+              }
+          } else {
+              break;
+          }
+      }
+      
+      return { baseReceiver: currentNode, calls: methodCalls };
+  }
+
   private processChainedMethodCalls(
     node: Parser.SyntaxNode,
     exitId: string
   ): ProcessResult {
-    const nodes: FlowchartNode[] = [];
-    const edges: FlowchartEdge[] = [];
-    const nodesConnectedToExit = new Set<string>();
-  
-    // Build the method call chain by traversing the AST structure
-    const methodCalls: {
-      node: Parser.SyntaxNode;
-      method: string;
-      args: string;
-    }[] = [];
-    
-    let currentNode: Parser.SyntaxNode | null = node;
-    let baseReceiver: Parser.SyntaxNode | null = null;
-  
-    // Walk through the method call chain
-    while (currentNode) {
-      if (currentNode.type === 'method_call_expression') {
-        const methodField = currentNode.childForFieldName('method');
-        const argsField = currentNode.childForFieldName('arguments');
-        
-        const methodName = methodField?.text || 'unknown';
-        let argsText = '';
-        
-        if (argsField && argsField.text !== '()') {
-          const argsContent = argsField.text.slice(1, -1);
-          argsText = argsContent.length > 15 ? `(${argsContent.substring(0, 12)}...)` : argsField.text;
-        } else {
-          argsText = '()';
-        }
-        
-        methodCalls.unshift({
-          node: currentNode,
-          method: methodName,
-          args: argsText
-        });
-        
-        // Move to the receiver (the next inner call or base object)
-        currentNode = currentNode.childForFieldName('receiver');
-      } else if (currentNode.type === 'call_expression') {
-        // Handle call_expression (like .count())
-        const functionField = currentNode.childForFieldName('function');
-        const argsField = currentNode.childForFieldName('arguments');
-        
-        if (functionField?.type === 'field_expression') {
-          // This is a method call disguised as a call_expression (e.g., .count())
-          const fieldName = functionField.childForFieldName('field');
-          const methodName = fieldName?.text || 'unknown';
-          
-          let argsText = '';
-          if (argsField && argsField.text !== '()') {
-            const argsContent = argsField.text.slice(1, -1);
-            argsText = argsContent.length > 15 ? `(${argsContent.substring(0, 12)}...)` : argsField.text;
-          } else {
-            argsText = '()';
-          }
-          
-          methodCalls.unshift({
-            node: currentNode,
-            method: methodName,
-            args: argsText
-          });
-          
-          // Move to the receiver
-          currentNode = functionField.childForFieldName('value');
-        } else {
-          // Regular function call, not part of method chain
-          break;
-        }
-      } else {
-        break;
-      }
-    }
-    
-    // The remaining currentNode is the base receiver
-    baseReceiver = currentNode;
+    const { baseReceiver, calls: methodCalls } = this._buildMethodCallChain(node);
     
     if (!baseReceiver) {
       return this.processGenericStatement(node, exitId);
     }
   
-    // Process the base receiver first
-    let entryNodeId: string | undefined;
-    let lastExitPoints: { id: string; label?: string }[] = [];
+    const nodes: FlowchartNode[] = [];
+    const edges: FlowchartEdge[] = [];
+    const nodesConnectedToExit = new Set<string>();
   
-    if (['identifier', 'literal', 'field_expression', 'index_expression'].includes(baseReceiver.type)) {
-      // Simple receiver - create a single node
-      const receiverId = this.generateNodeId("base");
-      const receiverNode = this.createSemanticNode(
-        receiverId,
-        baseReceiver.text,
-        NodeType.PROCESS,
-        baseReceiver
-      );
-      nodes.push(receiverNode);
-  
-      this.locationMap.push({
-        start: baseReceiver.startIndex,
-        end: baseReceiver.endIndex,
-        nodeId: receiverId,
-      });
-  
-      entryNodeId = receiverId;
-      lastExitPoints = [{ id: receiverId }];
-  
-    } else {
-      // Complex receiver - process recursively
-      const receiverResult = this.processStatement(baseReceiver, exitId);
-      nodes.push(...receiverResult.nodes);
-      edges.push(...receiverResult.edges);
-      receiverResult.nodesConnectedToExit.forEach(id => nodesConnectedToExit.add(id));
+    // Process the base receiver first, which might be a simple variable or a complex expression.
+    const receiverResult = this.processStatement(baseReceiver, exitId);
+    nodes.push(...receiverResult.nodes);
+    edges.push(...receiverResult.edges);
+    receiverResult.nodesConnectedToExit.forEach(id => nodesConnectedToExit.add(id));
       
-      entryNodeId = receiverResult.entryNodeId;
-      lastExitPoints = receiverResult.exitPoints;
-    }
+    let entryNodeId = receiverResult.entryNodeId;
+    let lastExitPoints = receiverResult.exitPoints;
   
     // Process each method call in sequence
-    for (let i = 0; i < methodCalls.length; i++) {
-      const { node: methodNode, method, args } = methodCalls[i];
-      
+    for (const { node: methodNode, method, args } of methodCalls) {
       const methodId = this.generateNodeId("method");
       const methodCallNode = this.createSemanticNode(
         methodId,
@@ -1724,7 +1655,7 @@ protected processBlock(
         }
       }
   
-      // Handle closures in method arguments - only create branches for complex closures
+      // Handle closures in method arguments - create branches for complex closures
       const argsNode = methodNode.childForFieldName('arguments');
       if (argsNode) {
         const closures = this.findClosuresInArguments(argsNode);
@@ -1732,8 +1663,6 @@ protected processBlock(
         closures.forEach((closure, closureIndex) => {
           const closureBody = closure.childForFieldName("body");
           
-          // Only create separate branches for complex closures (blocks with multiple statements)
-          // Simple expressions like |word| word.len() > 2 should be inlined
           if (closureBody && this.isComplexClosureBody(closureBody)) {
             const closureId = this.generateNodeId(`closure_${closureIndex}`);
             const params = this.getClosureParameters(closure);
@@ -1746,28 +1675,22 @@ protected processBlock(
             nodes.push(closureHeaderNode);
             edges.push({ from: methodId, to: closureId, label: `closure` });
 
-            // Use a dummy exit ID for the closure's block so its returns/exits
-            // are contained and don't connect to the main function's exit.
             const internalClosureExitId = this.generateNodeId('closure_internal_exit');
             const closureResult = this.processBlock(closureBody, internalClosureExitId);
             
             nodes.push(...closureResult.nodes);
-            
-            // Add edges from the closure, but ignore any that lead to the dummy exit.
-            // This contains the closure's logic within its own branch.
             edges.push(...closureResult.edges.filter(e => e.to !== internalClosureExitId));
 
             if (closureResult.entryNodeId) {
               edges.push({ from: closureId, to: closureResult.entryNodeId });
             }
             
-            // Mark nodes that connected to the internal exit as "handled".
             closureResult.nodesConnectedToExit.forEach(id => nodesConnectedToExit.add(id));
           }
         });
       }
   
-      // For the next method in the chain, the flow continues from the current method call node.
+      // For the next method in the chain, the flow continues from this method call node.
       lastExitPoints = [{ id: methodId }];
     }
   
