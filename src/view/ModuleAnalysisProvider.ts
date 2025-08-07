@@ -29,7 +29,7 @@ export type ModuleWebviewMessage =
 
 export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "visor.moduleAnalysisView";
-  
+
   private _view?: vscode.WebviewView;
   private _analyzer: ModuleAnalyzer;
   private _generator: ModuleMermaidGenerator;
@@ -57,7 +57,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this._extensionUri]
+      localResourceRoots: [this._extensionUri],
     };
 
     this._updateWebview();
@@ -65,29 +65,28 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
     // Handle messages from the webview
     webviewView.webview.onDidReceiveMessage(async (message) => {
       switch (message.command) {
-        case 'refresh':
+        case "refresh":
           this._refreshAnalysis();
           break;
-        case 'analyzeWorkspace':
+        case "analyzeWorkspace":
           this.analyzeWorkspace();
           break;
-        case 'analyzeCurrentFile':
+        case "analyzeCurrentFile":
           this.analyzeCurrentFileContext();
           break;
-        case 'changeView':
-          this._changeView(message.viewType);
-          break;
-        case 'export':
+        case "export":
           await this.handleExport(message.payload);
           break;
-        case 'exportError':
+        case "exportError":
           vscode.window.showErrorMessage(
             `Export failed: ${message.payload.error}`
           );
           break;
-        case 'copyMermaid':
+        case "copyMermaid":
           await vscode.env.clipboard.writeText(message.payload.code);
-          vscode.window.showInformationMessage("Mermaid code copied to clipboard!");
+          vscode.window.showInformationMessage(
+            "Mermaid code copied to clipboard!"
+          );
           break;
       }
     });
@@ -98,10 +97,27 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
 
     try {
       this._showLoading("Analyzing workspace modules...");
+      console.log("ModuleAnalysisProvider: Starting workspace analysis...");
+
       this._currentAnalysis = await this._analyzer.analyzeWorkspace();
+
+      console.log("ModuleAnalysisProvider: Analysis complete:", {
+        moduleCount: this._currentAnalysis.modules.length,
+        dependencyCount: this._currentAnalysis.dependencies.length,
+        modules: this._currentAnalysis.modules.map((m) => m.fileName),
+      });
+
       this._updateWebview();
     } catch (error) {
-      this._showError(`Failed to analyze workspace: ${error}`);
+      console.error(
+        "ModuleAnalysisProvider: Workspace analysis failed:",
+        error
+      );
+      this._showError(
+        `Failed to analyze workspace: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
   }
 
@@ -110,10 +126,28 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
 
     try {
       this._showLoading("Analyzing current file context...");
+      console.log("ModuleAnalysisProvider: Starting current file analysis...");
+
       this._currentAnalysis = await this._analyzer.analyzeActiveFileContext();
+
+      console.log("ModuleAnalysisProvider: Current file analysis complete:", {
+        moduleCount: this._currentAnalysis.modules.length,
+        dependencyCount: this._currentAnalysis.dependencies.length,
+        rootModule: this._currentAnalysis.rootModule,
+        modules: this._currentAnalysis.modules.map((m) => m.fileName),
+      });
+
       this._updateWebview();
     } catch (error) {
-      this._showError(`Failed to analyze current file context: ${error}`);
+      console.error(
+        "ModuleAnalysisProvider: Current file analysis failed:",
+        error
+      );
+      this._showError(
+        `Failed to analyze current file context: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
   }
 
@@ -128,13 +162,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _changeView(viewType: 'dependency' | 'overview' | 'matrix'): void {
-    if (!this._currentAnalysis) return;
-    
-    this._updateWebview(viewType);
-  }
-
-  private _updateWebview(viewType: 'dependency' | 'overview' | 'matrix' = 'dependency'): void {
+  private _updateWebview(): void {
     if (!this._view) return;
 
     if (!this._currentAnalysis) {
@@ -142,45 +170,56 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
       return;
     }
 
-    // Use the same theme configuration logic as BaseFlowchartProvider
-    const vsCodeTheme =
-      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
-        ? "dark"
-        : "light";
+    try {
+      // Use the same theme configuration logic as BaseFlowchartProvider
+      const vsCodeTheme =
+        vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+          ? "dark"
+          : "light";
 
-    // Read the selected theme from user configuration (same as BaseFlowchartProvider)
-    const config = vscode.workspace.getConfiguration("visor");
-    const selectedTheme = config.get<string>(
-      "nodeReadability.theme",
-      "monokai"
-    );
+      // Read the selected theme from user configuration (same as BaseFlowchartProvider)
+      const config = vscode.workspace.getConfiguration("visor");
+      const selectedTheme = config.get<string>(
+        "nodeReadability.theme",
+        "monokai"
+      );
 
-    // Pass theme configuration to the generator
-    this._generator.setTheme(selectedTheme, vsCodeTheme);
+      // Pass theme configuration to the generator
+      this._generator.setTheme(selectedTheme, vsCodeTheme);
 
-    let mermaidGraph: string;
-    let viewTitle: string;
+      // Focus only on dependency graph for now
+      const mermaidGraph = this._generator.generateModuleGraph(
+        this._currentAnalysis
+      );
+      const viewTitle = "Module Dependencies";
 
-    switch (viewType) {
-      case 'overview':
-        mermaidGraph = this._generator.generateModuleOverview(this._currentAnalysis);
-        viewTitle = "Module Overview";
-        break;
-      case 'matrix':
-        mermaidGraph = this._generator.generateDependencyMatrix(this._currentAnalysis);
-        viewTitle = "Dependency Matrix";
-        break;
-      default:
-        mermaidGraph = this._generator.generateModuleGraph(this._currentAnalysis);
-        viewTitle = "Module Dependencies";
+      // Validate the generated mermaid graph
+      if (!mermaidGraph || mermaidGraph.trim().length === 0) {
+        this._showError(
+          "Failed to generate graph visualization. No valid graph data found."
+        );
+        return;
+      }
+
+      this._view.webview.html = this._getWebviewHtml(
+        mermaidGraph,
+        viewTitle,
+        "dependency",
+        this._getNonce()
+      );
+    } catch (error) {
+      console.error("Error updating module analysis webview:", error);
+      this._showError(
+        `Failed to update view: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
     }
-
-    this._view.webview.html = this._getWebviewHtml(mermaidGraph, viewTitle, viewType, this._getNonce());
   }
 
   private _showLoading(message: string): void {
     if (!this._view) return;
-    
+
     this._view.webview.html = `
       <!DOCTYPE html>
       <html lang="en">
@@ -190,13 +229,17 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
         <title>Module Analysis</title>
         <style>
           body { 
-            font-family: var(--vscode-font-family); 
+            background-color: var(--vscode-editor-background);
             color: var(--vscode-foreground);
+            font-family: var(--vscode-font-family);
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
-            height: 100vh;
-            margin: 0;
+            overflow: hidden;
           }
           .loading {
             text-align: center;
@@ -228,7 +271,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
 
   private _showError(message: string): void {
     if (!this._view) return;
-    
+
     this._view.webview.html = `
       <!DOCTYPE html>
       <html lang="en">
@@ -238,11 +281,22 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
         <title>Module Analysis</title>
         <style>
           body { 
-            font-family: var(--vscode-font-family); 
-            color: var(--vscode-errorForeground);
-            padding: 20px;
+            background-color: var(--vscode-editor-background);
+            color: var(--vscode-foreground);
+            font-family: var(--vscode-font-family);
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
           }
-          .error { text-align: center; }
+          .error { 
+            text-align: center;
+            color: var(--vscode-errorForeground);
+          }
           button {
             background: var(--vscode-button-background);
             color: var(--vscode-button-foreground);
@@ -261,17 +315,28 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
         <div class="error">
           <h3>❌ Analysis Failed</h3>
           <p>${message}</p>
-          <button onclick="analyzeWorkspace()">Analyze Workspace</button>
-          <button onclick="analyzeCurrentFile()">Analyze Current File</button>
+          <button id="btn-error-workspace">Analyze Workspace</button>
+          <button id="btn-error-current">Analyze Current File</button>
         </div>
         <script>
           const vscode = acquireVsCodeApi();
-          function analyzeWorkspace() {
-            vscode.postMessage({ command: 'analyzeWorkspace' });
-          }
-          function analyzeCurrentFile() {
-            vscode.postMessage({ command: 'analyzeCurrentFile' });
-          }
+          
+          document.addEventListener('DOMContentLoaded', () => {
+            const analyzeWorkspaceBtn = document.getElementById('btn-error-workspace');
+            const analyzeCurrentBtn = document.getElementById('btn-error-current');
+            
+            if (analyzeWorkspaceBtn) {
+              analyzeWorkspaceBtn.addEventListener('click', () => {
+                vscode.postMessage({ command: 'analyzeWorkspace' });
+              });
+            }
+            
+            if (analyzeCurrentBtn) {
+              analyzeCurrentBtn.addEventListener('click', () => {
+                vscode.postMessage({ command: 'analyzeCurrentFile' });
+              });
+            }
+          });
         </script>
       </body>
       </html>
@@ -288,13 +353,21 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
         <title>Module Analysis</title>
         <style>
           body { 
-            font-family: var(--vscode-font-family); 
+            background-color: var(--vscode-editor-background);
             color: var(--vscode-foreground);
-            padding: 20px;
-            text-align: center;
+            font-family: var(--vscode-font-family);
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
           }
           .welcome {
-            margin: 20px 0;
+            text-align: center;
+            padding: 20px;
           }
           .icon {
             font-size: 48px;
@@ -329,24 +402,40 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
             Get a 30,000 ft view of your codebase.<br/>
             Analyze module dependencies, imports, exports, and interactions.
           </p>
-          <button onclick="analyzeWorkspace()">🌐 Analyze Workspace</button>
-          <button onclick="analyzeCurrentFile()">📄 Analyze Current File</button>
+          <button id="btn-analyze-workspace">🌐 Analyze Workspace</button>
+          <button id="btn-analyze-current">📄 Analyze Current File</button>
         </div>
         <script>
           const vscode = acquireVsCodeApi();
-          function analyzeWorkspace() {
-            vscode.postMessage({ command: 'analyzeWorkspace' });
-          }
-          function analyzeCurrentFile() {
-            vscode.postMessage({ command: 'analyzeCurrentFile' });
-          }
+          
+          document.addEventListener('DOMContentLoaded', () => {
+            const analyzeWorkspaceBtn = document.getElementById('btn-analyze-workspace');
+            const analyzeCurrentBtn = document.getElementById('btn-analyze-current');
+            
+            if (analyzeWorkspaceBtn) {
+              analyzeWorkspaceBtn.addEventListener('click', () => {
+                vscode.postMessage({ command: 'analyzeWorkspace' });
+              });
+            }
+            
+            if (analyzeCurrentBtn) {
+              analyzeCurrentBtn.addEventListener('click', () => {
+                vscode.postMessage({ command: 'analyzeCurrentFile' });
+              });
+            }
+          });
         </script>
       </body>
       </html>
     `;
   }
 
-  private _getWebviewHtml(mermaidGraph: string, title: string, currentView: string, nonce: string): string {
+  private _getWebviewHtml(
+    mermaidGraph: string,
+    title: string,
+    currentView: string,
+    nonce: string
+  ): string {
     const analysis = this._currentAnalysis!;
     const moduleCount = analysis.modules.length;
     const dependencyCount = analysis.dependencies.length;
@@ -369,19 +458,22 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@${SVG_PAN_ZOOM_VERSION}/dist/svg-pan-zoom.min.js"></script>
         <style>
           body, html { 
-            font-family: var(--vscode-font-family); 
+            background-color: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+            font-family: var(--vscode-font-family);
             margin: 0;
             padding: 0;
-            background: var(--vscode-editor-background);
-            color: var(--vscode-editor-foreground);
             width: 100%;
             height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             overflow: hidden;
           }
           
           .container {
             width: 100%;
-            height: 100vh;
+            height: 100%;
             display: flex;
             flex-direction: column;
           }
@@ -430,12 +522,6 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
             gap: 12px;
           }
           
-          .view-controls {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-          }
-          
           .export-controls {
             display: flex;
             gap: 8px;
@@ -481,6 +567,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
           #mermaid-container {
             flex: 1;
             width: 100%;
+            height: calc(100% - 70px);
             border: 1px solid var(--vscode-panel-border);
             border-top: none;
             background: var(--vscode-editor-background);
@@ -541,6 +628,30 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
             text-align: center;
             padding: 20px;
           }
+          
+          .loading {
+            text-align: center;
+          }
+          
+          .spinner {
+            border: 2px solid var(--vscode-progressBar-background);
+            border-top: 2px solid var(--vscode-progressBar-foreground);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px auto;
+          }
+          
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+          
+          .error {
+            color: var(--vscode-errorForeground);
+            text-align: center;
+          }
         </style>
       </head>
       <body>
@@ -555,22 +666,12 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
             </div>
             
             <div class="header-controls">
-              <div class="view-controls">
-                <button onclick="changeView('dependency')" ${currentView === 'dependency' ? 'class="active"' : ''} title="Show module dependencies">
-                  🔗 Dependencies
-                </button>
-                <button onclick="changeView('overview')" ${currentView === 'overview' ? 'class="active"' : ''} title="Show module overview">
-                  📊 Overview
-                </button>
-                <button onclick="changeView('matrix')" ${currentView === 'matrix' ? 'class="active"' : ''} title="Show dependency matrix">
-                  📋 Matrix
-                </button>
-              </div>
+              <h2 style="margin: 0; color: var(--vscode-foreground);">Module Dependencies</h2>
               
               <div class="divider"></div>
               
               <div class="export-controls">
-                <button onclick="refresh()" class="icon-only" title="Refresh analysis">🔄</button>
+                <button id="btn-refresh" class="icon-only" title="Refresh analysis">🔄</button>
                 <button id="copy-mermaid" title="Copy Mermaid code to clipboard">📋 Copy Code</button>
                 <button id="export-svg" title="Export as SVG">💾 SVG</button>
                 <button id="export-png" title="Export as PNG">🖼️ PNG</button>
@@ -607,7 +708,7 @@ ${mermaidGraph}
 
           // Initialize pan/zoom after mermaid loads (matching BaseFlowchartProvider pattern)
           window.addEventListener('load', () => {
-            const svgElement = document.querySelector('#mermaid-container svg');
+            const svgElement = document.querySelector('.mermaid svg');
             if (svgElement) {
               const panZoomInstance = svgPanZoom(svgElement, {
                 zoomEnabled: true,
@@ -619,7 +720,59 @@ ${mermaidGraph}
                 zoomScaleSensitivity: 0.2
               });
             }
+
+            // Set up event listeners after DOM is loaded
+            setupEventListeners();
           });
+
+          function setupEventListeners() {
+            // Only refresh button for dependency view
+            const btnRefresh = document.getElementById('btn-refresh');
+            if (btnRefresh) {
+              btnRefresh.addEventListener('click', () => refresh());
+            }
+
+            // Export functionality
+            const exportSvgBtn = document.getElementById('export-svg');
+            const exportPngBtn = document.getElementById('export-png');
+            
+            if (exportSvgBtn) {
+              exportSvgBtn.addEventListener('click', () => exportFlowchart('svg'));
+            }
+            if (exportPngBtn) {
+              exportPngBtn.addEventListener('click', () => exportFlowchart('png'));
+            }
+
+            // Copy functionality
+            const copyBtn = document.getElementById('copy-mermaid');
+            if (copyBtn) {
+              copyBtn.addEventListener('click', () => {
+                const mermaidSourceElement = document.getElementById('mermaid-source');
+                const mermaidSource = (mermaidSourceElement?.textContent || '').trim();
+
+                if (mermaidSource) {
+                  vscode.postMessage({
+                    command: 'copyMermaid',
+                    payload: { code: mermaidSource }
+                  });
+
+                  // Visual feedback
+                  const originalText = copyBtn.textContent;
+                  copyBtn.textContent = '✅ Copied!';
+                  copyBtn.disabled = true;
+                  setTimeout(() => {
+                    copyBtn.textContent = originalText;
+                    copyBtn.disabled = false;
+                  }, 2000);
+                } else {
+                  vscode.postMessage({
+                    command: 'exportError',
+                    payload: { error: "Could not find Mermaid source code to copy." }
+                  });
+                }
+              });
+            }
+          }
 
           // Enhanced export functionality matching function-level analysis
           function exportFlowchart(fileType) {
@@ -729,47 +882,9 @@ ${mermaidGraph}
               });
           }
 
-          // Global functions for HTML onclick handlers
+          // Global functions for HTML handlers (if needed)
           function refresh() {
             vscode.postMessage({ command: 'refresh' });
-          }
-
-          function changeView(viewType) {
-            vscode.postMessage({ command: 'changeView', viewType });
-          }
-
-          // Event handlers - attach directly like BaseFlowchartProvider
-          document.getElementById('export-svg').addEventListener('click', () => exportFlowchart('svg'));
-          document.getElementById('export-png').addEventListener('click', () => exportFlowchart('png'));
-
-          // Copy functionality
-          const copyBtn = document.getElementById('copy-mermaid');
-          if (copyBtn) {
-            copyBtn.addEventListener('click', () => {
-              const mermaidSourceElement = document.getElementById('mermaid-source');
-              const mermaidSource = (mermaidSourceElement?.textContent || '').trim();
-
-              if (mermaidSource) {
-                vscode.postMessage({
-                  command: 'copyMermaid',
-                  payload: { code: mermaidSource }
-                });
-
-                // Visual feedback
-                const originalText = copyBtn.textContent;
-                copyBtn.textContent = '✅ Copied!';
-                copyBtn.disabled = true;
-                setTimeout(() => {
-                  copyBtn.textContent = originalText;
-                  copyBtn.disabled = false;
-                }, 2000);
-              } else {
-                vscode.postMessage({
-                  command: 'exportError',
-                  payload: { error: "Could not find Mermaid source code to copy." }
-                });
-              }
-            });
           }
         </script>
       </body>
@@ -799,7 +914,10 @@ ${mermaidGraph}
       require("path").dirname(documentUri.fsPath)
     );
     const defaultFileUri = vscode.Uri.file(
-      require("path").join(defaultDirectory.fsPath, `module-analysis.${fileType}`)
+      require("path").join(
+        defaultDirectory.fsPath,
+        `module-analysis.${fileType}`
+      )
     );
 
     const filters: { [name: string]: string[] } =
@@ -840,5 +958,4 @@ ${mermaidGraph}
     }
     return text;
   }
-
 }
