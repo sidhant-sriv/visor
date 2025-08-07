@@ -37,8 +37,8 @@
           "icon": "media/icon.png"
         },
         {
-          "id": "visor.moduleAnalysisView",
-          "name": "Module Analysis",
+          "id": "visor.dataFlowView",
+          "name": "Data Flow",
           "type": "webview",
           "icon": "media/icon.png"
         }

@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
-import { ModuleAnalyzer } from "../logic/ModuleAnalyzer";
-import { ModuleMermaidGenerator } from "../logic/ModuleMermaidGenerator";
-import { ModuleAnalysisIR } from "../ir/moduleIr";
+import { DataFlowAnalyzer } from "../logic/DataFlowAnalyzer";
+import { DataFlowMermaidGenerator } from "../logic/DataFlowMermaidGenerator";
+import { DataFlowAnalysisIR } from "../ir/dataFlowIr";
 
 const MERMAID_VERSION = "11.8.0";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
@@ -27,17 +27,18 @@ export type ModuleWebviewMessage =
   | ExportErrorMessage
   | CopyMermaidMessage;
 
-export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = "visor.moduleAnalysisView";
+export class DataFlowProvider implements vscode.WebviewViewProvider {
+  public static readonly viewType = "visor.dataFlowView";
 
   private _view?: vscode.WebviewView;
-  private _analyzer: ModuleAnalyzer;
-  private _generator: ModuleMermaidGenerator;
-  private _currentAnalysis?: ModuleAnalysisIR;
+  private _analyzer: DataFlowAnalyzer;
+  private _generator: DataFlowMermaidGenerator;
+  private _currentAnalysis?: DataFlowAnalysisIR;
+  private _currentView: 'dataflow' | 'callgraph' = 'dataflow';
 
   constructor(private readonly _extensionUri: vscode.Uri) {
-    this._analyzer = new ModuleAnalyzer();
-    this._generator = new ModuleMermaidGenerator();
+    this._analyzer = new DataFlowAnalyzer();
+    this._generator = new DataFlowMermaidGenerator();
 
     // Listen for configuration changes to update themes (matching BaseFlowchartProvider)
     vscode.workspace.onDidChangeConfiguration((e) => {
@@ -68,11 +69,14 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
         case "refresh":
           this._refreshAnalysis();
           break;
-        case "analyzeWorkspace":
-          this.analyzeWorkspace();
+        case "analyzeCurrentFunction":
+          this.analyzeCurrentFunction();
           break;
-        case "analyzeCurrentFile":
-          this.analyzeCurrentFileContext();
+        case "analyzeWorkspace":
+          this.analyzeWorkspaceDataFlow();
+          break;
+        case "switchView":
+          this.switchView(message.payload.viewType);
           break;
         case "export":
           await this.handleExport(message.payload);
@@ -92,72 +96,71 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  public async analyzeWorkspace(): Promise<void> {
+  public async analyzeCurrentFunction(): Promise<void> {
     if (!this._view) return;
 
     try {
-      this._showLoading("Analyzing workspace modules...");
-      console.log("ModuleAnalysisProvider: Starting workspace analysis...");
+      this._showLoading("Analyzing current function data flow...");
+      console.log("DataFlowProvider: Starting current function analysis...");
 
-      this._currentAnalysis = await this._analyzer.analyzeWorkspace();
+      this._currentAnalysis = await this._analyzer.analyzeCurrentFunctionContext();
 
-      console.log("ModuleAnalysisProvider: Analysis complete:", {
-        moduleCount: this._currentAnalysis.modules.length,
-        dependencyCount: this._currentAnalysis.dependencies.length,
-        modules: this._currentAnalysis.modules.map((m) => m.fileName),
+      console.log("DataFlowProvider: Analysis complete:", {
+        functionCount: this._currentAnalysis.functions.length,
+        globalVariableCount: this._currentAnalysis.globalStateVariables.length,
+        dataFlowEdges: this._currentAnalysis.dataFlowEdges.length,
+        rootFunction: this._currentAnalysis.rootFunction,
       });
 
       this._updateWebview();
     } catch (error) {
-      console.error(
-        "ModuleAnalysisProvider: Workspace analysis failed:",
-        error
-      );
+      console.error("DataFlowProvider: Current function analysis failed:", error);
       this._showError(
-        `Failed to analyze workspace: ${
+        `Failed to analyze current function: ${
           error instanceof Error ? error.message : String(error)
         }`
       );
     }
   }
 
-  public async analyzeCurrentFileContext(): Promise<void> {
+  public async analyzeWorkspaceDataFlow(): Promise<void> {
     if (!this._view) return;
 
     try {
-      this._showLoading("Analyzing current file context...");
-      console.log("ModuleAnalysisProvider: Starting current file analysis...");
+      this._showLoading("Analyzing workspace data flow...");
+      console.log("DataFlowProvider: Starting workspace data flow analysis...");
 
-      this._currentAnalysis = await this._analyzer.analyzeActiveFileContext();
+      this._currentAnalysis = await this._analyzer.analyzeWorkspaceDataFlow();
 
-      console.log("ModuleAnalysisProvider: Current file analysis complete:", {
-        moduleCount: this._currentAnalysis.modules.length,
-        dependencyCount: this._currentAnalysis.dependencies.length,
-        rootModule: this._currentAnalysis.rootModule,
-        modules: this._currentAnalysis.modules.map((m) => m.fileName),
+      console.log("DataFlowProvider: Workspace analysis complete:", {
+        functionCount: this._currentAnalysis.functions.length,
+        globalVariableCount: this._currentAnalysis.globalStateVariables.length,
+        dataFlowEdges: this._currentAnalysis.dataFlowEdges.length,
       });
 
       this._updateWebview();
     } catch (error) {
-      console.error(
-        "ModuleAnalysisProvider: Current file analysis failed:",
-        error
-      );
+      console.error("DataFlowProvider: Workspace analysis failed:", error);
       this._showError(
-        `Failed to analyze current file context: ${
+        `Failed to analyze workspace data flow: ${
           error instanceof Error ? error.message : String(error)
         }`
       );
     }
+  }
+
+  public switchView(viewType: 'dataflow' | 'callgraph'): void {
+    this._currentView = viewType;
+    this._updateWebview();
   }
 
   private async _refreshAnalysis(): Promise<void> {
     if (this._currentAnalysis) {
       // Re-run the same type of analysis
-      if (this._currentAnalysis.rootModule) {
-        await this.analyzeCurrentFileContext();
+      if (this._currentAnalysis.scope === 'workspace') {
+        await this.analyzeWorkspaceDataFlow();
       } else {
-        await this.analyzeWorkspace();
+        await this.analyzeCurrentFunction();
       }
     }
   }
@@ -187,11 +190,17 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
       // Pass theme configuration to the generator
       this._generator.setTheme(selectedTheme, vsCodeTheme);
 
-      // Focus only on dependency graph for now
-      const mermaidGraph = this._generator.generateModuleGraph(
-        this._currentAnalysis
-      );
-      const viewTitle = "Module Dependencies";
+      // Generate the appropriate graph based on current view
+      let mermaidGraph: string;
+      let viewTitle: string;
+
+      if (this._currentView === 'callgraph') {
+        mermaidGraph = this._generator.generateFunctionCallGraph(this._currentAnalysis);
+        viewTitle = "Function Call Graph";
+      } else {
+        mermaidGraph = this._generator.generateDataFlowGraph(this._currentAnalysis);
+        viewTitle = "Data Flow Analysis";
+      }
 
       // Validate the generated mermaid graph
       if (!mermaidGraph || mermaidGraph.trim().length === 0) {
@@ -204,7 +213,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
       this._view.webview.html = this._getWebviewHtml(
         mermaidGraph,
         viewTitle,
-        "dependency",
+        this._currentView,
         this._getNonce()
       );
     } catch (error) {
@@ -226,7 +235,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Module Analysis</title>
+        <title>Data Flow Analysis</title>
         <style>
           body { 
             background-color: var(--vscode-editor-background);
@@ -278,7 +287,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Module Analysis</title>
+        <title>Data Flow Analysis</title>
         <style>
           body { 
             background-color: var(--vscode-editor-background);
@@ -316,7 +325,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
           <h3>❌ Analysis Failed</h3>
           <p>${message}</p>
           <button id="btn-error-workspace">Analyze Workspace</button>
-          <button id="btn-error-current">Analyze Current File</button>
+          <button id="btn-error-current">Analyze Current Function</button>
         </div>
         <script>
           const vscode = acquireVsCodeApi();
@@ -333,7 +342,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
             
             if (analyzeCurrentBtn) {
               analyzeCurrentBtn.addEventListener('click', () => {
-                vscode.postMessage({ command: 'analyzeCurrentFile' });
+                vscode.postMessage({ command: 'analyzeCurrentFunction' });
               });
             }
           });
@@ -350,7 +359,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Module Analysis</title>
+        <title>Data Flow Analysis</title>
         <style>
           body { 
             background-color: var(--vscode-editor-background);
@@ -396,14 +405,14 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
       </head>
       <body>
         <div class="welcome">
-          <div class="icon">🏗️</div>
-          <h2>Module Analysis</h2>
+          <div class="icon">🔄</div>
+          <h2>Data Flow Analysis</h2>
           <p class="description">
-            Get a 30,000 ft view of your codebase.<br/>
-            Analyze module dependencies, imports, exports, and interactions.
+            Understand how global state flows through your functions.<br/>
+            Track data dependencies and global variable usage across your codebase.
           </p>
+          <button id="btn-analyze-current">🎯 Analyze Current Function</button>
           <button id="btn-analyze-workspace">🌐 Analyze Workspace</button>
-          <button id="btn-analyze-current">📄 Analyze Current File</button>
         </div>
         <script>
           const vscode = acquireVsCodeApi();
@@ -420,7 +429,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
             
             if (analyzeCurrentBtn) {
               analyzeCurrentBtn.addEventListener('click', () => {
-                vscode.postMessage({ command: 'analyzeCurrentFile' });
+                vscode.postMessage({ command: 'analyzeCurrentFunction' });
               });
             }
           });
@@ -437,8 +446,9 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
     nonce: string
   ): string {
     const analysis = this._currentAnalysis!;
-    const moduleCount = analysis.modules.length;
-    const dependencyCount = analysis.dependencies.length;
+    const functionCount = analysis.functions.length;
+    const globalVarCount = analysis.globalStateVariables.length;
+    const dataFlowCount = analysis.dataFlowEdges.length;
 
     // Use the same theme logic as BaseFlowchartProvider for consistency
     const theme =
@@ -453,7 +463,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
         <meta charset="UTF-8">
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src https://cdn.jsdelivr.net;">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Module Analysis</title>
+        <title>Data Flow Analysis</title>
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js"></script>
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@${SVG_PAN_ZOOM_VERSION}/dist/svg-pan-zoom.min.js"></script>
         <style>
@@ -520,6 +530,12 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
             display: flex;
             align-items: center;
             gap: 12px;
+          }
+          
+          .view-controls {
+            display: flex;
+            gap: 4px;
+            align-items: center;
           }
           
           .export-controls {
@@ -660,13 +676,17 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
             <div class="header-info">
               <h3 class="title">${title}</h3>
               <div class="stats">
-                <div class="stat">📁 <span>${moduleCount} modules</span></div>
-                <div class="stat">🔗 <span>${dependencyCount} dependencies</span></div>
+                <div class="stat">⚙️ <span>${functionCount} functions</span></div>
+                <div class="stat">📊 <span>${globalVarCount} global vars</span></div>
+                <div class="stat">🔗 <span>${dataFlowCount} data flows</span></div>
               </div>
             </div>
             
             <div class="header-controls">
-              <h2 style="margin: 0; color: var(--vscode-foreground);">Module Dependencies</h2>
+              <div class="view-controls">
+                <button id="btn-dataflow" class="${currentView === 'dataflow' ? 'active' : ''}" title="Data Flow View">📊 Data Flow</button>
+                <button id="btn-callgraph" class="${currentView === 'callgraph' ? 'active' : ''}" title="Call Graph View">🔄 Call Graph</button>
+              </div>
               
               <div class="divider"></div>
               
@@ -726,7 +746,29 @@ ${mermaidGraph}
           });
 
           function setupEventListeners() {
-            // Only refresh button for dependency view
+            // View switching buttons
+            const btnDataFlow = document.getElementById('btn-dataflow');
+            const btnCallGraph = document.getElementById('btn-callgraph');
+            
+            if (btnDataFlow) {
+              btnDataFlow.addEventListener('click', () => {
+                vscode.postMessage({ 
+                  command: 'switchView',
+                  payload: { viewType: 'dataflow' }
+                });
+              });
+            }
+            
+            if (btnCallGraph) {
+              btnCallGraph.addEventListener('click', () => {
+                vscode.postMessage({ 
+                  command: 'switchView',
+                  payload: { viewType: 'callgraph' }
+                });
+              });
+            }
+
+            // Refresh button
             const btnRefresh = document.getElementById('btn-refresh');
             if (btnRefresh) {
               btnRefresh.addEventListener('click', () => refresh());
@@ -916,7 +958,7 @@ ${mermaidGraph}
     const defaultFileUri = vscode.Uri.file(
       require("path").join(
         defaultDirectory.fsPath,
-        `module-analysis.${fileType}`
+        `data-flow-analysis.${fileType}`
       )
     );
 
@@ -935,12 +977,12 @@ ${mermaidGraph}
       try {
         await vscode.workspace.fs.writeFile(uri, buffer);
         vscode.window.showInformationMessage(
-          `Successfully exported module analysis to ${uri.fsPath}`
+          `Successfully exported data flow analysis to ${uri.fsPath}`
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         vscode.window.showErrorMessage(
-          `Failed to export module analysis: ${message}`
+          `Failed to export data flow analysis: ${message}`
         );
       }
     }

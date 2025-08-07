@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { FlowchartViewProvider } from "./view/FlowchartViewProvider";
 import { FlowchartPanelProvider } from "./view/FlowchartPanelProvider";
-import { ModuleAnalysisProvider } from "./view/ModuleAnalysisProvider";
+import { DataFlowProvider } from "./view/ModuleAnalysisProvider";
 import { initLanguageServices } from "./logic/language-services";
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -27,12 +27,12 @@ export async function activate(context: vscode.ExtensionContext) {
     )
   );
 
-  // Register module analysis provider
-  const moduleAnalysisProvider = new ModuleAnalysisProvider(context.extensionUri);
+  // Register data flow analysis provider
+  const dataFlowProvider = new DataFlowProvider(context.extensionUri);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
-      ModuleAnalysisProvider.viewType,
-      moduleAnalysisProvider
+      DataFlowProvider.viewType,
+      dataFlowProvider
     )
   );
 
@@ -114,22 +114,22 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }),
 
-    // Module analysis commands
-    vscode.commands.registerCommand("visor.analyzeWorkspaceModules", async () => {
+    // Data flow analysis commands
+    vscode.commands.registerCommand("visor.analyzeWorkspaceDataFlow", async () => {
       try {
-        await moduleAnalysisProvider.analyzeWorkspace();
-        vscode.window.showInformationMessage("Workspace module analysis completed!");
+        await dataFlowProvider.analyzeWorkspaceDataFlow();
+        vscode.window.showInformationMessage("Workspace data flow analysis completed!");
       } catch (error) {
-        vscode.window.showErrorMessage(`Module analysis failed: ${error}`);
+        vscode.window.showErrorMessage(`Data flow analysis failed: ${error}`);
       }
     }),
 
-    vscode.commands.registerCommand("visor.analyzeCurrentFileModules", async () => {
+    vscode.commands.registerCommand("visor.analyzeCurrentFunctionDataFlow", async () => {
       try {
-        await moduleAnalysisProvider.analyzeCurrentFileContext();
-        vscode.window.showInformationMessage("Current file module analysis completed!");
+        await dataFlowProvider.analyzeCurrentFunction();
+        vscode.window.showInformationMessage("Current function data flow analysis completed!");
       } catch (error) {
-        vscode.window.showErrorMessage(`Module analysis failed: ${error}`);
+        vscode.window.showErrorMessage(`Data flow analysis failed: ${error}`);
       }
     })
   );
