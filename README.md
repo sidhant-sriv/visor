@@ -4,9 +4,20 @@
 
 ## ✨ Features
 
-### 🏗️ **Module Analysis (NEW!)**
+### 🔄 **Data Flow Analysis (NEW!)**
 
-- **Workspace-wide Analysis**: Get a 30,000 ft view of your entire codebase structure
+- **Global State Tracking**: Understand how global variables and state flow through your functions
+- **Cross-Function Dependencies**: See which functions share data and how they interact
+- **Dual Visualization Modes**:
+  - **Data Flow Graph**: Shows global state usage and data relationships
+  - **Function Call Graph**: Traditional call graph with data flow annotations
+- **Smart Expansion**: Start from current function and automatically find related functions that share data
+- **Large Codebase Navigation**: Trace data dependencies without manual ctrl+clicking through code
+- **Multi-language Support**: Works with TypeScript, JavaScript, Python, Java, and more
+
+### 🏗️ **Module Analysis**
+
+- **Workspace-wide Analysis**: Get a 30,000 ft view of your entire codebase structure  
 - **Dependency Mapping**: Visualize how modules interact through imports, exports, and function calls
 - **Multi-language Support**: Works with Python, TypeScript/JavaScript, and Java projects
 - **Three Visualization Modes**:
