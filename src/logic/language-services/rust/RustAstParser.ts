@@ -651,6 +651,7 @@ protected processBlock(
       case "if_expression":
         return this.processIfExpression(statement, exitId, loopContext);
       case "match_expression":
+        // FIX 3: Ensure loopContext is passed through correctly.
         return this.processMatchExpression(statement, exitId, loopContext);
       case "while_expression":
         return this.processWhileExpression(statement, exitId, loopContext);
@@ -975,10 +976,6 @@ protected processBlock(
     return this.processStatement(statementOrBlock, exitId, loopContext);
   }
 
-  /**
-   * Correctly processes a match expression by modeling its sequential evaluation of arms.
-   * Handles guard clauses by creating fall-through logic.
-   */
   private processMatchExpression(
     node: Parser.SyntaxNode,
     exitId: string,
@@ -987,96 +984,119 @@ protected processBlock(
     const value = node.childForFieldName("value");
     const body = node.childForFieldName("body");
 
-    if (!value || !body) {
+    if (!value) {
       return this.createProcessResult();
     }
 
     const valueText = this.truncateText(value.text);
-    const matchStartId = this.generateNodeId("match_start");
-    const matchStartNode = this.createSemanticNode(
-        matchStartId,
-        `match ${valueText}`,
-        NodeType.PROCESS, // A setup step, not a decision itself
-        value
+    const matchId = this.generateNodeId("match");
+    const matchNode = this.createSemanticNode(
+      matchId,
+      `match ${valueText}`,
+      NodeType.DECISION,
+      value
     );
+
+    const nodes: FlowchartNode[] = [matchNode];
+    const edges: FlowchartEdge[] = [];
+    const exitPoints: { id: string; label?: string }[] = [];
+    const nodesConnectedToExit = new Set<string>();
 
     this.locationMap.push({
       start: value.startIndex,
       end: value.endIndex,
-      nodeId: matchStartId,
+      nodeId: matchId,
     });
 
-    const nodes: FlowchartNode[] = [matchStartNode];
-    const edges: FlowchartEdge[] = [];
-    const nodesConnectedToExit = new Set<string>();
-
-    const mergeId = this.generateNodeId("match_merge");
-    nodes.push(this.createSemanticNode(mergeId, "", NodeType.MERGE, node));
-
-    const arms = body.descendantsOfType("match_arm");
-    let fallthroughSourceId = matchStartId;
-
-    for (let i = 0; i < arms.length; i++) {
-        const arm = arms[i];
+    if (body) {
+      const arms = body.descendantsOfType("match_arm");
+      arms.forEach((arm, index) => {
         const pattern = arm.childForFieldName("pattern");
         const guard = arm.childForFieldName("guard");
         const armValue = arm.childForFieldName("value");
 
-        if (!armValue) continue; // Skip arms with no value/body
+        const patternText = pattern
+          ? this.truncateText(pattern.text)
+          : `arm_${index}`;
 
-        const patternText = pattern ? this.truncateText(pattern.text) : `arm_${i}`;
+        let currentNodeId = matchId;
+        let currentLabel = patternText;
 
-        // Process the arm's body subgraph first
-        const armResult = this.processStatementOrBlock(armValue, exitId, loopContext);
-        nodes.push(...armResult.nodes);
-        edges.push(...armResult.edges);
-        armResult.nodesConnectedToExit.forEach((id) => nodesConnectedToExit.add(id));
-        
-        // Connect all successful exits from the arm's body to the common merge point
-        armResult.exitPoints.forEach(ep => {
-            if (!armResult.nodesConnectedToExit.has(ep.id)) {
-                edges.push({ from: ep.id, to: mergeId, label: ep.label });
-            }
-        });
-
-        // Create the decision node for this arm
-        const armDecisionId = this.generateNodeId("match_arm_decision");
-        let decisionLabel: string;
         if (guard) {
-            const guardCondition = guard.childForFieldName("condition");
-            const guardText = guardCondition ? this.truncateText(guardCondition.text) : '...';
-            decisionLabel = `${patternText} if ${guardText}`;
-        } else {
-            decisionLabel = patternText;
-        }
-        const armDecisionNode = this.createSemanticNode(armDecisionId, decisionLabel, NodeType.DECISION, arm);
-        nodes.push(armDecisionNode);
+          const guardCondition = guard.namedChild(0);
+          if (guardCondition) {
+            const guardId = this.generateNodeId("guard");
+            const guardText = this.truncateText(guardCondition.text);
+            const guardNode = this.createSemanticNode(
+              guardId,
+              `${patternText} if ${guardText}`,
+              NodeType.DECISION,
+              guard
+            );
 
-        // Connect from the previous fallthrough point to this arm's decision
-        // The label is empty for the first arm, and "false" for subsequent fallthroughs.
-        edges.push({ from: fallthroughSourceId, to: armDecisionId, label: fallthroughSourceId === matchStartId ? undefined : "false" });
+            nodes.push(guardNode);
+            edges.push({
+              from: matchId,
+              to: guardId,
+              label: patternText,
+            });
 
-        // Connect the 'true' path of the decision to the arm's body
-        if (armResult.entryNodeId) {
-            edges.push({ from: armDecisionId, to: armResult.entryNodeId, label: "true" });
-        } else {
-            // If arm body is empty, its true path goes directly to the merge point
-            edges.push({ from: armDecisionId, to: mergeId, label: "true" });
+            this.locationMap.push({
+              start: guard.startIndex,
+              end: guard.endIndex,
+              nodeId: guardId,
+            });
+
+            currentNodeId = guardId;
+            currentLabel = "true";
+          }
         }
-        
-        // The new fallthrough point is the 'false' path of the current arm's decision
-        fallthroughSourceId = armDecisionId;
+
+        if (armValue) {
+          const armResult = this.processStatementOrBlock(
+            armValue,
+            exitId,
+            loopContext
+          );
+          nodes.push(...armResult.nodes);
+          edges.push(...armResult.edges);
+
+          if (armResult.entryNodeId) {
+            edges.push({
+              from: currentNodeId,
+              to: armResult.entryNodeId,
+              label: currentLabel,
+            });
+          }
+          exitPoints.push(...armResult.exitPoints);
+          armResult.nodesConnectedToExit.forEach((id) =>
+            nodesConnectedToExit.add(id)
+          );
+        } else {
+          const armId = this.generateNodeId("arm");
+          const armNode = this.createSemanticNode(
+            armId,
+            patternText,
+            NodeType.PROCESS,
+            arm
+          );
+          nodes.push(armNode);
+          edges.push({ from: currentNodeId, to: armId, label: currentLabel });
+          exitPoints.push({ id: armId });
+
+          this.locationMap.push({
+            start: arm.startIndex,
+            end: arm.endIndex,
+            nodeId: armId,
+          });
+        }
+      });
     }
-
-    // Connect the final fallthrough (if all arms fail) to the merge point
-    edges.push({ from: fallthroughSourceId, to: mergeId, label: "false" });
-    
-    const exitPoints: { id: string; label?: string }[] = [{ id: mergeId }];
 
     return this.createProcessResult(
       nodes,
       edges,
-      matchStartId,
+      matchId,
       exitPoints,
       nodesConnectedToExit
     );
