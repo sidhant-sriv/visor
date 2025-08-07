@@ -7,6 +7,7 @@ import {
   NodeType,
 } from "../../../ir/ir";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
+import { ensureParserInit } from "../common/ParserInit";
 
 export class CppAstParser extends AbstractParser {
   private currentFunctionIsLambda = false;
@@ -22,7 +23,7 @@ export class CppAstParser extends AbstractParser {
    * @returns A promise that resolves to a new CppAstParser instance.
    */
   public static async create(wasmPath: string): Promise<CppAstParser> {
-    await Parser.init();
+    await ensureParserInit();
     const language = await Parser.Language.load(wasmPath);
     const parser = new Parser();
     parser.setLanguage(language);

@@ -7,6 +7,7 @@ import {
   NodeType,
 } from "../../../ir/ir";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
+import { ensureParserInit } from "../common/ParserInit";
 
 export class TsAstParser extends AbstractParser {
   private currentFunctionIsArrow = false;
@@ -22,7 +23,7 @@ export class TsAstParser extends AbstractParser {
    * @returns A promise that resolves to a new TsAstParser instance.
    */
   public static async create(wasmPath: string): Promise<TsAstParser> {
-    await Parser.init();
+    await ensureParserInit();
     const language = await Parser.Language.load(wasmPath);
     const parser = new Parser();
     parser.setLanguage(language);
@@ -385,20 +386,22 @@ export class TsAstParser extends AbstractParser {
               finallyContext
             );
           }
-           if (child?.type === "call_expression") {
+          if (child?.type === "call_expression") {
             const nodeId = this.generateNodeId("call");
             const node: FlowchartNode = {
-                id: nodeId,
-                label: this.escapeString(child.text),
-                shape: "rect",
-                nodeType: NodeType.FUNCTION_CALL,
+              id: nodeId,
+              label: this.escapeString(child.text),
+              shape: "rect",
+              nodeType: NodeType.FUNCTION_CALL,
             };
             this.locationMap.push({
-                start: child.startIndex,
-                end: child.endIndex,
-                nodeId,
+              start: child.startIndex,
+              end: child.endIndex,
+              nodeId,
             });
-            return this.createProcessResult([node], [], nodeId, [{ id: nodeId }]);
+            return this.createProcessResult([node], [], nodeId, [
+              { id: nodeId },
+            ]);
           }
           expressionNode = child ?? undefined;
         }
@@ -674,7 +677,11 @@ export class TsAstParser extends AbstractParser {
         shape: "rect",
         nodeType: NodeType.PROCESS,
       });
-      this.locationMap.push({ start: initNode.startIndex, end: initNode.endIndex, nodeId: initId });
+      this.locationMap.push({
+        start: initNode.startIndex,
+        end: initNode.endIndex,
+        nodeId: initId,
+      });
       entryPointId = initId;
       lastProcessedId = initId;
     }
@@ -688,7 +695,11 @@ export class TsAstParser extends AbstractParser {
       nodeType: NodeType.DECISION,
     });
     if (conditionNode) {
-        this.locationMap.push({ start: conditionNode.startIndex, end: conditionNode.endIndex, nodeId: conditionId });
+      this.locationMap.push({
+        start: conditionNode.startIndex,
+        end: conditionNode.endIndex,
+        nodeId: conditionId,
+      });
     }
 
     if (lastProcessedId) {
@@ -696,26 +707,34 @@ export class TsAstParser extends AbstractParser {
     } else {
       entryPointId = conditionId;
     }
-    
+
     // 3. Update Node
     let updateId: string | undefined;
     if (updateNode) {
-        updateId = this.generateNodeId("for_update");
-        nodes.push({
-            id: updateId,
-            label: this.escapeString(updateNode.text),
-            shape: "rect",
-            nodeType: NodeType.PROCESS,
-        });
-        this.locationMap.push({ start: updateNode.startIndex, end: updateNode.endIndex, nodeId: updateId });
-        // Connect update back to condition
-        edges.push({ from: updateId, to: conditionId });
+      updateId = this.generateNodeId("for_update");
+      nodes.push({
+        id: updateId,
+        label: this.escapeString(updateNode.text),
+        shape: "rect",
+        nodeType: NodeType.PROCESS,
+      });
+      this.locationMap.push({
+        start: updateNode.startIndex,
+        end: updateNode.endIndex,
+        nodeId: updateId,
+      });
+      // Connect update back to condition
+      edges.push({ from: updateId, to: conditionId });
     }
-    
+
     // Add the loop exit node
     const loopExitId = this.generateNodeId("for_exit");
-    nodes.push({ id: loopExitId, label: "end for", shape: "stadium", nodeType: NodeType.LOOP_END });
-
+    nodes.push({
+      id: loopExitId,
+      label: "end for",
+      shape: "stadium",
+      nodeType: NodeType.LOOP_END,
+    });
 
     // Loop Context for break/continue
     const continueTargetId = updateId || conditionId;
@@ -733,23 +752,26 @@ export class TsAstParser extends AbstractParser {
     );
     nodes.push(...bodyResult.nodes);
     edges.push(...bodyResult.edges);
-    bodyResult.nodesConnectedToExit.forEach(n => nodesConnectedToExit.add(n));
+    bodyResult.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
 
     // 5. Connect the parts
     if (bodyResult.entryNodeId) {
       // Condition (true) -> Body
-      edges.push({ from: conditionId, to: bodyResult.entryNodeId, label: "true" });
-      
+      edges.push({
+        from: conditionId,
+        to: bodyResult.entryNodeId,
+        label: "true",
+      });
+
       // Body -> Update (or Condition)
       bodyResult.exitPoints.forEach((ep) => {
         edges.push({ from: ep.id, to: continueTargetId });
       });
-
     } else {
-        // Empty loop body, loop goes from condition straight to update
-        edges.push({ from: conditionId, to: continueTargetId, label: "true" });
+      // Empty loop body, loop goes from condition straight to update
+      edges.push({ from: conditionId, to: continueTargetId, label: "true" });
     }
-    
+
     // Condition (false) -> Exit
     edges.push({ from: conditionId, to: loopExitId, label: "false" });
 
@@ -781,7 +803,12 @@ export class TsAstParser extends AbstractParser {
         shape: "diamond",
         nodeType: NodeType.DECISION,
       },
-      { id: loopExitId, label: "end loop", shape: "stadium", nodeType: NodeType.LOOP_END },
+      {
+        id: loopExitId,
+        label: "end loop",
+        shape: "stadium",
+        nodeType: NodeType.LOOP_END,
+      },
     ];
     this.locationMap.push({
       start: forInNode.startIndex,
@@ -844,7 +871,12 @@ export class TsAstParser extends AbstractParser {
         shape: "diamond",
         nodeType: NodeType.DECISION,
       },
-      { id: loopExitId, label: "end loop", shape: "stadium", nodeType: NodeType.LOOP_END },
+      {
+        id: loopExitId,
+        label: "end loop",
+        shape: "stadium",
+        nodeType: NodeType.LOOP_END,
+      },
     ];
     this.locationMap.push({
       start: whileNode.startIndex,
@@ -906,7 +938,12 @@ export class TsAstParser extends AbstractParser {
         shape: "diamond",
         nodeType: NodeType.DECISION,
       },
-      { id: loopExitId, label: "end loop", shape: "stadium", nodeType: NodeType.LOOP_END },
+      {
+        id: loopExitId,
+        label: "end loop",
+        shape: "stadium",
+        nodeType: NodeType.LOOP_END,
+      },
     ];
     this.locationMap.push({
       start: doWhileNode.startIndex,
@@ -1075,7 +1112,12 @@ export class TsAstParser extends AbstractParser {
   ): ProcessResult {
     const entryId = this.generateNodeId("try_entry");
     const nodes: FlowchartNode[] = [
-      { id: entryId, label: "try", shape: "stadium", nodeType: NodeType.PROCESS },
+      {
+        id: entryId,
+        label: "try",
+        shape: "stadium",
+        nodeType: NodeType.PROCESS,
+      },
     ];
     this.locationMap.push({
       start: tryNode.startIndex,

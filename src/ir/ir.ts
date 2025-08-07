@@ -8,6 +8,7 @@ export enum NodeType {
   EXIT = "exit",
   PROCESS = "process",
   DECISION = "decision",
+  MERGE = "merge", // Added to represent a merge point in control flow
   LOOP_START = "loop_start",
   LOOP_END = "loop_end",
   EXCEPTION = "exception",
@@ -16,6 +17,13 @@ export enum NodeType {
   ASSIGNMENT = "assignment",
   RETURN = "return",
   ASYNC_OPERATION = "async_operation",
+  // New Rust-specific node types
+  AWAIT = "await",
+  PANIC = "panic",
+  EARLY_RETURN_ERROR = "early_return_error",
+  METHOD_CALL = "method_call",
+  MACRO_CALL = "macro_call",
+  SUBROUTINE = "subroutine", // Added for impl method headers
 }
 
 export enum NodeCategory {

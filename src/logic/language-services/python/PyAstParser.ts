@@ -7,6 +7,7 @@ import {
   NodeType,
 } from "../../../ir/ir";
 import { ProcessResult, LoopContext } from "../../common/AstParserTypes";
+import { ensureParserInit } from "../common/ParserInit";
 
 export class PyAstParser extends AbstractParser {
   private currentFunctionIsLambda = false;
@@ -22,7 +23,7 @@ export class PyAstParser extends AbstractParser {
    * @returns A promise that resolves to a new PyAstParser instance.
    */
   public static async create(wasmPath: string): Promise<PyAstParser> {
-    await Parser.init();
+    await ensureParserInit();
     const language = await Parser.Language.load(wasmPath);
     const parser = new Parser();
     parser.setLanguage(language);
@@ -919,18 +920,18 @@ export class PyAstParser extends AbstractParser {
     const loopExitId = this.generateNodeId("while_exit");
 
     const nodes: FlowchartNode[] = [
-        this.createSemanticNode(
-            conditionId,
-            conditionText,
-            NodeType.DECISION,
-            conditionNode
-        ),
-        this.createSemanticNode(
-            loopExitId,
-            "end loop",
-            NodeType.LOOP_END,
-            whileNode
-        ),
+      this.createSemanticNode(
+        conditionId,
+        conditionText,
+        NodeType.DECISION,
+        conditionNode
+      ),
+      this.createSemanticNode(
+        loopExitId,
+        "end loop",
+        NodeType.LOOP_END,
+        whileNode
+      ),
     ];
     this.locationMap.push({
       start: conditionNode.startIndex,

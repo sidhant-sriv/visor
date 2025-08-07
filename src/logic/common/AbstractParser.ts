@@ -19,7 +19,7 @@ export abstract class AbstractParser {
   protected nodeIdCounter = 0;
   protected locationMap: LocationMapEntry[] = [];
   protected debug = false;
-  protected language: "python" | "typescript" | "java" | "cpp" | "c";
+  protected language: "python" | "typescript" | "java" | "cpp" | "c" | "rust";
 
   // The parser instance is now required by the constructor
   protected parser: Parser;
@@ -30,7 +30,7 @@ export abstract class AbstractParser {
 
   protected constructor(
     parser: Parser,
-    language: "python" | "typescript" | "java" | "cpp" | "c"
+    language: "python" | "typescript" | "java" | "cpp" | "c" | "rust"
   ) {
     this.parser = parser;
     this.language = language;
@@ -173,12 +173,22 @@ export abstract class AbstractParser {
         return this.nodeStyles.assignment;
       case NodeType.FUNCTION_CALL:
         return this.nodeStyles.function_call;
+      case NodeType.METHOD_CALL:
+        return this.nodeStyles.method_call;
+      case NodeType.MACRO_CALL:
+        return this.nodeStyles.function_call; // Same style as function calls
       case NodeType.EXCEPTION:
         return this.nodeStyles.exception;
       case NodeType.BREAK_CONTINUE:
         return this.nodeStyles.break_continue;
       case NodeType.ASYNC_OPERATION:
         return this.nodeStyles.async_operation;
+      case NodeType.AWAIT:
+        return this.nodeStyles.await;
+      case NodeType.PANIC:
+        return this.nodeStyles.throw; // Red/error style
+      case NodeType.EARLY_RETURN_ERROR:
+        return this.nodeStyles.return;
       case NodeType.PROCESS:
         return this.nodeStyles.process;
       default:

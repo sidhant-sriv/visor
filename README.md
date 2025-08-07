@@ -17,6 +17,7 @@
 - **Java**: Methods, classes, constructors
 - **C++**: Functions and methods
 - **C**: Functions with comprehensive control flow support (if/else, loops, switch, goto)
+- **Rust**: Functions, closures, match expressions, if/else, loops (for, while, loop), break/continue
 
 ### 🎯 **Interactive Visualization**
 
@@ -59,7 +60,7 @@
 - **Configurable Thresholds**: Customizable complexity ratings (Low/Medium/High/Very High)
 - **Toggle Display**: 📊 button to show/hide complexity information
 - **Smart Analysis**: Follows McCabe's cyclomatic complexity calculation
-- **Multi-Language Support**: Works across Python, TypeScript, Java, and C++
+- **Multi-Language Support**: Works across Python, TypeScript, Java, C++, C, and Rust
 
 ## 🚀 Quick Start
 

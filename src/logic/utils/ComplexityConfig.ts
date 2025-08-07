@@ -178,6 +178,22 @@ export const COMPLEXITY_NODE_TYPES = {
     "goto_statement",
     "labeled_statement",
   ]),
+
+  rust: new Set([
+    "if_expression",
+    "else_clause",
+    "for_expression",
+    "while_expression",
+    "loop_expression",
+    "match_expression",
+    "match_arm",
+    "binary_expression",
+    "logical_expression",
+    "try_expression",
+    "let_condition",
+    "_let_chain",
+    "closure_expression",
+  ]),
 } as const;
 
 /**
