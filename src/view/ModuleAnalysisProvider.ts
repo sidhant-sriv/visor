@@ -69,6 +69,9 @@ export class DataFlowProvider implements vscode.WebviewViewProvider {
         case "refresh":
           this._refreshAnalysis();
           break;
+        case "reset":
+          this._resetView();
+          break;
         case "analyzeCurrentFunction":
           this.analyzeCurrentFunction();
           break;
@@ -103,6 +106,16 @@ export class DataFlowProvider implements vscode.WebviewViewProvider {
       this._showLoading("Analyzing current function data flow...");
       console.log("DataFlowProvider: Starting current function analysis...");
 
+      // Add detailed logging to understand failures
+      const activeEditor = vscode.window.activeTextEditor;
+      console.log("DataFlowProvider: Active editor:", {
+        hasEditor: !!activeEditor,
+        languageId: activeEditor?.document.languageId,
+        fileName: activeEditor?.document.fileName,
+        cursorLine: activeEditor?.selection.active.line,
+        documentLength: activeEditor?.document.getText().length
+      });
+
       this._currentAnalysis = await this._analyzer.analyzeCurrentFunctionContext();
 
       console.log("DataFlowProvider: Analysis complete:", {
@@ -110,11 +123,30 @@ export class DataFlowProvider implements vscode.WebviewViewProvider {
         globalVariableCount: this._currentAnalysis.globalStateVariables.length,
         dataFlowEdges: this._currentAnalysis.dataFlowEdges.length,
         rootFunction: this._currentAnalysis.rootFunction,
+        scope: this._currentAnalysis.scope,
+        title: this._currentAnalysis.title
       });
+
+      // Log analysis details for debugging
+      if (this._currentAnalysis.functions.length > 0) {
+        console.log("DataFlowProvider: Functions found:", 
+          this._currentAnalysis.functions.map(f => ({ name: f.name, globalAccesses: f.globalStateAccesses.length }))
+        );
+      }
+      if (this._currentAnalysis.globalStateVariables.length > 0) {
+        console.log("DataFlowProvider: Global variables found:", 
+          this._currentAnalysis.globalStateVariables.map(g => ({ name: g.name, type: g.type, accessedBy: g.accessedBy }))
+        );
+      }
 
       this._updateWebview();
     } catch (error) {
       console.error("DataFlowProvider: Current function analysis failed:", error);
+      console.error("DataFlowProvider: Error details:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        errorType: error?.constructor?.name || 'Unknown'
+      });
       this._showError(
         `Failed to analyze current function: ${
           error instanceof Error ? error.message : String(error)
@@ -130,17 +162,44 @@ export class DataFlowProvider implements vscode.WebviewViewProvider {
       this._showLoading("Analyzing workspace data flow...");
       console.log("DataFlowProvider: Starting workspace data flow analysis...");
 
+      // Add workspace validation logging
+      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+      console.log("DataFlowProvider: Workspace info:", {
+        hasWorkspace: !!workspaceFolder,
+        workspacePath: workspaceFolder?.uri.fsPath,
+        name: workspaceFolder?.name
+      });
+
       this._currentAnalysis = await this._analyzer.analyzeWorkspaceDataFlow();
 
       console.log("DataFlowProvider: Workspace analysis complete:", {
         functionCount: this._currentAnalysis.functions.length,
         globalVariableCount: this._currentAnalysis.globalStateVariables.length,
         dataFlowEdges: this._currentAnalysis.dataFlowEdges.length,
+        scope: this._currentAnalysis.scope,
+        title: this._currentAnalysis.title
       });
+
+      // Log analysis details for debugging
+      if (this._currentAnalysis.functions.length > 0) {
+        console.log("DataFlowProvider: Functions found:", 
+          this._currentAnalysis.functions.map(f => ({ name: f.name, file: f.filePath.split('/').pop(), globalAccesses: f.globalStateAccesses.length }))
+        );
+      }
+      if (this._currentAnalysis.globalStateVariables.length > 0) {
+        console.log("DataFlowProvider: Global variables found:", 
+          this._currentAnalysis.globalStateVariables.map(g => ({ name: g.name, type: g.type, accessedBy: g.accessedBy }))
+        );
+      }
 
       this._updateWebview();
     } catch (error) {
       console.error("DataFlowProvider: Workspace analysis failed:", error);
+      console.error("DataFlowProvider: Error details:", {
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : 'No stack trace',
+        errorType: error?.constructor?.name || 'Unknown'
+      });
       this._showError(
         `Failed to analyze workspace data flow: ${
           error instanceof Error ? error.message : String(error)
@@ -152,6 +211,16 @@ export class DataFlowProvider implements vscode.WebviewViewProvider {
   public switchView(viewType: 'dataflow' | 'callgraph'): void {
     this._currentView = viewType;
     this._updateWebview();
+  }
+
+  private _resetView(): void {
+    console.log("DataFlowProvider: Resetting view");
+    this._currentAnalysis = undefined;
+    this._currentView = 'dataflow';
+    
+    if (this._view) {
+      this._view.webview.html = this._getInitialHtml();
+    }
   }
 
   private async _refreshAnalysis(): Promise<void> {
@@ -413,6 +482,8 @@ export class DataFlowProvider implements vscode.WebviewViewProvider {
           </p>
           <button id="btn-analyze-current">🎯 Analyze Current Function</button>
           <button id="btn-analyze-workspace">🌐 Analyze Workspace</button>
+          <br/>
+          <button id="btn-reset" style="margin-top: 10px; background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);">🔄 Reset View</button>
         </div>
         <script>
           const vscode = acquireVsCodeApi();
@@ -420,6 +491,7 @@ export class DataFlowProvider implements vscode.WebviewViewProvider {
           document.addEventListener('DOMContentLoaded', () => {
             const analyzeWorkspaceBtn = document.getElementById('btn-analyze-workspace');
             const analyzeCurrentBtn = document.getElementById('btn-analyze-current');
+            const resetBtn = document.getElementById('btn-reset');
             
             if (analyzeWorkspaceBtn) {
               analyzeWorkspaceBtn.addEventListener('click', () => {
@@ -430,6 +502,12 @@ export class DataFlowProvider implements vscode.WebviewViewProvider {
             if (analyzeCurrentBtn) {
               analyzeCurrentBtn.addEventListener('click', () => {
                 vscode.postMessage({ command: 'analyzeCurrentFunction' });
+              });
+            }
+            
+            if (resetBtn) {
+              resetBtn.addEventListener('click', () => {
+                vscode.postMessage({ command: 'reset' });
               });
             }
           });
@@ -692,6 +770,7 @@ export class DataFlowProvider implements vscode.WebviewViewProvider {
               
               <div class="export-controls">
                 <button id="btn-refresh" class="icon-only" title="Refresh analysis">🔄</button>
+                <button id="btn-reset" title="Reset to start">🏠 Reset</button>
                 <button id="copy-mermaid" title="Copy Mermaid code to clipboard">📋 Copy Code</button>
                 <button id="export-svg" title="Export as SVG">💾 SVG</button>
                 <button id="export-png" title="Export as PNG">🖼️ PNG</button>
@@ -772,6 +851,14 @@ ${mermaidGraph}
             const btnRefresh = document.getElementById('btn-refresh');
             if (btnRefresh) {
               btnRefresh.addEventListener('click', () => refresh());
+            }
+
+            // Reset button
+            const btnReset = document.getElementById('btn-reset');
+            if (btnReset) {
+              btnReset.addEventListener('click', () => {
+                vscode.postMessage({ command: 'reset' });
+              });
             }
 
             // Export functionality

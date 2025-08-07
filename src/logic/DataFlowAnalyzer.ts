@@ -14,70 +14,210 @@ export class DataFlowAnalyzer {
    * Analyze data flow starting from the current function context
    */
   public async analyzeCurrentFunctionContext(): Promise<DataFlowAnalysisIR> {
+    console.log("DataFlowAnalyzer: Starting current function context analysis");
+    
     const activeEditor = vscode.window.activeTextEditor;
     if (!activeEditor) {
+      console.error("DataFlowAnalyzer: No active editor found");
       throw new Error("No active editor found");
     }
+
+    console.log("DataFlowAnalyzer: Active editor found:", {
+      languageId: activeEditor.document.languageId,
+      fileName: activeEditor.document.fileName,
+      lineCount: activeEditor.document.lineCount,
+      cursorLine: activeEditor.selection.active.line,
+      cursorCharacter: activeEditor.selection.active.character
+    });
 
     const document = activeEditor.document;
     const position = activeEditor.selection.active;
     const sourceCode = document.getText();
     const currentOffset = document.offsetAt(position);
 
-    // Start with current function and expand outward
-    const currentFunction = await this.extractCurrentFunction(sourceCode, document.languageId, currentOffset);
-    if (!currentFunction) {
-      throw new Error("No function found at current position");
+    console.log("DataFlowAnalyzer: Document info:", {
+      sourceCodeLength: sourceCode.length,
+      currentOffset,
+      positionLine: position.line,
+      positionCharacter: position.character,
+      firstChars: sourceCode.substring(0, 100).replace(/\n/g, '\\n')
+    });
+
+    try {
+      // Start with current function and expand outward
+      const currentFunction = await this.extractCurrentFunction(sourceCode, document.languageId, currentOffset);
+      if (!currentFunction) {
+        console.warn("DataFlowAnalyzer: No function found at current position");
+        // Instead of throwing error, create a minimal analysis
+        const analysis: DataFlowAnalysisIR = {
+          functions: [],
+          globalStateVariables: [],
+          dataFlowEdges: [],
+          title: `No function found at cursor`,
+          scope: 'function',
+          analysisTimestamp: Date.now()
+        };
+
+        // Try to find all functions in the file
+        console.log("DataFlowAnalyzer: Attempting to find all functions in file");
+        const allFunctions = this.findAllFunctions(sourceCode, document.languageId);
+        console.log("DataFlowAnalyzer: Found functions:", allFunctions.map(f => f.name));
+        
+        if (allFunctions.length > 0) {
+          analysis.functions = allFunctions;
+          analysis.title = `Functions in ${document.fileName.split('/').pop() || 'file'}`;
+        }
+
+        return analysis;
+      }
+
+      console.log("DataFlowAnalyzer: Found current function:", {
+        name: currentFunction.name,
+        parameters: currentFunction.parameters,
+        isAsync: currentFunction.isAsync,
+        locationLine: currentFunction.location.line
+      });
+
+      const analysis: DataFlowAnalysisIR = {
+        functions: [currentFunction],
+        globalStateVariables: [],
+        dataFlowEdges: [],
+        title: `Data Flow: ${currentFunction.name}`,
+        rootFunction: currentFunction.name,
+        scope: 'function',
+        analysisTimestamp: Date.now()
+      };
+
+      // Extract global state accesses from the current function
+      console.log("DataFlowAnalyzer: Analyzing global state usage");
+      await this.analyzeGlobalStateUsage(analysis, [document.uri.fsPath]);
+
+      console.log("DataFlowAnalyzer: Global state analysis complete:", {
+        globalVarsFound: analysis.globalStateVariables.length,
+        globalVarNames: analysis.globalStateVariables.map(g => g.name)
+      });
+
+      // Expand to find functions that share data with the current function
+      console.log("DataFlowAnalyzer: Expanding data flow analysis");
+      await this.expandDataFlowAnalysis(analysis, currentFunction);
+
+      console.log("DataFlowAnalyzer: Analysis complete:", {
+        totalFunctions: analysis.functions.length,
+        totalGlobalVars: analysis.globalStateVariables.length,
+        totalDataFlowEdges: analysis.dataFlowEdges.length
+      });
+
+      return analysis;
+    } catch (error) {
+      console.error("DataFlowAnalyzer: Error in analysis:", error);
+      throw error;
     }
-
-    const analysis: DataFlowAnalysisIR = {
-      functions: [currentFunction],
-      globalStateVariables: [],
-      dataFlowEdges: [],
-      title: `Data Flow: ${currentFunction.name}`,
-      rootFunction: currentFunction.name,
-      scope: 'function',
-      analysisTimestamp: Date.now()
-    };
-
-    // Extract global state accesses from the current function
-    await this.analyzeGlobalStateUsage(analysis, [document.uri.fsPath]);
-
-    // Expand to find functions that share data with the current function
-    await this.expandDataFlowAnalysis(analysis, currentFunction);
-
-    return analysis;
   }
 
   /**
    * Analyze data flow for the entire workspace
    */
   public async analyzeWorkspaceDataFlow(): Promise<DataFlowAnalysisIR> {
+    console.log("DataFlowAnalyzer: Starting workspace data flow analysis");
+    
     if (!this.workspaceRoot) {
+      console.error("DataFlowAnalyzer: No workspace found");
       throw new Error("No workspace found");
     }
 
-    // Find all source files in the workspace
-    const sourceFiles = await this.findSourceFiles(this.workspaceRoot);
-    
-    const analysis: DataFlowAnalysisIR = {
-      functions: [],
-      globalStateVariables: [],
-      dataFlowEdges: [],
-      title: "Workspace Data Flow",
-      scope: 'workspace',
-      analysisTimestamp: Date.now()
-    };
+    console.log("DataFlowAnalyzer: Workspace root:", this.workspaceRoot);
 
-    // Analyze each file for functions and global state
-    for (const filePath of sourceFiles) {
-      await this.analyzeFileForDataFlow(analysis, filePath);
+    try {
+      // Find all source files in the workspace
+      console.log("DataFlowAnalyzer: Finding source files in workspace");
+      const sourceFiles = await this.findSourceFiles(this.workspaceRoot);
+      console.log("DataFlowAnalyzer: Found source files:", {
+        count: sourceFiles.length,
+        files: sourceFiles.slice(0, 10).map(f => f.split('/').pop()) // Show first 10 filenames
+      });
+      
+      const analysis: DataFlowAnalysisIR = {
+        functions: [],
+        globalStateVariables: [],
+        dataFlowEdges: [],
+        title: "Workspace Data Flow",
+        scope: 'workspace',
+        analysisTimestamp: Date.now()
+      };
+
+      // Analyze each file for functions and global state
+      let filesAnalyzed = 0;
+      for (const filePath of sourceFiles.slice(0, 20)) { // Limit to first 20 files for performance
+        try {
+          console.log(`DataFlowAnalyzer: Analyzing file ${filesAnalyzed + 1}/${Math.min(sourceFiles.length, 20)}: ${filePath.split('/').pop()}`);
+          await this.analyzeFileForDataFlow(analysis, filePath);
+          filesAnalyzed++;
+        } catch (error) {
+          console.warn(`DataFlowAnalyzer: Failed to analyze file ${filePath}:`, error);
+        }
+      }
+
+      console.log("DataFlowAnalyzer: File analysis complete:", {
+        filesAnalyzed,
+        functionsFound: analysis.functions.length,
+        globalVarsFound: analysis.globalStateVariables.length
+      });
+
+      // Build data flow edges between functions
+      console.log("DataFlowAnalyzer: Building data flow connections");
+      await this.buildDataFlowConnections(analysis);
+
+      console.log("DataFlowAnalyzer: Workspace analysis complete:", {
+        totalFunctions: analysis.functions.length,
+        totalGlobalVars: analysis.globalStateVariables.length,
+        totalDataFlowEdges: analysis.dataFlowEdges.length
+      });
+
+      return analysis;
+    } catch (error) {
+      console.error("DataFlowAnalyzer: Error in workspace analysis:", error);
+      throw error;
     }
+  }
 
-    // Build data flow edges between functions
-    await this.buildDataFlowConnections(analysis);
-
-    return analysis;
+  /**
+   * Find all functions in the source code (fallback when cursor detection fails)
+   */
+  private findAllFunctions(sourceCode: string, languageId: string): FunctionInfo[] {
+    console.log("DataFlowAnalyzer: Finding all functions in file");
+    const lines = sourceCode.split('\n');
+    const functions: FunctionInfo[] = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const functionMatch = this.matchFunctionDefinition(line, languageId);
+      if (functionMatch) {
+        console.log(`DataFlowAnalyzer: Found function '${functionMatch.name}' at line ${i + 1}`);
+        
+        const functionStart = lines.slice(0, i).join('\n').length + (i > 0 ? 1 : 0);
+        const functionEnd = this.findFunctionEnd(lines, i, languageId);
+        
+        const functionInfo: FunctionInfo = {
+          name: functionMatch.name,
+          filePath: vscode.window.activeTextEditor?.document.uri.fsPath || '',
+          location: {
+            start: functionStart,
+            end: functionEnd,
+            line: i + 1,
+            column: functionMatch.column
+          },
+          globalStateAccesses: [],
+          parameters: functionMatch.parameters,
+          calls: [],
+          isAsync: functionMatch.isAsync,
+        };
+        
+        functions.push(functionInfo);
+      }
+    }
+    
+    console.log(`DataFlowAnalyzer: Found ${functions.length} functions total`);
+    return functions;
   }
 
   /**
