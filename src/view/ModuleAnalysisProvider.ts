@@ -38,6 +38,14 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
   constructor(private readonly _extensionUri: vscode.Uri) {
     this._analyzer = new ModuleAnalyzer();
     this._generator = new ModuleMermaidGenerator();
+
+    // Listen for configuration changes to update themes (matching BaseFlowchartProvider)
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("visor.nodeReadability.theme")) {
+        // Refresh the current view when theme changes
+        this._updateWebview();
+      }
+    });
   }
 
   public resolveWebviewView(
@@ -140,6 +148,22 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
       this._view.webview.html = this._getInitialHtml();
       return;
     }
+
+    // Use the same theme configuration logic as BaseFlowchartProvider
+    const vsCodeTheme =
+      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+        ? "dark"
+        : "light";
+
+    // Read the selected theme from user configuration (same as BaseFlowchartProvider)
+    const config = vscode.workspace.getConfiguration("visor");
+    const selectedTheme = config.get<string>(
+      "nodeReadability.theme",
+      "monokai"
+    );
+
+    // Pass theme configuration to the generator
+    this._generator.setTheme(selectedTheme, vsCodeTheme);
 
     let mermaidGraph: string;
     let viewTitle: string;
@@ -334,7 +358,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
     const moduleCount = analysis.modules.length;
     const dependencyCount = analysis.dependencies.length;
 
-    // Dynamic theme selection based on VS Code theme
+    // Use the same theme logic as BaseFlowchartProvider for consistency
     const theme =
       vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
         ? "dark"
@@ -575,9 +599,9 @@ ${mermaidGraph}
 
         <script nonce="${nonce}">
           const vscode = acquireVsCodeApi();
-          let panZoom;
 
-          mermaid.initialize({ 
+          // Use the same initialization pattern as BaseFlowchartProvider
+          mermaid.initialize({
             startOnLoad: true,
             theme: '${theme}',
             securityLevel: 'loose',
@@ -588,35 +612,20 @@ ${mermaidGraph}
             }
           });
 
-          // Initialize mermaid and setup pan/zoom
+          // Initialize pan/zoom after mermaid loads (matching BaseFlowchartProvider pattern)
           window.addEventListener('load', () => {
-            mermaid.init(undefined, ".mermaid").then(() => {
-              // Add enhanced pan and zoom after mermaid renders
-              setTimeout(() => {
-                const svgElement = document.querySelector('#mermaid-container svg');
-                if (svgElement && !panZoom) {
-                  panZoom = svgPanZoom(svgElement, {
-                    zoomEnabled: true,
-                    controlIconsEnabled: true,
-                    fit: true,
-                    center: true,
-                    minZoom: 0.1,
-                    maxZoom: 10,
-                    zoomScaleSensitivity: 0.2,
-                    mouseWheelZoomEnabled: true,
-                    preventMouseEventsDefault: true,
-                    dblClickZoomEnabled: true,
-                    onZoom: function(newScale) {
-                      // Optional: Add zoom level indicator
-                    }
-                  });
-                }
-              }, 100);
-            }).catch(error => {
-              console.error('Mermaid initialization failed:', error);
-              document.querySelector('#mermaid-container').innerHTML = 
-                '<div class="message-container"><p>⚠️ Failed to render diagram: ' + error.message + '</p></div>';
-            });
+            const svgElement = document.querySelector('#mermaid-container svg');
+            if (svgElement) {
+              const panZoomInstance = svgPanZoom(svgElement, {
+                zoomEnabled: true,
+                controlIconsEnabled: true,
+                fit: true,
+                center: true,
+                minZoom: 0.1,
+                maxZoom: 10,
+                zoomScaleSensitivity: 0.2
+              });
+            }
           });
 
           // Enhanced export functionality matching function-level analysis
@@ -727,7 +736,7 @@ ${mermaidGraph}
               });
           }
 
-          // Event handlers
+          // Global functions for HTML onclick handlers
           function refresh() {
             vscode.postMessage({ command: 'refresh' });
           }
@@ -735,6 +744,14 @@ ${mermaidGraph}
           function changeView(viewType) {
             vscode.postMessage({ command: 'changeView', viewType });
           }
+
+          // Make functions globally accessible
+          window.refresh = refresh;
+          window.changeView = changeView;
+
+          // Event handlers - attach directly like BaseFlowchartProvider
+          document.getElementById('export-svg').addEventListener('click', () => exportFlowchart('svg'));
+          document.getElementById('export-png').addEventListener('click', () => exportFlowchart('png'));
 
           // Copy functionality
           const copyBtn = document.getElementById('copy-mermaid');
@@ -750,11 +767,11 @@ ${mermaidGraph}
                 });
 
                 // Visual feedback
-                const originalText = copyBtn.innerHTML;
-                copyBtn.innerHTML = '✅ Copied!';
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = '✅ Copied!';
                 copyBtn.disabled = true;
                 setTimeout(() => {
-                  copyBtn.innerHTML = originalText;
+                  copyBtn.textContent = originalText;
                   copyBtn.disabled = false;
                 }, 2000);
               } else {
@@ -765,19 +782,6 @@ ${mermaidGraph}
               }
             });
           }
-
-          // Export button handlers
-          document.getElementById('export-svg').addEventListener('click', () => exportFlowchart('svg'));
-          document.getElementById('export-png').addEventListener('click', () => exportFlowchart('png'));
-
-          // Handle window resize
-          window.addEventListener('resize', () => {
-            if (panZoom) {
-              panZoom.resize();
-              panZoom.fit();
-              panZoom.center();
-            }
-          });
         </script>
       </body>
       </html>

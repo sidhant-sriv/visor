@@ -1,7 +1,23 @@
 import { ModuleAnalysisIR, ModuleInfo, ModuleDependency, ExportInfo, ImportInfo } from "../ir/moduleIr";
+import { SubtleThemeManager, ThemeStyles } from "./utils/ThemeManager";
 import * as path from "path";
 
 export class ModuleMermaidGenerator {
+  private themeStyles: ThemeStyles;
+  private vsCodeTheme: "light" | "dark" = "dark";
+  
+  constructor() {
+    // Initialize with default theme
+    this.themeStyles = SubtleThemeManager.getThemeStyles("monokai", "dark");
+  }
+
+  /**
+   * Set theme configuration (matching BaseFlowchartProvider pattern)
+   */
+  public setTheme(themeKey: string, vsCodeTheme: "light" | "dark"): void {
+    this.themeStyles = SubtleThemeManager.getThemeStyles(themeKey, vsCodeTheme);
+    this.vsCodeTheme = vsCodeTheme;
+  }
   /**
    * Generates a Mermaid graph showing module dependencies and interactions
    */
