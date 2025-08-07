@@ -3,6 +3,30 @@ import { ModuleAnalyzer } from "../logic/ModuleAnalyzer";
 import { ModuleMermaidGenerator } from "../logic/ModuleMermaidGenerator";
 import { ModuleAnalysisIR } from "../ir/moduleIr";
 
+const MERMAID_VERSION = "11.8.0";
+const SVG_PAN_ZOOM_VERSION = "3.6.1";
+
+// Define message types for consistency with function-level analysis
+export type ExportMessage = {
+  command: "export";
+  payload: { fileType: "svg" | "png"; data: string };
+};
+
+export type ExportErrorMessage = {
+  command: "exportError";
+  payload: { error: string };
+};
+
+export type CopyMermaidMessage = {
+  command: "copyMermaid";
+  payload: { code: string };
+};
+
+export type ModuleWebviewMessage =
+  | ExportMessage
+  | ExportErrorMessage
+  | CopyMermaidMessage;
+
 export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "visor.moduleAnalysisView";
   
@@ -31,7 +55,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
     this._updateWebview();
 
     // Handle messages from the webview
-    webviewView.webview.onDidReceiveMessage((message) => {
+    webviewView.webview.onDidReceiveMessage(async (message) => {
       switch (message.command) {
         case 'refresh':
           this._refreshAnalysis();
@@ -45,11 +69,24 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
         case 'changeView':
           this._changeView(message.viewType);
           break;
+        case 'export':
+          await this.handleExport(message.payload);
+          break;
+        case 'exportError':
+          vscode.window.showErrorMessage(
+            `Export failed: ${message.payload.error}`
+          );
+          break;
+        case 'copyMermaid':
+          await vscode.env.clipboard.writeText(message.payload.code);
+          vscode.window.showInformationMessage("Mermaid code copied to clipboard!");
+          break;
+        // Legacy support for old message names
         case 'exportSVG':
-          this._exportSVG();
+          this._showPlaceholderMessage("SVG export");
           break;
         case 'exportPNG':
-          this._exportPNG();
+          this._showPlaceholderMessage("PNG export");
           break;
       }
     });
@@ -121,7 +158,7 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
         viewTitle = "Module Dependencies";
     }
 
-    this._view.webview.html = this._getWebviewHtml(mermaidGraph, viewTitle, viewType);
+    this._view.webview.html = this._getWebviewHtml(mermaidGraph, viewTitle, viewType, this._getNonce());
   }
 
   private _showLoading(message: string): void {
@@ -292,142 +329,405 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
     `;
   }
 
-  private _getWebviewHtml(mermaidGraph: string, title: string, currentView: string): string {
+  private _getWebviewHtml(mermaidGraph: string, title: string, currentView: string, nonce: string): string {
     const analysis = this._currentAnalysis!;
     const moduleCount = analysis.modules.length;
     const dependencyCount = analysis.dependencies.length;
+
+    // Dynamic theme selection based on VS Code theme
+    const theme =
+      vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
+        ? "dark"
+        : "default";
 
     return `
       <!DOCTYPE html>
       <html lang="en">
       <head>
         <meta charset="UTF-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src https://cdn.jsdelivr.net;">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Module Analysis</title>
-        <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+        <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js"></script>
+        <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@${SVG_PAN_ZOOM_VERSION}/dist/svg-pan-zoom.min.js"></script>
         <style>
-          body { 
+          body, html { 
             font-family: var(--vscode-font-family); 
             margin: 0;
-            padding: 10px;
+            padding: 0;
             background: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
           }
+          
+          .container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+          }
+          
           .header {
+            flex-shrink: 0;
+            padding: 12px 16px;
+            background: var(--vscode-editor-background);
+            border-bottom: 1px solid var(--vscode-panel-border);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 15px;
-            padding: 10px;
-            background: var(--vscode-titleBar-activeBackground);
-            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(8px);
           }
-          .title {
-            color: var(--vscode-titleBar-activeForeground);
-            font-weight: bold;
-            font-size: 16px;
-          }
-          .controls {
+          
+          .header-info {
             display: flex;
-            gap: 5px;
+            flex-direction: column;
+            gap: 4px;
           }
-          button {
-            background: var(--vscode-button-background);
-            color: var(--vscode-button-foreground);
-            border: none;
-            padding: 6px 12px;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
+          
+          .title {
+            color: var(--vscode-foreground);
+            font-weight: 600;
+            font-size: 14px;
+            margin: 0;
           }
-          button:hover {
-            background: var(--vscode-button-hoverBackground);
-          }
-          button.active {
-            background: var(--vscode-button-hoverBackground);
-            font-weight: bold;
-          }
+          
           .stats {
             display: flex;
-            gap: 15px;
-            margin: 10px 0;
+            gap: 16px;
             font-size: 12px;
             color: var(--vscode-descriptionForeground);
           }
+          
           .stat {
             display: flex;
             align-items: center;
-            gap: 5px;
+            gap: 4px;
           }
-          #mermaid-container {
-            width: 100%;
-            height: 70vh;
-            border: 1px solid var(--vscode-panel-border);
+          
+          .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+          }
+          
+          .view-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+          }
+          
+          .export-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+          }
+          
+          .divider {
+            width: 1px;
+            height: 20px;
+            background: var(--vscode-panel-border);
+            opacity: 0.5;
+          }
+          
+          button {
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: 1px solid var(--vscode-button-border, transparent);
+            padding: 6px 12px;
             border-radius: 4px;
-            overflow: hidden;
-            background: white;
+            cursor: pointer;
+            font-size: 11px;
+            font-family: var(--vscode-font-family);
+            transition: background-color 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 4px;
           }
+          
+          button:hover {
+            background: var(--vscode-button-hoverBackground);
+          }
+          
+          button.active {
+            background: var(--vscode-button-hoverBackground);
+            font-weight: 600;
+          }
+          
+          button.icon-only {
+            padding: 6px 8px;
+            min-width: auto;
+          }
+          
+          #mermaid-container {
+            flex: 1;
+            width: 100%;
+            border: 1px solid var(--vscode-panel-border);
+            border-top: none;
+            background: var(--vscode-editor-background);
+            overflow: hidden;
+            position: relative;
+          }
+          
           .mermaid {
             width: 100%;
             height: 100%;
           }
+          
+          .mermaid svg {
+            width: 100%;
+            height: 100%;
+          }
+          
+          /* Enhanced node styling */
+          .mermaid .node {
+            filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
+          }
+          
+          .mermaid .node text {
+            font-family: var(--vscode-font-family);
+            font-size: 12px;
+            text-anchor: middle;
+            dominant-baseline: central;
+          }
+          
+          /* Edge styling for better flow visibility */
+          .mermaid .edgePath path {
+            stroke-width: 1.5px;
+            stroke: var(--vscode-editorWidget-border);
+            fill: none;
+          }
+          
+          .mermaid .edgeLabel {
+            background-color: transparent;
+            border: none;
+            border-radius: 0;
+            padding: 0;
+            font-size: 11px;
+            color: var(--vscode-editor-foreground);
+            font-weight: normal;
+          }
+          
+          /* Hidden element to store original mermaid source */
+          #mermaid-source {
+            display: none;
+          }
+          
+          /* Loading and error states */
+          .message-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+            padding: 20px;
+          }
         </style>
       </head>
       <body>
-        <div class="header">
-          <div>
-            <div class="title">${title}</div>
-            <div class="stats">
-              <div class="stat">📁 <span>${moduleCount} modules</span></div>
-              <div class="stat">🔗 <span>${dependencyCount} dependencies</span></div>
+        <div class="container">
+          <div class="header">
+            <div class="header-info">
+              <h3 class="title">${title}</h3>
+              <div class="stats">
+                <div class="stat">📁 <span>${moduleCount} modules</span></div>
+                <div class="stat">🔗 <span>${dependencyCount} dependencies</span></div>
+              </div>
+            </div>
+            
+            <div class="header-controls">
+              <div class="view-controls">
+                <button onclick="changeView('dependency')" ${currentView === 'dependency' ? 'class="active"' : ''} title="Show module dependencies">
+                  🔗 Dependencies
+                </button>
+                <button onclick="changeView('overview')" ${currentView === 'overview' ? 'class="active"' : ''} title="Show module overview">
+                  📊 Overview
+                </button>
+                <button onclick="changeView('matrix')" ${currentView === 'matrix' ? 'class="active"' : ''} title="Show dependency matrix">
+                  📋 Matrix
+                </button>
+              </div>
+              
+              <div class="divider"></div>
+              
+              <div class="export-controls">
+                <button onclick="refresh()" class="icon-only" title="Refresh analysis">🔄</button>
+                <button id="copy-mermaid" title="Copy Mermaid code to clipboard">📋 Copy Code</button>
+                <button id="export-svg" title="Export as SVG">💾 SVG</button>
+                <button id="export-png" title="Export as PNG">🖼️ PNG</button>
+              </div>
             </div>
           </div>
-          <div class="controls">
-            <button onclick="changeView('dependency')" ${currentView === 'dependency' ? 'class="active"' : ''}>Dependencies</button>
-            <button onclick="changeView('overview')" ${currentView === 'overview' ? 'class="active"' : ''}>Overview</button>
-            <button onclick="changeView('matrix')" ${currentView === 'matrix' ? 'class="active"' : ''}>Matrix</button>
-            <button onclick="refresh()">🔄</button>
-            <button onclick="exportSVG()">📥 SVG</button>
-          </div>
-        </div>
-        
-        <div id="mermaid-container">
-          <div class="mermaid">
+          
+          <div id="mermaid-container">
+            <div class="mermaid">
 ${mermaidGraph}
+            </div>
           </div>
         </div>
 
-        <script>
+        <!-- Store the original mermaid source for export -->
+        <div id="mermaid-source">${mermaidGraph
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")}</div>
+
+        <script nonce="${nonce}">
           const vscode = acquireVsCodeApi();
           let panZoom;
 
           mermaid.initialize({ 
             startOnLoad: true,
-            theme: 'default',
+            theme: '${theme}',
             securityLevel: 'loose',
             flowchart: {
-              useMaxWidth: true,
-              htmlLabels: true
+              useMaxWidth: false,
+              htmlLabels: true,
+              curve: 'basis'
             }
           });
 
-          mermaid.init(undefined, ".mermaid").then(() => {
-            // Add pan and zoom after mermaid renders
-            setTimeout(() => {
-              const svgElement = document.querySelector('#mermaid-container svg');
-              if (svgElement && !panZoom) {
-                panZoom = svgPanZoom(svgElement, {
-                  zoomEnabled: true,
-                  controlIconsEnabled: true,
-                  fit: true,
-                  center: true,
-                  minZoom: 0.1,
-                  maxZoom: 10
-                });
-              }
-            }, 100);
+          // Initialize mermaid and setup pan/zoom
+          window.addEventListener('load', () => {
+            mermaid.init(undefined, ".mermaid").then(() => {
+              // Add enhanced pan and zoom after mermaid renders
+              setTimeout(() => {
+                const svgElement = document.querySelector('#mermaid-container svg');
+                if (svgElement && !panZoom) {
+                  panZoom = svgPanZoom(svgElement, {
+                    zoomEnabled: true,
+                    controlIconsEnabled: true,
+                    fit: true,
+                    center: true,
+                    minZoom: 0.1,
+                    maxZoom: 10,
+                    zoomScaleSensitivity: 0.2,
+                    mouseWheelZoomEnabled: true,
+                    preventMouseEventsDefault: true,
+                    dblClickZoomEnabled: true,
+                    onZoom: function(newScale) {
+                      // Optional: Add zoom level indicator
+                    }
+                  });
+                }
+              }, 100);
+            }).catch(error => {
+              console.error('Mermaid initialization failed:', error);
+              document.querySelector('#mermaid-container').innerHTML = 
+                '<div class="message-container"><p>⚠️ Failed to render diagram: ' + error.message + '</p></div>';
+            });
           });
 
+          // Enhanced export functionality matching function-level analysis
+          function exportFlowchart(fileType) {
+            const mermaidSourceElement = document.getElementById('mermaid-source');
+
+            if (!mermaidSourceElement || !mermaidSourceElement.innerHTML) {
+              vscode.postMessage({
+                command: 'exportError',
+                payload: { error: "Could not find Mermaid source code to export." }
+              });
+              return;
+            }
+
+            const mermaidSource = mermaidSourceElement.innerHTML
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&amp;/g, '&')
+              .trim();
+
+            const exportId = 'export-' + Date.now();
+
+            // Use mermaid.render to get a clean SVG without pan-zoom controls
+            mermaid.render(exportId, mermaidSource)
+              .then(result => {
+                const { svg } = result;
+                const parser = new DOMParser();
+                const svgDoc = parser.parseFromString(svg, 'image/svg+xml');
+                const cleanSvgElement = svgDoc.documentElement;
+
+                if (!cleanSvgElement || cleanSvgElement.tagName !== 'svg') {
+                  throw new Error('Invalid SVG generated by Mermaid render');
+                }
+
+                // Temporarily add to DOM to calculate size
+                const tempDiv = document.createElement('div');
+                tempDiv.style.position = 'absolute';
+                tempDiv.style.visibility = 'hidden';
+                document.body.appendChild(tempDiv);
+                tempDiv.appendChild(cleanSvgElement);
+                const bbox = cleanSvgElement.getBBox();
+                document.body.removeChild(tempDiv);
+
+                const padding = 20;
+                const finalX = bbox.x - padding;
+                const finalY = bbox.y - padding;
+                const finalWidth = bbox.width + (padding * 2);
+                const finalHeight = bbox.height + (padding * 2);
+
+                // Set final dimensions and viewBox
+                cleanSvgElement.setAttribute('width', finalWidth.toString());
+                cleanSvgElement.setAttribute('height', finalHeight.toString());
+                cleanSvgElement.setAttribute('viewBox', \`\${finalX} \${finalY} \${finalWidth} \${finalHeight}\`);
+
+                // Add a background rectangle
+                const backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
+                const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                rect.setAttribute('x', finalX.toString());
+                rect.setAttribute('y', finalY.toString());
+                rect.setAttribute('width', finalWidth.toString());
+                rect.setAttribute('height', finalHeight.toString());
+                rect.setAttribute('fill', backgroundColor);
+                cleanSvgElement.insertBefore(rect, cleanSvgElement.firstChild);
+
+                const finalSvgData = new XMLSerializer().serializeToString(cleanSvgElement);
+
+                if (fileType === 'svg') {
+                  vscode.postMessage({
+                    command: 'export',
+                    payload: { fileType: 'svg', data: finalSvgData }
+                  });
+                } else { // PNG export
+                  const canvas = document.createElement('canvas');
+                  const ctx = canvas.getContext('2d');
+                  if (!ctx) {
+                    throw new Error("Could not get canvas 2D context.");
+                  }
+
+                  const scale = 2; // For higher DPI
+                  canvas.width = finalWidth * scale;
+                  canvas.height = finalHeight * scale;
+                  ctx.scale(scale, scale);
+
+                  const img = new Image();
+                  img.onload = function() {
+                    ctx.drawImage(img, 0, 0, finalWidth, finalHeight);
+                    const pngData = canvas.toDataURL('image/png').split(',')[1]; // Get base64 part
+                    vscode.postMessage({
+                      command: 'export',
+                      payload: { fileType: 'png', data: pngData }
+                    });
+                  };
+                  img.onerror = function() {
+                    vscode.postMessage({
+                      command: 'exportError',
+                      payload: { error: "SVG to PNG conversion failed (image load error)." }
+                    });
+                  };
+                  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(finalSvgData);
+                }
+              })
+              .catch(error => {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown export error';
+                vscode.postMessage({
+                  command: 'exportError',
+                  payload: { error: 'Export failed: ' + errorMessage }
+                });
+              });
+          }
+
+          // Event handlers
           function refresh() {
             vscode.postMessage({ command: 'refresh' });
           }
@@ -436,9 +736,39 @@ ${mermaidGraph}
             vscode.postMessage({ command: 'changeView', viewType });
           }
 
-          function exportSVG() {
-            vscode.postMessage({ command: 'exportSVG' });
+          // Copy functionality
+          const copyBtn = document.getElementById('copy-mermaid');
+          if (copyBtn) {
+            copyBtn.addEventListener('click', () => {
+              const mermaidSourceElement = document.getElementById('mermaid-source');
+              const mermaidSource = (mermaidSourceElement?.textContent || '').trim();
+
+              if (mermaidSource) {
+                vscode.postMessage({
+                  command: 'copyMermaid',
+                  payload: { code: mermaidSource }
+                });
+
+                // Visual feedback
+                const originalText = copyBtn.innerHTML;
+                copyBtn.innerHTML = '✅ Copied!';
+                copyBtn.disabled = true;
+                setTimeout(() => {
+                  copyBtn.innerHTML = originalText;
+                  copyBtn.disabled = false;
+                }, 2000);
+              } else {
+                vscode.postMessage({
+                  command: 'exportError',
+                  payload: { error: "Could not find Mermaid source code to copy." }
+                });
+              }
+            });
           }
+
+          // Export button handlers
+          document.getElementById('export-svg').addEventListener('click', () => exportFlowchart('svg'));
+          document.getElementById('export-png').addEventListener('click', () => exportFlowchart('png'));
 
           // Handle window resize
           window.addEventListener('resize', () => {
@@ -454,15 +784,84 @@ ${mermaidGraph}
     `;
   }
 
+  /**
+   * Handle export functionality (matches BaseFlowchartProvider implementation)
+   */
+  private async handleExport(payload: {
+    fileType: "svg" | "png";
+    data: string;
+  }): Promise<void> {
+    const activeEditor = vscode.window.activeTextEditor;
+    if (!activeEditor) {
+      vscode.window.showErrorMessage(
+        "Cannot export: No active text editor found."
+      );
+      return;
+    }
+
+    const { fileType, data } = payload;
+    const documentUri = activeEditor.document.uri;
+
+    const defaultDirectory = vscode.Uri.file(
+      require("path").dirname(documentUri.fsPath)
+    );
+    const defaultFileUri = vscode.Uri.file(
+      require("path").join(defaultDirectory.fsPath, `module-analysis.${fileType}`)
+    );
+
+    const filters: { [name: string]: string[] } =
+      fileType === "svg"
+        ? { "SVG Images": ["svg"] }
+        : { "PNG Images": ["png"] };
+
+    const uri = await vscode.window.showSaveDialog({
+      filters,
+      defaultUri: defaultFileUri,
+    });
+
+    if (uri) {
+      const buffer = Buffer.from(data, fileType === "png" ? "base64" : "utf-8");
+      try {
+        await vscode.workspace.fs.writeFile(uri, buffer);
+        vscode.window.showInformationMessage(
+          `Successfully exported module analysis to ${uri.fsPath}`
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage(
+          `Failed to export module analysis: ${message}`
+        );
+      }
+    }
+  }
+
+  /**
+   * Generates a random nonce for Content Security Policy (matches BaseFlowchartProvider)
+   */
+  private _getNonce(): string {
+    let text = "";
+    const possible =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    for (let i = 0; i < 32; i++) {
+      text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+  }
+
+  /**
+   * Show placeholder message for legacy functionality (temporary)
+   */
+  private _showPlaceholderMessage(feature: string): void {
+    vscode.window.showInformationMessage(
+      `${feature} functionality is now integrated into the main export system. Use the export buttons in the header.`
+    );
+  }
+
   private async _exportSVG(): Promise<void> {
-    // Implementation for SVG export would go here
-    // For now, just show a message
-    vscode.window.showInformationMessage("SVG export functionality will be implemented in a future update.");
+    this._showPlaceholderMessage("SVG export");
   }
 
   private async _exportPNG(): Promise<void> {
-    // Implementation for PNG export would go here
-    // For now, just show a message  
-    vscode.window.showInformationMessage("PNG export functionality will be implemented in a future update.");
+    this._showPlaceholderMessage("PNG export");
   }
 }
