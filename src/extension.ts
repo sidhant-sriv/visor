@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { FlowchartViewProvider } from "./view/FlowchartViewProvider";
 import { FlowchartPanelProvider } from "./view/FlowchartPanelProvider";
+import { DataFlowProvider } from "./view/ModuleAnalysisProvider";
 import { initLanguageServices } from "./logic/language-services";
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -23,6 +24,15 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.registerWebviewViewProvider(
       FlowchartViewProvider.viewType,
       sidebarProvider
+    )
+  );
+
+  // Register data flow analysis provider
+  const dataFlowProvider = new DataFlowProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      DataFlowProvider.viewType,
+      dataFlowProvider
     )
   );
 
@@ -101,6 +111,25 @@ export async function activate(context: vscode.ExtensionContext) {
         if (panelProvider.isVisible()) {
           panelProvider.refresh();
         }
+      }
+    }),
+
+    // Data flow analysis commands
+    vscode.commands.registerCommand("visor.analyzeWorkspaceDataFlow", async () => {
+      try {
+        await dataFlowProvider.analyzeWorkspaceDataFlow();
+        vscode.window.showInformationMessage("Workspace data flow analysis completed!");
+      } catch (error) {
+        vscode.window.showErrorMessage(`Data flow analysis failed: ${error}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("visor.analyzeCurrentFunctionDataFlow", async () => {
+      try {
+        await dataFlowProvider.analyzeCurrentFunction();
+        vscode.window.showInformationMessage("Current function data flow analysis completed!");
+      } catch (error) {
+        vscode.window.showErrorMessage(`Data flow analysis failed: ${error}`);
       }
     })
   );

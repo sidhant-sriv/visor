@@ -35,6 +35,12 @@
           "name": "Flowchart",
           "type": "webview",
           "icon": "media/icon.png"
+        },
+        {
+          "id": "visor.dataFlowView",
+          "name": "Data Flow",
+          "type": "webview",
+          "icon": "media/icon.png"
         }
       ]
     },
@@ -62,6 +68,16 @@
         "command": "visor.maximizeFlowchartPanel",
         "title": "Maximize Flowchart Panel",
         "icon": "$(screen-full)"
+      },
+      {
+        "command": "visor.analyzeWorkspaceModules",
+        "title": "Analyze Workspace Modules",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "visor.analyzeCurrentFileModules",
+        "title": "Analyze Current File Modules",
+        "icon": "$(file-code)"
       }
     ],
     "menus": {
@@ -99,6 +115,13 @@
         },
         {
           "command": "visor.maximizeFlowchartPanel",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "visor.analyzeWorkspaceModules"
+        },
+        {
+          "command": "visor.analyzeCurrentFileModules",
           "when": "editorTextFocus"
         }
       ]

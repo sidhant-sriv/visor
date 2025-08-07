@@ -4,6 +4,28 @@
 
 ## ✨ Features
 
+### 🔄 **Data Flow Analysis (NEW!)**
+
+- **Global State Tracking**: Understand how global variables and state flow through your functions
+- **Cross-Function Dependencies**: See which functions share data and how they interact
+- **Dual Visualization Modes**:
+  - **Data Flow Graph**: Shows global state usage and data relationships
+  - **Function Call Graph**: Traditional call graph with data flow annotations
+- **Smart Expansion**: Start from current function and automatically find related functions that share data
+- **Large Codebase Navigation**: Trace data dependencies without manual ctrl+clicking through code
+- **Multi-language Support**: Works with TypeScript, JavaScript, Python, Java, and more
+
+### 🏗️ **Module Analysis**
+
+- **Workspace-wide Analysis**: Get a 30,000 ft view of your entire codebase structure  
+- **Dependency Mapping**: Visualize how modules interact through imports, exports, and function calls
+- **Multi-language Support**: Works with Python, TypeScript/JavaScript, and Java projects
+- **Three Visualization Modes**:
+  - **Dependency Graph**: Shows module relationships and connections
+  - **Module Overview**: Displays imports and exports for each module
+  - **Dependency Matrix**: Connection counts and interaction patterns
+- **Interactive Analysis**: Click to analyze workspace or focus on current file context
+
 ### 🔄 **Real-Time Flowchart Generation**
 
 - Automatically generates flowcharts for functions as you navigate your code
@@ -88,6 +110,37 @@ def complex_function(data):
 
 This function will show **Medium complexity (CC=6)** with ⚠️ indicators on decision nodes.
 
+**Module Analysis Example:**
+
+Create a simple Python project:
+
+```python
+# utils.py
+def calculate_sum(numbers):
+    return sum(numbers)
+
+class DataProcessor:
+    def process(self, data):
+        return calculate_sum(data)
+```
+
+```python
+# main.py
+from utils import DataProcessor, calculate_sum
+import math
+
+def main():
+    processor = DataProcessor()
+    result = processor.process([1, 2, 3, 4, 5])
+    sqrt_result = math.sqrt(result)
+    print(f"Result: {sqrt_result}")
+```
+
+The module analysis will show:
+- **Dependencies**: main.py → utils.py, main.py → math (built-in)
+- **Exports**: utils.py exports `calculate_sum` function and `DataProcessor` class  
+- **Function Calls**: Cross-module calls from main.py to utils.py functions
+
 ## Enhanced Node Readability
 
 ### Semantic Node Categories
@@ -132,6 +185,23 @@ Access theme and complexity settings via VS Code Settings (`Cmd/Ctrl + ,`) under
 ```
 
 ## 🚀 How to Use
+
+### Module Analysis (NEW!)
+
+1. **Open the Module Analysis View**: Click the Visor icon in the Activity Bar and select the "Module Analysis" tab
+2. **Analyze Your Codebase**:
+   - **Workspace Analysis**: Click "🌐 Analyze Workspace" to get a complete overview of all modules
+   - **Current File Context**: Click "📄 Analyze Current File" to focus on the active file and its dependencies
+3. **Explore Different Views**:
+   - **Dependencies**: Shows how modules connect to each other
+   - **Overview**: Detailed view of imports and exports per module
+   - **Matrix**: Connection counts and dependency patterns
+4. **Interactive Features**:
+   - Pan and zoom the diagram
+   - Switch between visualization modes
+   - Export diagrams as SVG (coming soon)
+
+### Function-Level Flowcharts
 
 ### Getting Started
 
@@ -236,6 +306,7 @@ Visor supports opening flowcharts in dedicated external windows for enhanced pro
 
 ### Core Components
 
+#### Function-Level Analysis
 - **AbstractParser**: Enhanced base class with semantic node creation and complexity analysis
 - **ComplexityAnalyzer**: McCabe cyclomatic complexity calculation engine with language-specific support
 - **ComplexityConfig**: Configuration management for complexity thresholds, indicators, and display options
@@ -246,6 +317,13 @@ Visor supports opening flowcharts in dedicated external windows for enhanced pro
 - **BaseFlowchartProvider**: Shared webview logic with robust event handling and window state management
 - **FlowchartViewProvider**: Sidebar integration with complexity display and external window launcher
 - **FlowchartPanelProvider**: Dedicated external window management with singleton pattern and proper cleanup
+
+#### Module-Level Analysis (NEW!)
+- **ModuleAnalyzer**: Core analyzer for workspace and file-context module analysis
+- **ModuleAnalysisIR**: Intermediate representation for module dependencies, imports, exports, and function calls
+- **Language Module Parsers**: Python, TypeScript/JavaScript, and Java parsers for extracting module-level information
+- **ModuleMermaidGenerator**: Generates dependency graphs, module overviews, and dependency matrices
+- **ModuleAnalysisProvider**: Webview provider for interactive module analysis visualization
 
 ### Performance Features
 
@@ -302,6 +380,18 @@ code --extensionDevelopmentPath=.
 - `yarn test`: Runs test suite
 - `yarn publish:patch`: Publishes a patch version
 - `yarn release`: Full release workflow (test + publish + git tags)
+
+### Commands
+
+#### Function-Level Analysis
+- **Visor: Generate Flowchart** - Generates flowchart for the current function
+- **Visor: Open Flowchart in Panel** - Opens flowchart in a new panel/window
+- **Visor: Open Flowchart to Side** - Opens flowchart beside current editor
+- **Visor: Open Flowchart in New Column** - Opens flowchart in new column
+
+#### Module-Level Analysis  
+- **Visor: Analyze Workspace Modules** - Analyzes all modules in the workspace
+- **Visor: Analyze Current File Modules** - Analyzes current file and its dependencies
 
 ### Project Structure
 

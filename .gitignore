@@ -13,3 +13,6 @@ src/**/*.js.map
 test_*.py
 test_*.js
 simple_test.py
+
+# Sample project files (for testing module analysis)
+sample_project/
