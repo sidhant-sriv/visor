@@ -61,10 +61,12 @@ export class ModuleMermaidGenerator {
         const label = this.getDependencyLabel(dependency);
         const edgeStyle = this.getDependencyEdgeStyle(dependency.dependencyType);
         
-        mermaid += `    ${fromId} ${edgeStyle} ${toId}\n`;
-        
         if (label) {
-          mermaid += `    ${fromId} -.->|"${label}"| ${toId}\n`;
+          // Use labeled edge when label exists
+          mermaid += `    ${fromId} ${edgeStyle}|"${label}"| ${toId}\n`;
+        } else {
+          // Use simple edge when no label
+          mermaid += `    ${fromId} ${edgeStyle} ${toId}\n`;
         }
       }
     }

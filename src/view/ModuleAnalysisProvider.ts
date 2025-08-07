@@ -89,13 +89,6 @@ export class ModuleAnalysisProvider implements vscode.WebviewViewProvider {
           await vscode.env.clipboard.writeText(message.payload.code);
           vscode.window.showInformationMessage("Mermaid code copied to clipboard!");
           break;
-        // Legacy support for old message names
-        case 'exportSVG':
-          this._showPlaceholderMessage("SVG export");
-          break;
-        case 'exportPNG':
-          this._showPlaceholderMessage("PNG export");
-          break;
       }
     });
   }
@@ -745,10 +738,6 @@ ${mermaidGraph}
             vscode.postMessage({ command: 'changeView', viewType });
           }
 
-          // Make functions globally accessible
-          window.refresh = refresh;
-          window.changeView = changeView;
-
           // Event handlers - attach directly like BaseFlowchartProvider
           document.getElementById('export-svg').addEventListener('click', () => exportFlowchart('svg'));
           document.getElementById('export-png').addEventListener('click', () => exportFlowchart('png'));
@@ -852,20 +841,4 @@ ${mermaidGraph}
     return text;
   }
 
-  /**
-   * Show placeholder message for legacy functionality (temporary)
-   */
-  private _showPlaceholderMessage(feature: string): void {
-    vscode.window.showInformationMessage(
-      `${feature} functionality is now integrated into the main export system. Use the export buttons in the header.`
-    );
-  }
-
-  private async _exportSVG(): Promise<void> {
-    this._showPlaceholderMessage("SVG export");
-  }
-
-  private async _exportPNG(): Promise<void> {
-    this._showPlaceholderMessage("PNG export");
-  }
 }
