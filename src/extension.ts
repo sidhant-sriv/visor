@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { FlowchartViewProvider } from "./view/FlowchartViewProvider";
 import { FlowchartPanelProvider } from "./view/FlowchartPanelProvider";
+import { ModuleAnalysisProvider } from "./view/ModuleAnalysisProvider";
 import { initLanguageServices } from "./logic/language-services";
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -23,6 +24,15 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.registerWebviewViewProvider(
       FlowchartViewProvider.viewType,
       sidebarProvider
+    )
+  );
+
+  // Register module analysis provider
+  const moduleAnalysisProvider = new ModuleAnalysisProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      ModuleAnalysisProvider.viewType,
+      moduleAnalysisProvider
     )
   );
 
@@ -101,6 +111,25 @@ export async function activate(context: vscode.ExtensionContext) {
         if (panelProvider.isVisible()) {
           panelProvider.refresh();
         }
+      }
+    }),
+
+    // Module analysis commands
+    vscode.commands.registerCommand("visor.analyzeWorkspaceModules", async () => {
+      try {
+        await moduleAnalysisProvider.analyzeWorkspace();
+        vscode.window.showInformationMessage("Workspace module analysis completed!");
+      } catch (error) {
+        vscode.window.showErrorMessage(`Module analysis failed: ${error}`);
+      }
+    }),
+
+    vscode.commands.registerCommand("visor.analyzeCurrentFileModules", async () => {
+      try {
+        await moduleAnalysisProvider.analyzeCurrentFileContext();
+        vscode.window.showInformationMessage("Current file module analysis completed!");
+      } catch (error) {
+        vscode.window.showErrorMessage(`Module analysis failed: ${error}`);
       }
     })
   );
