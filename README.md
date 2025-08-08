@@ -288,8 +288,35 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **svg-pan-zoom**: For interactive flowchart navigation
 - **McCabe**: For foundational work on cyclomatic complexity metrics
 
----
+## Contributors
 
+<table>
+  <tr>
+    <td align="center">
+      <a href="https://github.com/sidhant-sriv">
+        <img src="https://avatars.githubusercontent.com/sidhant-sriv" width="100px;" alt="Sidhant Srivastava"/>
+        <br />
+        <sub><b>Sidhant Srivastava</b></sub>
+      </a>
+      <br />
+      <a href="https://www.linkedin.com/in/sidhant-srivastava-41803620b/" title="LinkedIn"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/linkedin/linkedin-original.svg" width="24px" alt="LinkedIn"/></a>
+      <a href="https://x.com/sidsodsudx" title="X"><img src="https://cdn.jsdelivr.net/gh/simple-icons/simple-icons/icons/x.svg" width="24px" alt="X"/></a>
+      <a href="https://github.com/sidhant-sriv" title="GitHub"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" width="24px" alt="GitHub"/></a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/fakubwoy">
+        <img src="https://avatars.githubusercontent.com/fakubwoy" width="100px;" alt="Fakubwoy"/>
+        <br />
+        <sub><b>Fakubwoy</b></sub>
+      </a>
+      <br />
+      <a href="https://www.linkedin.com/in/farhaan-khan-1629202b8/" title="LinkedIn"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/linkedin/linkedin-original.svg" width="24px" alt="LinkedIn"/></a>
+      <a href="https://github.com/fakubwoy" title="GitHub"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/github/github-original.svg" width="24px" alt="GitHub"/></a>
+    </td>
+  </tr>
+</table>
+
+---
 
 ## Support
 
