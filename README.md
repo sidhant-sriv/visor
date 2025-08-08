@@ -2,15 +2,15 @@
 
 **Visor** is a powerful VS Code extension that provides real-time, interactive flowchart visualization for your code across multiple programming languages. Transform complex code logic into clear, visual flowcharts that help you understand, debug, and document your code more effectively.
 
-## ✨ Features
+## Features
 
-### 🔄 **Real-Time Flowchart Generation**
+### **Real-Time Flowchart Generation**
 
 - Automatically generates flowcharts for functions as you navigate your code
 - Live updates as you edit your code (500ms debounced for optimal performance)
 - Intelligent function detection based on cursor position
 
-### 🌐 **Multi-Language Support**
+### **Multi-Language Support**
 
 - **Python**: Functions, lambdas, higher-order functions (map, filter, reduce)
 - **TypeScript/JavaScript**: Functions, arrow functions, methods, classes
@@ -19,7 +19,7 @@
 - **C**: Functions with comprehensive control flow support (if/else, loops, switch, goto)
 - **Rust**: Functions, closures, match expressions, if/else, loops (for, while, loop), break/continue
 
-### 🎯 **Interactive Visualization**
+### **Interactive Visualization**
 
 - **Bidirectional Navigation**: Click flowchart nodes to jump to code, cursor movement highlights corresponding nodes
 - **Smart Highlighting**: Real-time synchronization between code and flowchart
@@ -27,7 +27,7 @@
 - **External Window Support**: Open flowcharts in dedicated panel windows for multi-monitor setups
 - **Window State Management**: Robust event handling ensures graphs generate reliably across window switches
 
-### 🎨 **Rich Visual Elements**
+### **Rich Visual Elements**
 
 - **Semantic Node Types**: Enhanced visual differentiation between entry/exit, decisions, processes, loops, exceptions, and assignments
 - **Subtle Theme-Aware Styling**: Professional color palette that adapts to VS Code light/dark themes without overwhelming visual noise
@@ -39,13 +39,13 @@
 - **VS Code Theme Integration**: Automatically adapts to light/dark themes with subtle accent colors
 - **Dual View Options**: Choose between sidebar integration or dedicated external windows
 
-### 📤 **Export Capabilities**
+### **Export Capabilities**
 
 - Export flowcharts as **SVG** (vector graphics) or **PNG** (raster images)
 - High-quality exports with proper background and styling
 - Perfect for documentation and presentations
 
-### ⚡ **Advanced Code Analysis**
+### **Advanced Code Analysis**
 
 - **Tree-sitter Parsing**: Robust, syntax-aware code analysis
 - **Control Flow Analysis**: Accurately represents loops, conditionals, and branches
@@ -53,7 +53,7 @@
 - **Higher-Order Functions**: Special support for functional programming patterns
 - **Performance Optimized**: Efficient parsing with object pooling and caching
 
-### 📊 **Cyclomatic Complexity Analysis**
+### **Cyclomatic Complexity Analysis**
 
 - **Function-Level Metrics**: Shows overall function complexity with detailed descriptions
 - **Node-Level Indicators**: Visual complexity indicators (⚠️ 🔴 🚨) on flowchart nodes
@@ -62,31 +62,15 @@
 - **Smart Analysis**: Follows McCabe's cyclomatic complexity calculation
 - **Multi-Language Support**: Works across Python, TypeScript, Java, C++, C, and Rust
 
-## 🚀 Quick Start
+## Quick Start
 
 1. **Install** the Visor extension from the VS Code marketplace
 2. **Open** any Python, TypeScript, Java, C, or C++ file
 3. **Click** the Visor icon in the Activity Bar (left sidebar)
 4. **Place your cursor** inside a function to see the flowchart
 5. **Observe complexity metrics** in the bottom panel and node indicators
-
-**Try this Python example:**
-
-```python
-def complex_function(data):
-    result = 0
-    for item in data:
-        if item > 10:
-            if item % 2 == 0:
-                result += item * 2
-            else:
-                result += item
-        elif item > 0:
-            result += 1
-    return result
-```
-
-This function will show **Medium complexity (CC=6)** with ⚠️ indicators on decision nodes.
+6. **Export** flowcharts as SVG or PNG using the export buttons
+7. **Open in External Window**: Click the 🚀 button to view in a dedicated window for larger flowcharts
 
 ## Enhanced Node Readability
 
@@ -131,7 +115,7 @@ Access theme and complexity settings via VS Code Settings (`Cmd/Ctrl + ,`) under
 }
 ```
 
-## 🚀 How to Use
+## How to Use
 
 ### Getting Started
 
@@ -195,44 +179,7 @@ Visor supports opening flowcharts in dedicated external windows for enhanced pro
 - Red indicators 🔴 on decision nodes
 - Suggestion to consider refactoring
 
-### Supported Language Features
-
-#### Python
-
-- Function definitions (`def function_name():`)
-- Lambda expressions (`lambda x: x + 1`)
-- Higher-order functions (`map()`, `filter()`, `reduce()`)
-- Nested functions and closures
-
-#### TypeScript/JavaScript
-
-- Function declarations (`function name() {}`)
-- Arrow functions (`const name = () => {}`)
-- Method definitions in classes
-- Async/await patterns
-
-#### Java
-
-- Method definitions
-- Constructor methods
-- Class methods (static and instance)
-
-#### C++
-
-- Function definitions
-- Method definitions in classes
-- Function overloading
-
-#### C
-
-- Function definitions (`int function_name() {}`)
-- Control flow structures (if/else, for, while, do-while)
-- Switch statements with case labels
-- Goto statements and labels
-- Break and continue statements
-- Pointer operations and function pointers
-
-## 🛠 Technical Architecture
+## Technical Architecture
 
 ### Core Components
 
@@ -254,13 +201,7 @@ Visor supports opening flowcharts in dedicated external windows for enhanced pro
 - **Debounced Updates**: Prevents excessive re-rendering during typing
 - **Tree-sitter WASM**: Fast, incremental parsing
 
-## 📋 Requirements
-
-- **Visual Studio Code**: v1.102.0 or newer
-- **Node.js**: Required for development (not for end users)
-- **Supported Languages**: Python, TypeScript, JavaScript, Java, C, C++
-
-## 🔧 Development
+## Development
 
 ### Prerequisites
 
@@ -272,8 +213,8 @@ Visor supports opening flowcharts in dedicated external windows for enhanced pro
 
 ```bash
 # Clone the repository
-git clone https://github.com/sidhant-sriv/sidvis.git
-cd sidvis
+git clone https://github.com/sidhant-sriv/visor.git
+cd visor
 
 # Install dependencies
 yarn install
@@ -293,45 +234,10 @@ yarn watch
 code --extensionDevelopmentPath=.
 ```
 
-### Available Scripts
+### Scripts
 
 - `yarn compile`: Compiles TypeScript to JavaScript
 - `yarn watch`: Compiles in watch mode for development
-- `yarn package`: Creates production build
-- `yarn lint`: Runs ESLint for code quality
-- `yarn test`: Runs test suite
-- `yarn publish:patch`: Publishes a patch version
-- `yarn release`: Full release workflow (test + publish + git tags)
-
-### Project Structure
-
-```
-src/
-├── extension.ts              # Extension entry point with command registration
-├── view/
-│   ├── BaseFlowchartProvider.ts    # Shared webview logic with event handling
-│   ├── FlowchartViewProvider.ts    # Sidebar view integration
-│   └── FlowchartPanelProvider.ts   # External window management
-├── logic/
-│   ├── analyzer.ts           # Language router
-│   ├── EnhancedMermaidGenerator.ts  # Advanced flowchart generation with complexity indicators
-│   ├── language-services/   # Language-specific parsers
-│   │   ├── python/
-│   │   ├── typescript/
-│   │   ├── java/
-│   │   └── cpp/
-│   ├── common/
-│   │   ├── AbstractParser.ts    # Base parser class with complexity analysis
-│   │   └── AstParserTypes.ts    # Shared types
-│   └── utils/
-│       ├── StringProcessor.ts   # String utilities
-│       ├── ComplexityAnalyzer.ts # McCabe complexity calculation
-│       ├── ComplexityConfig.ts   # Configuration management
-│       └── ThemeManager.ts      # Theme and styling management
-├── ir/
-│   └── ir.ts                # Intermediate representation with complexity metrics
-└── types/                   # TypeScript declarations
-```
 
 ### Contributing
 
@@ -353,71 +259,11 @@ To add support for a new language:
 3. **Register Language**: Add to `analyzer.ts` and `language-services/index.ts`
 4. **Update Webpack**: Add WASM file copy rule to `webpack.config.js`
 
-Example parser structure:
-
-```typescript
-export class NewLangParser extends AbstractParser {
-  public static async create(wasmPath: string): Promise<NewLangParser> {
-    // Initialize tree-sitter parser
-  }
-
-  public generateFlowchart(sourceCode: string, position?: number): FlowchartIR {
-    // Parse and generate flowchart IR
-  }
-}
-```
-
-### Testing
-
-```bash
-# Run all tests
-yarn test
-
-# Run specific test file
-yarn test --grep "parser"
-
-# Debug tests in VS Code
-# Use the "Run Extension Tests" configuration
-```
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**Flowchart not generating:**
-
-- Ensure your cursor is inside a function
-- Check that the file language is supported
-- Look for errors in the VS Code Developer Console (Help > Toggle Developer Tools)
-- Try using the "Visor: Generate Flowchart" command from the command palette
-- If using external windows, ensure the window has focus when switching between functions
-
-**External window issues:**
-
-- If external windows stop updating, close and reopen them using the 🚀 button
-- For multi-monitor setups, ensure VS Code has proper focus when navigating code
-- External windows automatically dispose when VS Code closes
-
-**Export not working:**
-
-- Ensure you have sufficient disk space
-- Check file permissions in the target directory
-- Try exporting to a different location
-- Export functionality works in both sidebar and external window views
-
-**Performance issues:**
-
-- Large functions may take longer to process
-- Consider breaking down complex functions
-- Check if multiple heavy operations are running simultaneously
-
 ### Debug Mode
 
 Enable debug logging by setting the `visor.debug` configuration in VS Code settings.
 
-## 📊 Supported Control Structures
-
-### All Languages
+## Supported Control Structures
 
 - **Sequential**: Statements, assignments, function calls
 - **Conditional**: if/else, switch/case, ternary operators (+1 complexity each)
@@ -426,45 +272,15 @@ Enable debug logging by setting the `visor.debug` configuration in VS Code setti
 - **Exception Handling**: try/catch blocks (+1 complexity per catch)
 - **Logical Operators**: AND/OR operations (+1 complexity each)
 
-### Language-Specific Features
-
-#### Python
-
-- List comprehensions
-- Higher-order functions (`map`, `filter`, `reduce`)
-- Exception handling (`try`/`except`)
-- Context managers (`with` statements)
-
-#### TypeScript/JavaScript
-
-- Promise chains and async/await
-- Array methods (`forEach`, `map`, `filter`)
-- Class methods and constructors
-- Module imports/exports
-
-#### Java
-
-- Exception handling (`try`/`catch`)
-- Enhanced for loops
-- Method overloading
-- Constructor chaining
-
-#### C/C++
-
-- Pointer operations
-- Memory management
-- Function overloading
-- Template functions (basic support)
-
-## 🔒 Privacy & Security
+## Privacy & Security
 
 Visor processes your code locally within VS Code. No code is transmitted to external servers. All parsing and flowchart generation happens on your machine, ensuring your code remains private and secure.
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - **Tree-sitter**: For robust, incremental parsing
 - **Mermaid.js**: For beautiful diagram rendering
@@ -473,5 +289,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **McCabe**: For foundational work on cyclomatic complexity metrics
 
 ---
+
+
+## Support
+
+If you find this project useful, consider supporting us on [Buy Me a Coffee](https://buymeacoffee.com/sidsodsud).
 
 # Code with <❤️> Visor
