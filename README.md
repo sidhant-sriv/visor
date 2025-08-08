@@ -72,7 +72,6 @@
 6. **Export** flowcharts as SVG or PNG using the export buttons
 7. **Open in External Window**: Click the 🚀 button to view in a dedicated window for larger flowcharts
 
-
 ## Enhanced Node Readability
 
 ### Semantic Node Categories
@@ -180,7 +179,6 @@ Visor supports opening flowcharts in dedicated external windows for enhanced pro
 - Red indicators 🔴 on decision nodes
 - Suggestion to consider refactoring
 
-
 ## Technical Architecture
 
 ### Core Components
@@ -274,7 +272,6 @@ Enable debug logging by setting the `visor.debug` configuration in VS Code setti
 - **Exception Handling**: try/catch blocks (+1 complexity per catch)
 - **Logical Operators**: AND/OR operations (+1 complexity each)
 
-
 ## Privacy & Security
 
 Visor processes your code locally within VS Code. No code is transmitted to external servers. All parsing and flowchart generation happens on your machine, ensuring your code remains private and secure.
@@ -292,5 +289,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **McCabe**: For foundational work on cyclomatic complexity metrics
 
 ---
+
+
+## Support
+
+If you find this project useful, consider supporting us on [Buy Me a Coffee](https://buymeacoffee.com/sidsodsud).
 
 # Code with <❤️> Visor
