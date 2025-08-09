@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { EnvironmentDetector } from "../logic/utils/EnvironmentDetector";
 import {
   BaseFlowchartProvider,
   WebviewMessage,
@@ -97,18 +98,20 @@ export class FlowchartPanelProvider extends BaseFlowchartProvider {
     const finalViewColumn = viewColumn || getViewColumn(defaultPosition);
 
     // Create the panel with enhanced options for better detached experience
+    const baseOptions = {
+      enableScripts: true,
+      localResourceRoots: [this._extensionUri],
+      retainContextWhenHidden: retainWhenHidden,
+      enableFindWidget: enableFindWidget,
+      // Enable command URIs for better interaction
+      enableCommandUris: true,
+    };
+    
     this._panel = vscode.window.createWebviewPanel(
       "visor.flowchartPanel",
       "🔍 Flowchart Viewer", // More distinctive title
       finalViewColumn,
-      {
-        enableScripts: true,
-        localResourceRoots: [this._extensionUri],
-        retainContextWhenHidden: retainWhenHidden,
-        enableFindWidget: enableFindWidget,
-        // Enable command URIs for better interaction
-        enableCommandUris: true,
-      }
+      EnvironmentDetector.getWebviewPanelOptions(baseOptions)
     );
 
     // Set a distinctive icon to make it stand out

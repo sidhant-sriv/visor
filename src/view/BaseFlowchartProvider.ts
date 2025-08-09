@@ -3,6 +3,7 @@ import { analyzeCode } from "../logic/analyzer";
 import { LocationMapEntry } from "../ir/ir";
 import { EnhancedMermaidGenerator } from "../logic/EnhancedMermaidGenerator";
 import { getComplexityConfig } from "../logic/utils/ComplexityConfig";
+import { EnvironmentDetector } from "../logic/utils/EnvironmentDetector";
 
 const MERMAID_VERSION = "11.8.0";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
@@ -61,6 +62,9 @@ export abstract class BaseFlowchartProvider {
   protected _eventListenersSetup: boolean = false;
 
   constructor(protected readonly _extensionUri: vscode.Uri) {
+    // Detect environment and apply any necessary compatibility fixes
+    this.initializeEnvironment();
+    
     // Listen for configuration changes to update themes
     this._disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
@@ -70,6 +74,26 @@ export abstract class BaseFlowchartProvider {
         }
       })
     );
+  }
+
+  /**
+   * Initialize environment-specific settings and compatibility fixes
+   */
+  private initializeEnvironment(): void {
+    const env = EnvironmentDetector.detectEnvironment();
+    
+    if (env.requiresCompatibilityMode) {
+      console.log(`Visor: Running in compatibility mode for ${env.editor}`);
+      
+      // Add any environment-specific initialization here
+      if (env.isCursor) {
+        // Cursor-specific initialization
+        console.log("Visor: Applying Cursor-specific compatibility settings");
+      } else if (env.isWindsurf) {
+        // Windsurf-specific initialization  
+        console.log("Visor: Applying Windsurf-specific compatibility settings");
+      }
+    }
   }
 
   /**
@@ -453,7 +477,7 @@ export abstract class BaseFlowchartProvider {
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src https://cdn.jsdelivr.net;">
+        <meta http-equiv="Content-Security-Policy" content="${EnvironmentDetector.getContentSecurityPolicy(nonce)}">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Code Flowchart</title>
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js"></script>
@@ -814,29 +838,62 @@ ${flowchartSyntax}
                 }
             });
 
-            mermaid.initialize({
-                startOnLoad: true,
-                theme: '${theme}',
-                securityLevel: 'loose',
-                flowchart: {
-                    useMaxWidth: false,
-                    htmlLabels: true,
-                    curve: 'basis'
+            // Enhanced error handling for different environments
+            function initializeMermaid() {
+                try {
+                    mermaid.initialize({
+                        startOnLoad: true,
+                        theme: '${theme}',
+                        securityLevel: 'loose',
+                        flowchart: {
+                            useMaxWidth: false,
+                            htmlLabels: true,
+                            curve: 'basis'
+                        }
+                    });
+                } catch (error) {
+                    console.warn('Mermaid initialization error:', error);
+                    // Try with more basic configuration for compatibility
+                    try {
+                        mermaid.initialize({
+                            startOnLoad: true,
+                            theme: '${theme}',
+                            securityLevel: 'loose'
+                        });
+                    } catch (fallbackError) {
+                        console.error('Mermaid fallback initialization failed:', fallbackError);
+                    }
                 }
-            });
+            }
+
+            // Initialize mermaid with error handling
+            if (typeof mermaid !== 'undefined') {
+                initializeMermaid();
+            } else {
+                console.error('Mermaid library not loaded');
+            }
 
             window.addEventListener('load', () => {
                 const svgElement = document.querySelector('.mermaid svg');
-                if (svgElement) {
-                    const panZoomInstance = svgPanZoom(svgElement, {
-                        zoomEnabled: true,
-                        controlIconsEnabled: true,
-                        fit: true,
-                        center: true,
-                        minZoom: 0.1,
-                        maxZoom: 10,
-                        zoomScaleSensitivity: 0.2
-                    });
+                if (svgElement && typeof svgPanZoom !== 'undefined') {
+                    try {
+                        const panZoomInstance = svgPanZoom(svgElement, {
+                            zoomEnabled: true,
+                            controlIconsEnabled: true,
+                            fit: true,
+                            center: true,
+                            minZoom: 0.1,
+                            maxZoom: 10,
+                            zoomScaleSensitivity: 0.2
+                        });
+                    } catch (error) {
+                        console.warn('SVG pan zoom initialization failed:', error);
+                        // Continue without pan/zoom functionality
+                    }
+                } else if (!svgElement) {
+                    console.warn('No SVG element found for pan/zoom');
+                } else {
+                    console.warn('svgPanZoom library not loaded');
                 }
             });
 
