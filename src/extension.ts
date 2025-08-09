@@ -2,9 +2,12 @@ import * as vscode from "vscode";
 import { FlowchartViewProvider } from "./view/FlowchartViewProvider";
 import { FlowchartPanelProvider } from "./view/FlowchartPanelProvider";
 import { initLanguageServices } from "./logic/language-services";
+import { LLMManager } from "./logic/llm/LLMManager";
+import { setExtensionContext } from "./logic/llm/LLMContext";
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log("Visor extension is now active!");
+  setExtensionContext(context);
 
   try {
     // Initialize all language services
@@ -102,6 +105,21 @@ export async function activate(context: vscode.ExtensionContext) {
           panelProvider.refresh();
         }
       }
+    }),
+
+    // LLM: Enable labels (provider+key flow)
+    vscode.commands.registerCommand("visor.llm.enableLabels", async () => {
+      await LLMManager.enableLLM(context);
+    }),
+
+    // LLM: Change model
+    vscode.commands.registerCommand("visor.llm.changeModel", async () => {
+      await LLMManager.changeModel(context);
+    }),
+
+    // LLM: Reset cache
+    vscode.commands.registerCommand("visor.llm.resetCache", async () => {
+      await LLMManager.resetCache(context);
     })
   );
 }
