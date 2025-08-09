@@ -194,6 +194,19 @@ export const COMPLEXITY_NODE_TYPES = {
     "_let_chain",
     "closure_expression",
   ]),
+
+  go: new Set([
+    "if_statement",
+    "else_clause",
+    "for_statement",
+    "range_clause",
+    "switch_statement",
+    "case_clause",
+    "type_switch_statement",
+    "type_case_clause",
+    "binary_expression",
+    "logical_expression",
+  ]),
 } as const;
 
 /**

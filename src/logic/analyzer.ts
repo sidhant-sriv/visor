@@ -6,6 +6,7 @@ import { analyzeJavaCode } from "./language-services/java";
 import { analyzeCppCode } from "./language-services/cpp";
 import { analyzeCCode } from "./language-services/c";
 import { analyzeRustCode } from "./language-services/rust";
+import { analyzeGoCode } from "./language-services/go";
 
 /**
  * Analyzes the given source code and generates a flowchart.
@@ -35,6 +36,8 @@ export async function analyzeCode(
       return analyzeCCode(sourceCode, functionName, position);
     case "rust":
       return analyzeRustCode(sourceCode, functionName, position);
+    case "go":
+      return analyzeGoCode(sourceCode, functionName, position);
     default:
       throw new Error(`Unsupported language: ${languageId}`);
   }
