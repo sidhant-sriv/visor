@@ -1,9 +1,10 @@
 import * as vscode from "vscode";
-import { LLMService, Provider, getGroqModels } from "./LLMService";
+import { LLMService, Provider, getGroqModels, getOllamaModels, extractNodeLabels, replaceNodeLabels, ExtractedLabels } from "./LLMService";
 import { logInfo, logWarn } from "./LLMLogger";
 
 export class LLMManager {
   private static inMemoryCache: Map<string, string> = new Map();
+  private static inMemoryLabelCache: Map<string, string> = new Map();
   private static inflight: Map<string, Promise<string>> = new Map();
 
   public static async isEnabled(context: vscode.ExtensionContext): Promise<boolean> {
@@ -11,6 +12,10 @@ export class LLMManager {
     const enabled = cfg.get<boolean>("enabled", false);
     if (!enabled) return false;
     const provider = cfg.get<string>("provider", "openai") as Provider;
+    if (provider === "ollama") {
+      // Ollama runs locally and does not require an API key
+      return true;
+    }
     const key = await context.secrets.get(LLMManager.secretKeyName(provider));
     return Boolean(key);
   }
@@ -21,6 +26,7 @@ export class LLMManager {
         { label: "OpenAI", value: "openai" },
         { label: "Gemini", value: "gemini" },
         { label: "Groq", value: "groq" },
+        { label: "Ollama (local)", value: "ollama" },
       ],
       {
         title: "Choose LLM Provider",
@@ -30,16 +36,28 @@ export class LLMManager {
     if (!providerPick) return;
     const provider = providerPick.value as Provider;
 
-    const apiKey = await vscode.window.showInputBox({
-      title: `${providerPick.label} API Key`,
-      placeHolder: "Enter your API key",
-      ignoreFocusOut: true,
-      password: true,
-      validateInput: (val) => (!val ? "API key is required" : undefined),
-    });
-    if (!apiKey) return;
-
-    await context.secrets.store(LLMManager.secretKeyName(provider), apiKey);
+    // For Ollama, we don't need an API key; optionally collect base URL
+    let baseUrl: string | undefined;
+    if (provider === "ollama") {
+      baseUrl = await vscode.window.showInputBox({
+        title: `Ollama Base URL`,
+        placeHolder: "http://localhost:11434",
+        value: "http://localhost:11434",
+        ignoreFocusOut: true,
+        prompt: "Enter the Ollama server URL if different from default",
+      });
+      if (baseUrl) await context.secrets.store(LLMManager.secretBaseUrlName("ollama"), baseUrl);
+    } else {
+      const apiKey = await vscode.window.showInputBox({
+        title: `${providerPick.label} API Key`,
+        placeHolder: "Enter your API key",
+        ignoreFocusOut: true,
+        password: true,
+        validateInput: (val) => (!val ? "API key is required" : undefined),
+      });
+      if (!apiKey) return;
+      await context.secrets.store(LLMManager.secretKeyName(provider), apiKey);
+    }
     await vscode.workspace.getConfiguration("visor.llm").update("provider", provider, vscode.ConfigurationTarget.Global);
     await vscode.workspace.getConfiguration("visor.llm").update("enabled", true, vscode.ConfigurationTarget.Global);
 
@@ -47,7 +65,13 @@ export class LLMManager {
     let suggestions: string[] = LLMService.getDefaultModels(provider);
     if (provider === "groq") {
       logInfo("Fetching Groq models during onboarding");
-      const remote = await getGroqModels(apiKey);
+      const apiKey = await context.secrets.get(LLMManager.secretKeyName("groq"));
+      const remote = apiKey ? await getGroqModels(apiKey) : [];
+      if (remote.length > 0) suggestions = remote;
+    }
+    if (provider === "ollama") {
+      const base = (await context.secrets.get(LLMManager.secretBaseUrlName("ollama"))) || undefined;
+      const remote = await getOllamaModels(base);
       if (remote.length > 0) suggestions = remote;
     }
     const modelPick = await vscode.window.showQuickPick(
@@ -79,6 +103,11 @@ export class LLMManager {
         if (remote.length > 0) suggestions = remote;
       }
     }
+    if (provider === "ollama") {
+      const base = (await context.secrets.get(LLMManager.secretBaseUrlName("ollama"))) || undefined;
+      const remote = await getOllamaModels(base);
+      if (remote.length > 0) suggestions = remote;
+    }
     const current = cfg.get<string>("model", suggestions[0] || "");
 
     const pick = await vscode.window.showQuickPick(
@@ -101,7 +130,9 @@ export class LLMManager {
 
   public static async resetCache(context: vscode.ExtensionContext): Promise<void> {
     LLMManager.inMemoryCache.clear();
+    LLMManager.inMemoryLabelCache.clear();
     await context.globalState.update("visor.llm.cache", {});
+    await context.globalState.update("visor.llm.labelCache", {});
     void vscode.window.showInformationMessage("Visor LLM cache cleared.");
   }
 
@@ -129,8 +160,12 @@ export class LLMManager {
     if (!enabled) return null;
     const style = vscode.workspace.getConfiguration("visor.llm").get<string>("style", "concise");
     const language = vscode.workspace.getConfiguration("visor.llm").get<string>("language", "");
-    const key = await context.secrets.get(this.secretKeyName(provider));
-    if (!key) {
+    const key = provider === "ollama" ? undefined : await context.secrets.get(this.secretKeyName(provider));
+    let baseUrl: string | undefined = undefined;
+    if (provider === "ollama") {
+      baseUrl = (await context.secrets.get(this.secretBaseUrlName("ollama"))) || undefined;
+    }
+    if (provider !== "ollama" && !key) {
       logWarn(`No API key found for provider ${provider}`);
       return null;
     }
@@ -138,6 +173,7 @@ export class LLMManager {
     const cacheKey = await LLMService.computeCacheKey(mermaidSource, provider, effectiveModel, style, language);
     logInfo(`Cache key ${cacheKey.substring(0,8)}...`);
     const persistent = context.globalState.get<Record<string, string>>("visor.llm.cache", {});
+    const persistentLabel = context.globalState.get<Record<string, string>>("visor.llm.labelCache", {});
     if (cacheKey in persistent) {
       logInfo(`Cache hit: persistent`);
       this.inMemoryCache.set(cacheKey, persistent[cacheKey]);
@@ -154,13 +190,78 @@ export class LLMManager {
 
     const promise = (async () => {
       logInfo(`LLM call dispatch`);
-      const translated = await LLLMServiceInstance.translateLabels({
+      // Attempt incremental per-label caching flow for label-only providers
+      if (provider !== "groq") {
+        const extraction: ExtractedLabels = extractNodeLabels(mermaidSource);
+        if (extraction && extraction.labels.length > 0) {
+          // Determine which labels are already cached
+          const labelKeys = await Promise.all(
+            extraction.labels.map((label) => LLMService.computeLabelCacheKey(label, provider, effectiveModel, style, language))
+          );
+          const missingIndices: number[] = [];
+          const translatedLabels: string[] = new Array(extraction.labels.length);
+          for (let i = 0; i < labelKeys.length; i++) {
+            const k = labelKeys[i];
+            const mem = this.inMemoryLabelCache.get(k);
+            const persisted = persistentLabel[k];
+            if (mem) {
+              translatedLabels[i] = mem;
+            } else if (persisted) {
+              translatedLabels[i] = persisted;
+              this.inMemoryLabelCache.set(k, persisted);
+            } else {
+              missingIndices.push(i);
+            }
+          }
+          if (missingIndices.length === 0) {
+            // Everything cached: rebuild without calling provider
+            const replaced = replaceNodeLabels(mermaidSource, extraction, translatedLabels);
+            this.inMemoryCache.set(cacheKey, replaced);
+            const updated = { ...persistent, [cacheKey]: replaced };
+            await context.globalState.update("visor.llm.cache", updated);
+            return replaced;
+          } else if (missingIndices.length > 0) {
+            const missingLabels = missingIndices.map((i) => extraction.labels[i]);
+            const subset = await LLMServiceInstance.translateLabelSubset(
+              { provider, model: effectiveModel, apiKey: key || "", style, language, baseUrl },
+              missingLabels
+            );
+            if (subset && subset.length === missingLabels.length) {
+              // Merge subset back
+              for (let j = 0; j < missingIndices.length; j++) {
+                const idx = missingIndices[j];
+                translatedLabels[idx] = subset[j];
+                const lk = labelKeys[idx];
+                this.inMemoryLabelCache.set(lk, subset[j]);
+              }
+              // Persist updated per-label cache
+              const updatedLabelCache = { ...persistentLabel };
+              for (let j = 0; j < extraction.labels.length; j++) {
+                const lk = labelKeys[j];
+                const v = translatedLabels[j];
+                if (lk && v) updatedLabelCache[lk] = v;
+              }
+              await context.globalState.update("visor.llm.labelCache", updatedLabelCache);
+              // Rebuild mermaid
+              const replaced = replaceNodeLabels(mermaidSource, extraction, translatedLabels);
+              this.inMemoryCache.set(cacheKey, replaced);
+              const updated = { ...persistent, [cacheKey]: replaced };
+              await context.globalState.update("visor.llm.cache", updated);
+              return replaced;
+            }
+            // If subset failed, fall through to full translation
+          }
+        }
+      }
+
+      const translated = await LLMServiceInstance.translateLabels({
         mermaidSource,
         provider,
         model: effectiveModel,
-        apiKey: key,
+        apiKey: key || "",
         style,
         language,
+        baseUrl,
       });
       logInfo(`LLM call resolved: ${translated ? 'ok' : 'null'}`);
       if (!translated) return mermaidSource;
@@ -182,9 +283,13 @@ export class LLMManager {
   private static secretKeyName(provider: Provider): string {
     return `visor.llm.${provider}.apiKey`;
   }
+
+  private static secretBaseUrlName(provider: Provider): string {
+    return `visor.llm.${provider}.baseUrl`;
+  }
 }
 
 // Lazily create a single service instance
-const LLLMServiceInstance = new LLMService();
+const LLMServiceInstance = new LLMService();
 
 

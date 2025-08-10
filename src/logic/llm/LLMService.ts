@@ -1,7 +1,7 @@
 import * as crypto from "crypto";
 import { logInfo, logWarn, logError } from "./LLMLogger";
 
-export type Provider = "openai" | "gemini" | "groq";
+export type Provider = "openai" | "gemini" | "groq" | "ollama";
 
 export interface TranslateParams {
   mermaidSource: string;
@@ -10,6 +10,8 @@ export interface TranslateParams {
   apiKey: string;
   style?: string;
   language?: string;
+  // For providers that use a base URL instead of an API key (e.g., Ollama)
+  baseUrl?: string;
 }
 
 export class LLMService {
@@ -21,6 +23,9 @@ export class LLMService {
         return ["gemini-1.5-flash", "gemini-1.5-pro"];
       case "groq":
         return ["openai/gpt-oss-20b"];
+      case "ollama":
+        // Commonly available local models in Ollama (actual availability depends on local installation)
+        return ["llama3.2", "llama3.1", "qwen2.5:7b", "mistral:7b"];
     }
   }
 
@@ -34,6 +39,24 @@ export class LLMService {
     const version = "v2";
     const h = crypto.createHash("sha256");
     h.update(mermaidSource);
+    h.update(`|${provider}|${model}|style=${style || ""}|lang=${language || ""}|${version}`);
+    return h.digest("hex");
+  }
+
+  /**
+   * Compute a stable cache key for a single label, capturing provider/model/style/language.
+   * Changes to any of these inputs will invalidate the cached translation for that label.
+   */
+  public static async computeLabelCacheKey(
+    label: string,
+    provider: Provider,
+    model: string,
+    style?: string,
+    language?: string
+  ): Promise<string> {
+    const version = "lv1"; // label-cache version
+    const h = crypto.createHash("sha256");
+    h.update(label);
     h.update(`|${provider}|${model}|style=${style || ""}|lang=${language || ""}|${version}`);
     return h.digest("hex");
   }
@@ -54,6 +77,29 @@ export class LLMService {
     const rewritten = await callProvider(params, extraction.labels);
     if (!rewritten || rewritten.length !== extraction.labels.length) return null;
     return replaceNodeLabels(mermaidSource, extraction, rewritten);
+  }
+
+  /**
+   * Translate an arbitrary subset/list of labels using the configured provider.
+   * Returns the translated labels in the same order as input.
+   */
+  public async translateLabelSubset(
+    params: Omit<TranslateParams, "mermaidSource">,
+    labels: string[]
+  ): Promise<string[] | null> {
+    if (labels.length === 0) return [];
+    return callProvider(
+      {
+        provider: params.provider,
+        model: params.model,
+        apiKey: params.apiKey,
+        style: params.style,
+        language: params.language,
+        baseUrl: params.baseUrl,
+        // mermaidSource intentionally omitted
+      } as TranslateParams,
+      labels
+    );
   }
 }
 
@@ -113,7 +159,7 @@ function htmlUnescape(s: string): string {
 }
 
 async function callProvider(params: TranslateParams, labels: string[]): Promise<string[] | null> {
-  const { provider, model, apiKey, style, language } = params;
+  const { provider, model, apiKey, style, language, baseUrl } = params;
   const instruction = [
     "You are a label rewritter for flowchart nodes.",
     "- INPUT: JSON with keys 'instruction' and 'labels' (array of strings).",
@@ -139,6 +185,8 @@ async function callProvider(params: TranslateParams, labels: string[]): Promise<
         return await callGemini(model, apiKey, payload);
       case "groq":
         return await callGroq(model, apiKey, payload);
+      case "ollama":
+        return await callOllama(model, baseUrl, payload);
     }
   } catch {
     return null;
@@ -278,6 +326,55 @@ async function callGroq(model: string, apiKey: string, payload: { instruction: s
   return parseLabelsJsonText(content);
 }
 
+// -------------------- Ollama (local) --------------------
+interface OllamaChatMessage { role: string; content: string }
+interface OllamaChatResponse { message?: { role?: string; content?: string } }
+function isOllamaChatResponse(x: unknown): x is OllamaChatResponse {
+  if (!x || typeof x !== "object") return false;
+  const obj = x as { message?: unknown };
+  if (obj.message === undefined) return true; // tolerate minimal structures
+  if (!obj.message || typeof obj.message !== "object") return false;
+  const msg = obj.message as { content?: unknown };
+  return msg.content === undefined || typeof msg.content === "string";
+}
+
+async function callOllama(
+  model: string,
+  baseUrl: string | undefined,
+  payload: { instruction: string; labels: string[] }
+): Promise<string[] | null> {
+  const urlBase = (baseUrl && baseUrl.trim()) ? baseUrl.trim().replace(/\/$/, "") : "http://localhost:11434";
+  const url = `${urlBase}/api/chat`;
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: "Follow the user's constraints exactly. Output pure JSON array only." },
+      { role: "user", content: payload.instruction },
+      { role: "user", content: JSON.stringify(payload) },
+    ] as OllamaChatMessage[],
+    options: { temperature: 0.2 },
+    stream: false,
+  };
+  logInfo(`Ollama label-array request: base=${urlBase} model=${model} body=${JSON.stringify(body).slice(0, 2000)}`);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    logError(`Ollama fetch error: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+  if (!res.ok) return null;
+  const data: unknown = await res.json();
+  if (!isOllamaChatResponse(data)) return null;
+  const content: string | undefined = (data as OllamaChatResponse).message?.content;
+  if (!content) return null;
+  return parseLabelsJsonText(content);
+}
+
 // -------------------- Groq: full Mermaid rewrite path --------------------
 function buildGroqMermaidPrompt(mermaidSource: string, style?: string, language?: string): string {
   const lines: string[] = [];
@@ -373,13 +470,14 @@ async function callGroqRewriteMermaid(params: TranslateParams): Promise<string |
         if (extraction.labels.length === labels.length) {
           return replaceNodeLabels(params.mermaidSource, extraction, labels);
         }
-      } catch {}
+      } catch {
+        logWarn("Groq response did not contain a valid Mermaid graph; attempting fallback label replacement.");
+      }
     }
   }
   return cleaned;
 }
 
-// -------------------- Groq models listing --------------------
 interface GroqModelsListResponse { data?: Array<{ id?: string }> }
 function isGroqModelsListResponse(x: unknown): x is GroqModelsListResponse {
   if (!x || typeof x !== "object") return false;
@@ -403,6 +501,33 @@ export async function getGroqModels(apiKey: string): Promise<string[]> {
     const ids = data.data?.map((m) => (m && m.id ? String(m.id) : "")).filter((s) => !!s) || [];
     // Optional: filter to chat-capable models
     return ids;
+  } catch {
+    return [];
+  }
+}
+
+// -------------------- Ollama models listing --------------------
+interface OllamaTagsResponse { models?: Array<{ name?: string }> }
+function isOllamaTagsResponse(x: unknown): x is OllamaTagsResponse {
+  if (!x || typeof x !== "object") return false;
+  const obj = x as { models?: unknown };
+  if (obj.models === undefined) return false;
+  return Array.isArray(obj.models);
+}
+
+export async function getOllamaModels(baseUrl?: string): Promise<string[]> {
+  const urlBase = (baseUrl && baseUrl.trim()) ? baseUrl.trim().replace(/\/$/, "") : "http://localhost:11434";
+  const url = `${urlBase}/api/tags`;
+  try {
+    const res = await fetch(url, { method: "GET" });
+    if (!res.ok) {
+      logWarn(`Ollama models list failed: ${res.status}`);
+      return [];
+    }
+    const data: unknown = await res.json();
+    if (!isOllamaTagsResponse(data)) return [];
+    const names = (data.models || []).map((m) => (m && m.name ? String(m.name) : "")).filter((s) => !!s);
+    return names;
   } catch {
     return [];
   }

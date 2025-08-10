@@ -81,6 +81,7 @@ export abstract class BaseFlowchartProvider {
   protected _eventListenersSetup: boolean = false;
   protected _mermaidCodeOriginal?: string;
   protected _mermaidCodeLLM?: string;
+  private _cachedClickHandlers?: { source: string; lines: string[] };
 
   constructor(protected readonly _extensionUri: vscode.Uri) {
     // Listen for configuration changes to update themes
@@ -219,7 +220,7 @@ export abstract class BaseFlowchartProvider {
         console.log("Visor LLM: disableLLMLabels received");
         const webview = this.getWebview();
         if (webview && this._mermaidCodeOriginal) {
-          webview.postMessage({ command: "applyMermaid", payload: { mermaid: this._mermaidCodeOriginal } });
+          webview.postMessage({ command: "applyMermaid", payload: { mermaid: this._mermaidCodeOriginal, llmApplied: false } });
         }
         break;
       }
@@ -242,15 +243,39 @@ export abstract class BaseFlowchartProvider {
    * Merge click handlers from original Mermaid into a translated Mermaid string
    * to preserve node interactivity after LLM rewrites.
    */
+  private static isClickLine(line: string): boolean {
+    let index = 0;
+    // Skip leading spaces and tabs without allocating new strings
+    while (index < line.length) {
+      const code = line.charCodeAt(index);
+      if (code !== 32 && code !== 9) break; // 32 = space, 9 = tab
+      index += 1;
+    }
+    return line.startsWith("click ", index);
+  }
+
+  private extractClickHandlers(src: string): string[] {
+    if (this._cachedClickHandlers && this._cachedClickHandlers.source === src) {
+      return this._cachedClickHandlers.lines;
+    }
+    const lines: string[] = [];
+    const srcLines = src.split(/\r?\n/);
+    for (const line of srcLines) {
+      if (BaseFlowchartProvider.isClickLine(line)) {
+        lines.push(line);
+      }
+    }
+    this._cachedClickHandlers = { source: src, lines };
+    return lines;
+  }
+
   private mergeClickHandlers(originalSrc: string, translatedSrc: string): string {
     try {
-      const origClicks = originalSrc
-        .split(/\r?\n/)
-        .filter((l) => l.trim().startsWith("click "));
+      const origClicks = this.extractClickHandlers(originalSrc);
       if (origClicks.length === 0) return translatedSrc;
       const withoutClicks = translatedSrc
         .split(/\r?\n/)
-        .filter((l) => !l.trim().startsWith("click "))
+        .filter((l) => !BaseFlowchartProvider.isClickLine(l))
         .join("\n");
       // Append original click lines at end
       return `${withoutClicks}\n${origClicks.join("\n")}\n`;
@@ -272,9 +297,13 @@ export abstract class BaseFlowchartProvider {
         // Preserve click interactivity
         translated = this.mergeClickHandlers(this._mermaidCodeOriginal, translated);
         this._mermaidCodeLLM = translated;
-        webview.postMessage({ command: "applyMermaid", payload: { mermaid: translated } });
+        webview.postMessage({ command: "applyMermaid", payload: { mermaid: translated, llmApplied: true } });
       } else {
         vscode.window.showWarningMessage("LLM labels could not be applied. Using original labels.");
+        // Notify webview to reset LLM UI state
+        try {
+          webview.postMessage({ command: "applyMermaid", payload: { mermaid: this._mermaidCodeOriginal, llmApplied: false } });
+        } catch {}
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -949,6 +978,25 @@ ${flowchartSyntax}
                                     });
                                 }
                             }, 0);
+                            // Mark LLM enabled only after a successful apply if requested
+                            try {
+                                if (message.payload && message.payload.llmApplied) {
+                                    localStorage.setItem('visor-llm-enabled', 'true');
+                                    const llmToggle = document.getElementById('llm-toggle');
+                                    if (llmToggle) {
+                                        llmToggle.textContent = '🧠✓ LLM';
+                                        llmToggle.title = 'Disable LLM labels';
+                                    }
+                                } else {
+                                    // If this was a disable request, ensure state reflects disabled
+                                    localStorage.setItem('visor-llm-enabled', 'false');
+                                    const llmToggle = document.getElementById('llm-toggle');
+                                    if (llmToggle) {
+                                        llmToggle.textContent = '🧠 LLM';
+                                        llmToggle.title = 'Enable LLM labels';
+                                    }
+                                }
+                            } catch {}
                         }
                         break;
                     }
@@ -1198,12 +1246,13 @@ ${flowchartSyntax}
                         llmToggle.textContent = '🧠 LLM';
                         llmToggle.title = 'Enable LLM labels';
                     } else {
+                        // Optimistically show progress, but do not flip the enabled state yet.
                         llmToggle.setAttribute('disabled', 'true');
                         llmToggle.textContent = '🧠…';
                         vscode.postMessage({ command: 'requestLLMLabels', payload: {} });
-                        // Re-enable after a short delay; final state is set upon applyMermaid
+                        // Re-enable after a short delay; final state will be set upon successful applyMermaid
                         setTimeout(() => llmToggle.removeAttribute('disabled'), 2000);
-                        localStorage.setItem('visor-llm-enabled', 'true');
+                        // Do NOT set localStorage here. It will be set in applyMermaid handler below.
                     }
                 };
             }

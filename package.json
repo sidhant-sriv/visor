@@ -213,7 +213,7 @@
         },
         "visor.llm.provider": {
           "type": "string",
-          "enum": ["openai", "gemini", "groq"],
+          "enum": ["openai", "gemini", "groq", "ollama"],
           "default": "openai",
           "description": "LLM provider used for translating node labels"
         },
