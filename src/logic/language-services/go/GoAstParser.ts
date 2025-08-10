@@ -53,7 +53,6 @@ export class GoAstParser extends AbstractParser {
     const tree = this.parser.parse(sourceCode);
     this.resetState();
 
-    // Pick target function
     let targetNode: Parser.SyntaxNode | undefined;
     if (position !== undefined) {
       targetNode = tree.rootNode
@@ -70,20 +69,14 @@ export class GoAstParser extends AbstractParser {
     if (!targetNode) {
       return {
         nodes: [
-          this.createSemanticNode(
-            "msg",
-            "Place cursor in a function.",
-            NodeType.PROCESS
-          ),
+          this.createSemanticNode("msg", "Place cursor in a function.", NodeType.PROCESS),
         ],
         edges: [],
         locationMap: [],
       };
     }
 
-    const funcNameStr = this.escapeString(
-      this.extractFunctionName(targetNode) || "[anonymous]"
-    );
+    const funcNameStr = this.escapeString(this.extractFunctionName(targetNode) || "[anonymous]");
     const title = `Flowchart for function: ${funcNameStr}`;
     const body = targetNode.childForFieldName("body");
 
@@ -92,90 +85,40 @@ export class GoAstParser extends AbstractParser {
     const entryId = this.generateNodeId("start");
     const exitId = this.generateNodeId("end");
 
-    nodes.push(
-      this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode)
-    );
-    nodes.push(
-      this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode)
-    );
-    this.locationMap.push({
-      start: targetNode.startIndex,
-      end: targetNode.endIndex,
-      nodeId: entryId,
-    });
-    this.locationMap.push({
-      start: targetNode.startIndex,
-      end: targetNode.endIndex,
-      nodeId: exitId,
-    });
+    nodes.push(this.createSemanticNode(entryId, "Start", NodeType.ENTRY, targetNode));
+    nodes.push(this.createSemanticNode(exitId, "End", NodeType.EXIT, targetNode));
+    this.locationMap.push({ start: targetNode.startIndex, end: targetNode.endIndex, nodeId: entryId });
+    this.locationMap.push({ start: targetNode.startIndex, end: targetNode.endIndex, nodeId: exitId });
 
     if (!body) {
-      const ir: FlowchartIR = {
-        nodes,
-        edges: [{ from: entryId, to: exitId }],
-        entryNodeId: entryId,
-        exitNodeId: exitId,
-        locationMap: this.locationMap,
-        title,
-      };
-      this.addFunctionComplexity(ir, targetNode);
-      return ir;
+        const ir: FlowchartIR = { nodes, edges: [{ from: entryId, to: exitId }], entryNodeId: entryId, exitNodeId: exitId, locationMap: this.locationMap, title };
+        this.addFunctionComplexity(ir, targetNode);
+        return ir;
     }
 
     const bodyRes = this.processBlock(body, exitId);
     nodes.push(...bodyRes.nodes);
     edges.push(...bodyRes.edges);
-    edges.push(
-      bodyRes.entryNodeId
-        ? { from: entryId, to: bodyRes.entryNodeId }
-        : { from: entryId, to: exitId }
-    );
+    edges.push(bodyRes.entryNodeId ? { from: entryId, to: bodyRes.entryNodeId } : { from: entryId, to: exitId });
     bodyRes.exitPoints.forEach((ep) => {
-      if (!bodyRes.nodesConnectedToExit.has(ep.id))
-        edges.push({ from: ep.id, to: exitId, label: ep.label });
+        if (!bodyRes.nodesConnectedToExit.has(ep.id))
+            edges.push({ from: ep.id, to: exitId, label: ep.label });
     });
 
     const idSet = new Set(nodes.map((n) => n.id));
-    const validEdges = edges.filter(
-      (e) => idSet.has(e.from) && idSet.has(e.to)
-    );
-    const filteredLocationMap = this.locationMap.filter((lm) =>
-      idSet.has(lm.nodeId)
-    );
-
-    const ir: FlowchartIR = {
-      nodes,
-      edges: validEdges,
-      entryNodeId: entryId,
-      exitNodeId: exitId,
-      locationMap: filteredLocationMap,
-      title,
-    };
+    const validEdges = edges.filter((e) => idSet.has(e.from) && idSet.has(e.to));
+    const filteredLocationMap = this.locationMap.filter((lm) => idSet.has(lm.nodeId));
+    
+    const ir: FlowchartIR = { nodes, edges: validEdges, entryNodeId: entryId, exitNodeId: exitId, locationMap: filteredLocationMap, title };
     this.addFunctionComplexity(ir, targetNode);
     return ir;
   }
 
-  // Basic block handling for Go
-  protected processBlock(
-    blockNode: Parser.SyntaxNode,
+  private processStatementList(
+    statements: Parser.SyntaxNode[],
     exitId: string,
-    loopContext?: LoopContext,
-    _finallyContext?: { finallyEntryId: string }
+    loopContext?: LoopContext
   ): ProcessResult {
-    if (!blockNode) return this.createProcessResult();
-
-    const statements = blockNode.namedChildren.filter(
-      (s) =>
-        ![
-          "line_comment",
-          "block_comment",
-          "comment",
-          "empty_statement",
-          "import_declaration",
-          "package_clause",
-          "type_declaration",
-        ].includes(s.type)
-    );
     if (statements.length === 0) return this.createProcessResult();
 
     const nodes: FlowchartNode[] = [];
@@ -185,28 +128,45 @@ export class GoAstParser extends AbstractParser {
     let lastExitPoints: { id: string; label?: string }[] = [];
 
     for (const st of statements) {
+      if (st.type === 'fallthrough_statement') continue;
+      
       const res = this.processStatement(st, exitId, loopContext);
       if (res.nodes.length === 0 && !res.entryNodeId) continue;
+      
       nodes.push(...res.nodes);
       edges.push(...res.edges);
       res.nodesConnectedToExit.forEach((n) => nodesConnectedToExit.add(n));
-      if (!entryNodeId) entryNodeId = res.entryNodeId;
-      if (lastExitPoints.length > 0 && res.entryNodeId) {
-        for (const ep of lastExitPoints)
-          edges.push({ from: ep.id, to: res.entryNodeId, label: ep.label });
+      
+      if (!entryNodeId) {
+        entryNodeId = res.entryNodeId;
       }
+      
+      if (lastExitPoints.length > 0 && res.entryNodeId) {
+        for (const ep of lastExitPoints) {
+          edges.push({ from: ep.id, to: res.entryNodeId, label: ep.label });
+        }
+      }
+      
       lastExitPoints = res.exitPoints;
-      // Stop sequential flow if no exits from this statement
-      if (res.entryNodeId && lastExitPoints.length === 0) break;
+      
+      if (res.entryNodeId && lastExitPoints.length === 0) {
+        break; 
+      }
     }
 
-    return this.createProcessResult(
-      nodes,
-      edges,
-      entryNodeId,
-      lastExitPoints,
-      nodesConnectedToExit
-    );
+    return this.createProcessResult(nodes, edges, entryNodeId, lastExitPoints, nodesConnectedToExit);
+  }
+  
+  protected processBlock(
+    blockNode: Parser.SyntaxNode | null,
+    exitId: string,
+    loopContext?: LoopContext,
+  ): ProcessResult {
+    if (!blockNode) {
+      return this.createProcessResult();
+    }
+    const statements = blockNode.namedChildren.filter(s => !["line_comment", "block_comment", "comment", "empty_statement", "import_declaration", "package_clause", "type_declaration"].includes(s.type));
+    return this.processStatementList(statements, exitId, loopContext);
   }
 
   protected processStatement(
@@ -233,6 +193,8 @@ export class GoAstParser extends AbstractParser {
         return this.processIf(node, exitId, loopContext);
       case "for_statement":
         return this.processFor(node, exitId);
+      case "expression_switch_statement":
+      case "type_switch_statement":
       case "switch_statement":
         return this.processSwitch(node, exitId, loopContext);
       case "select_statement":
@@ -256,18 +218,9 @@ export class GoAstParser extends AbstractParser {
     const result = this.createProcessResult();
     const id = this.generateNodeId("assign");
     result.nodes.push(
-      this.createSemanticNode(
-        id,
-        this.summarizeNode(node),
-        NodeType.ASSIGNMENT,
-        node
-      )
+      this.createSemanticNode(id, this.summarizeNode(node), NodeType.ASSIGNMENT, node)
     );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: id,
-    });
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: id });
     result.entryNodeId = id;
     result.exitPoints.push({ id });
     return result;
@@ -277,18 +230,9 @@ export class GoAstParser extends AbstractParser {
     const result = this.createProcessResult();
     const id = this.generateNodeId("call");
     result.nodes.push(
-      this.createSemanticNode(
-        id,
-        this.summarizeNode(node),
-        NodeType.FUNCTION_CALL,
-        node
-      )
+      this.createSemanticNode(id, this.summarizeNode(node), NodeType.FUNCTION_CALL, node)
     );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: id,
-    });
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: id });
     result.entryNodeId = id;
     result.exitPoints.push({ id });
     return result;
@@ -298,42 +242,21 @@ export class GoAstParser extends AbstractParser {
     const result = this.createProcessResult();
     const id = this.generateNodeId("expr");
     result.nodes.push(
-      this.createSemanticNode(
-        id,
-        this.summarizeNode(node),
-        NodeType.PROCESS,
-        node
-      )
+      this.createSemanticNode(id, this.summarizeNode(node), NodeType.PROCESS, node)
     );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: id,
-    });
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: id });
     result.entryNodeId = id;
     result.exitPoints.push({ id });
     return result;
   }
 
-  private processReturn(
-    node: Parser.SyntaxNode,
-    exitId: string
-  ): ProcessResult {
+  private processReturn(node: Parser.SyntaxNode, exitId: string): ProcessResult {
     const result = this.createProcessResult();
     const id = this.generateNodeId("ret");
     result.nodes.push(
-      this.createSemanticNode(
-        id,
-        this.summarizeNode(node),
-        NodeType.RETURN,
-        node
-      )
+      this.createSemanticNode(id, this.summarizeNode(node), NodeType.RETURN, node)
     );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: id,
-    });
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: id });
     result.entryNodeId = id;
     result.edges.push({ from: id, to: exitId });
     result.nodesConnectedToExit.add(id);
@@ -353,18 +276,9 @@ export class GoAstParser extends AbstractParser {
 
     const decisionId = this.generateNodeId("if");
     result.nodes.push(
-      this.createSemanticNode(
-        decisionId,
-        cond ? this.summarizeNode(cond) : "if",
-        NodeType.DECISION,
-        node
-      )
+      this.createSemanticNode(decisionId, cond ? this.summarizeNode(cond) : "if", NodeType.DECISION, node)
     );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: decisionId,
-    });
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: decisionId });
 
     if (initializer) {
       const initRes = this.processStatement(initializer, exitId, loopContext);
@@ -372,69 +286,45 @@ export class GoAstParser extends AbstractParser {
       result.edges.push(...initRes.edges);
       if (initRes.entryNodeId) {
         result.entryNodeId = initRes.entryNodeId;
-        result.edges.push({ from: initRes.entryNodeId, to: decisionId });
+        initRes.exitPoints.forEach((ep) => {
+            result.edges.push({ from: ep.id, to: decisionId });
+        });
       }
     } else {
       result.entryNodeId = decisionId;
     }
 
-    const thenRes = thenBlock
-      ? this.processBlock(thenBlock, exitId, loopContext)
-      : this.createProcessResult();
+    const thenRes = thenBlock ? this.processBlock(thenBlock, exitId, loopContext) : this.createProcessResult();
     let elseRes = this.createProcessResult();
     if (elseNode) {
-      elseRes =
-        elseNode.type === "if_statement"
-          ? this.processIf(elseNode, exitId, loopContext)
-          : this.processBlock(elseNode, exitId, loopContext);
+      elseRes = elseNode.type === "if_statement" ? this.processIf(elseNode, exitId, loopContext) : this.processBlock(elseNode, exitId, loopContext);
     }
 
     result.nodes.push(...thenRes.nodes, ...elseRes.nodes);
     result.edges.push(...thenRes.edges, ...elseRes.edges);
     if (thenRes.entryNodeId)
-      result.edges.push({
-        from: decisionId,
-        to: thenRes.entryNodeId,
-        label: "true",
-      });
+      result.edges.push({ from: decisionId, to: thenRes.entryNodeId, label: "true" });
     else result.exitPoints.push({ id: decisionId, label: "true" });
 
     if (elseRes.entryNodeId) {
-      result.edges.push({
-        from: decisionId,
-        to: elseRes.entryNodeId,
-        label: "false",
-      });
+      result.edges.push({ from: decisionId, to: elseRes.entryNodeId, label: "false" });
     } else {
       result.exitPoints.push({ id: decisionId, label: "false" });
     }
 
     result.exitPoints.push(...thenRes.exitPoints, ...elseRes.exitPoints);
-    thenRes.nodesConnectedToExit.forEach((n) =>
-      result.nodesConnectedToExit.add(n)
-    );
-    elseRes.nodesConnectedToExit.forEach((n) =>
-      result.nodesConnectedToExit.add(n)
-    );
+    thenRes.nodesConnectedToExit.forEach((n) => result.nodesConnectedToExit.add(n));
+    elseRes.nodesConnectedToExit.forEach((n) => result.nodesConnectedToExit.add(n));
     return result;
   }
 
   private processFor(node: Parser.SyntaxNode, exitId: string): ProcessResult {
     const result = this.createProcessResult();
-    const clause = node.childForFieldName("clause"); // may be for_clause or range_clause
-    const forClause =
-      clause && clause.type === "for_clause" ? clause : undefined;
-    const initializer = forClause
-      ? forClause.childForFieldName("initializer")
-      : node.childForFieldName("initializer");
-    const cond = forClause
-      ? forClause.childForFieldName("condition")
-      : node.childForFieldName("condition");
-    // In tree-sitter-go, the for_clause field is 'update' (not 'post')
-    const update = forClause
-      ? forClause.childForFieldName("update")
-      : node.childForFieldName("update");
-    const isRange = !!clause && clause.type === "range_clause";
+    const clauseNode = node.children.find(c => c.type === 'for_clause' || c.type === 'range_clause');
+    const initializer = clauseNode?.childForFieldName("initializer") || node.childForFieldName("initializer");
+    const cond = clauseNode?.childForFieldName("condition") || node.childForFieldName("condition");
+    const update = clauseNode?.childForFieldName("update") || node.childForFieldName("update");
+    const isRange = clauseNode?.type === "range_clause";
     const body = node.childForFieldName("body");
 
     let lastId: string | undefined;
@@ -442,67 +332,36 @@ export class GoAstParser extends AbstractParser {
       const initRes = this.processStatement(initializer, exitId);
       result.nodes.push(...initRes.nodes);
       result.edges.push(...initRes.edges);
-      lastId = initRes.entryNodeId;
+      if (initRes.exitPoints.length > 0) lastId = initRes.exitPoints[0].id;
       result.entryNodeId = initRes.entryNodeId;
     }
 
     const headerId = this.generateNodeId("for");
     const headerText = this.summarizeForHeader(node);
-    result.nodes.push(
-      this.createSemanticNode(headerId, headerText, NodeType.LOOP_START, node)
-    );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: headerId,
-    });
+    result.nodes.push(this.createSemanticNode(headerId, headerText, NodeType.LOOP_START, node));
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: headerId });
     if (!result.entryNodeId) result.entryNodeId = headerId;
     if (lastId) result.edges.push({ from: lastId, to: headerId });
 
-    // Prepare a loop-end id for break targets; we'll only add the node if needed
     const endId = this.generateNodeId("for_end");
-
-    // continue target
     let continueTargetId = headerId;
     if (update) {
       const updateId = this.generateNodeId("for_update");
-      result.nodes.push(
-        this.createSemanticNode(
-          updateId,
-          this.summarizeNode(update),
-          NodeType.PROCESS,
-          update
-        )
-      );
-      this.locationMap.push({
-        start: update.startIndex,
-        end: update.endIndex,
-        nodeId: updateId,
-      });
+      result.nodes.push(this.createSemanticNode(updateId, this.summarizeNode(update), NodeType.PROCESS, update));
+      this.locationMap.push({ start: update.startIndex, end: update.endIndex, nodeId: updateId });
       result.edges.push({ from: updateId, to: headerId });
       continueTargetId = updateId;
     }
 
     let hasBreakToEnd = false;
     if (body) {
-      const inner = this.processBlock(body, exitId, {
-        breakTargetId: endId,
-        continueTargetId,
-      });
+      const inner = this.processBlock(body, exitId, { breakTargetId: endId, continueTargetId });
       result.nodes.push(...inner.nodes);
       result.edges.push(...inner.edges);
       if (inner.entryNodeId) {
-        result.edges.push({
-          from: headerId,
-          to: inner.entryNodeId,
-          label: cond ? "true" : "loop",
-        });
+        result.edges.push({ from: headerId, to: inner.entryNodeId, label: cond ? "true" : "loop" });
       } else {
-        result.edges.push({
-          from: headerId,
-          to: continueTargetId,
-          label: cond ? "true" : "loop",
-        });
+        result.edges.push({ from: headerId, to: continueTargetId, label: cond ? "true" : "loop" });
       }
       inner.exitPoints.forEach((ep) => {
         if (!inner.nodesConnectedToExit.has(ep.id)) {
@@ -511,34 +370,18 @@ export class GoAstParser extends AbstractParser {
       });
       hasBreakToEnd = inner.edges.some((e) => e.to === endId);
     } else {
-      result.edges.push({
-        from: headerId,
-        to: continueTargetId,
-        label: cond ? "true" : "loop",
-      });
+      result.edges.push({ from: headerId, to: continueTargetId, label: cond ? "true" : "loop" });
     }
 
-    // Decide whether a Loop End node is needed
     const needsEnd = !!cond || isRange || hasBreakToEnd;
     if (needsEnd) {
-      result.nodes.push(
-        this.createSemanticNode(endId, "Loop End", NodeType.LOOP_END, node)
-      );
-      this.locationMap.push({
-        start: node.startIndex,
-        end: node.endIndex,
-        nodeId: endId,
-      });
+      result.nodes.push(this.createSemanticNode(endId, "Loop End", NodeType.LOOP_END, node));
+      this.locationMap.push({ start: node.endIndex -1, end: node.endIndex, nodeId: endId });
       if (cond || isRange) {
-        result.edges.push({
-          from: headerId,
-          to: endId,
-          label: cond ? "false" : "end",
-        });
+        result.edges.push({ from: headerId, to: endId, label: cond ? "false" : "end" });
       }
       result.exitPoints.push({ id: endId });
     }
-
     return result;
   }
 
@@ -551,101 +394,72 @@ export class GoAstParser extends AbstractParser {
     const switchId = this.generateNodeId("switch");
     const endId = this.generateNodeId("switch_end");
 
-    const headerNode =
-      node.childForFieldName("initializer") || node.childForFieldName("value");
-    const headerText = `switch ${
-      headerNode ? this.summarizeNode(headerNode) : ""
-    }`;
-    result.nodes.push(
-      this.createSemanticNode(switchId, headerText, NodeType.DECISION, node)
-    );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: switchId,
-    });
+    const condition = node.childForFieldName("condition") || node.childForFieldName("value");
+    const label = condition ? `switch ${this.summarizeNode(condition)}` : "switch";
+
+    result.nodes.push(this.createSemanticNode(switchId, label, NodeType.DECISION, node));
     result.entryNodeId = switchId;
-    result.nodes.push(
-      this.createSemanticNode(endId, "End Switch", NodeType.MERGE, node)
+    result.nodes.push(this.createSemanticNode(endId, "End Switch", NodeType.MERGE, node));
+
+    // The case clauses are direct named children of the switch statement node itself.
+    const clauses = node.namedChildren.filter(
+      c => c.type === "expression_case" || c.type === "default_case" || c.type === "type_case_clause"
     );
-    this.locationMap.push({
-      start: node.endIndex - 1,
-      end: node.endIndex,
-      nodeId: endId,
+    
+    if (clauses.length === 0) {
+      result.edges.push({ from: switchId, to: endId });
+      result.exitPoints.push({ id: endId });
+      return result;
+    }
+
+    const clauseInfo = new Map<Parser.SyntaxNode, { bodyRes: ProcessResult; hasFallthrough: boolean }>();
+    
+    clauses.forEach(clause => {
+      const expressionsNode = clause.childForFieldName("expressions") || clause.childForFieldName("type");
+      const statements = clause.namedChildren.filter(c => c.id !== expressionsNode?.id);
+      const hasFallthrough = statements.some(s => s.type === 'fallthrough_statement');
+      const bodyStmts = statements.filter(s => s.type !== 'fallthrough_statement');
+      const bodyRes = this.processStatementList(bodyStmts, exitId, loopContext);
+      clauseInfo.set(clause, { bodyRes, hasFallthrough });
     });
 
-    const caseClauses =
-      node
-        .childForFieldName("body")
-        ?.children.filter((c) => c.type === "expression_case_clause") || [];
+    clauses.forEach((clause, index) => {
+      const info = clauseInfo.get(clause)!;
+      result.nodes.push(...info.bodyRes.nodes);
+      result.edges.push(...info.bodyRes.edges);
 
-    let lastCaseExitPoints: { id: string }[] = [{ id: switchId }];
-    let hasDefault = false;
-
-    for (const clause of caseClauses) {
-      const caseId = this.generateNodeId("case");
-      const caseExpr = clause.childForFieldName("expressions");
-      const isDefault = !caseExpr;
-      if (isDefault) hasDefault = true;
-
-      const caseLabel = isDefault
-        ? "default"
-        : `case ${this.summarizeNode(caseExpr!)}`;
-      result.nodes.push(
-        this.createSemanticNode(caseId, caseLabel, NodeType.DECISION, clause)
-      );
-      this.locationMap.push({
-        start: clause.startIndex,
-        end: clause.endIndex,
-        nodeId: caseId,
-      });
-
-      lastCaseExitPoints.forEach((ep) => {
-        result.edges.push({ from: ep.id, to: caseId });
-      });
-
-      const body = clause.namedChildren.filter(
-        (c) => c.type !== "expression_list"
-      );
-      let caseEntry = caseId;
-      let currentExitPoints: { id: string }[] = [{ id: caseId }];
-      let fallsThrough = false;
-
-      for (const st of body) {
-        if (st.type === "fallthrough_statement") {
-          fallsThrough = true;
-          break;
-        }
-        const stRes = this.processStatement(st, exitId, {
-          ...loopContext,
-          breakTargetId: endId,
-          continueTargetId: loopContext?.continueTargetId || endId,
-        });
-        result.nodes.push(...stRes.nodes);
-        result.edges.push(...stRes.edges);
-        if (stRes.entryNodeId) {
-          currentExitPoints.forEach((ep) => {
-            result.edges.push({ from: ep.id, to: stRes.entryNodeId! });
-          });
-          currentExitPoints = stRes.exitPoints;
+      const isDefault = clause.type === "default_case";
+      const expressions = clause.childForFieldName("expressions") || clause.childForFieldName("type");
+      const rawCaseLabel = isDefault ? "default" : `case ${this.summarizeNode(expressions || clause)}`;
+      const caseLabel = this.escapeString(rawCaseLabel);
+      
+      let branchTargetId = info.bodyRes.entryNodeId;
+      if (!branchTargetId && info.hasFallthrough) {
+        const nextClause = clauses[index + 1];
+        if (nextClause) branchTargetId = clauseInfo.get(nextClause)?.bodyRes.entryNodeId;
+      }
+      branchTargetId = branchTargetId || endId;
+      result.edges.push({ from: switchId, to: branchTargetId, label: caseLabel });
+      
+      let exitTargetId = endId;
+      if (info.hasFallthrough) {
+        const nextClause = clauses[index + 1];
+        if (nextClause) {
+          let nextEntryId: string | undefined;
+          for (let j = index + 1; j < clauses.length; j++) {
+            nextEntryId = clauseInfo.get(clauses[j])!.bodyRes.entryNodeId;
+            if (nextEntryId) break;
+          }
+          exitTargetId = nextEntryId || endId;
         }
       }
-
-      if (fallsThrough) {
-        lastCaseExitPoints = currentExitPoints;
-      } else {
-        currentExitPoints.forEach((ep) => {
-          result.edges.push({ from: ep.id, to: endId });
-        });
-        lastCaseExitPoints = [{ id: caseId }];
-      }
-    }
-
-    if (!hasDefault) {
-      lastCaseExitPoints.forEach((ep) => {
-        result.edges.push({ from: ep.id, to: endId });
+      
+      info.bodyRes.exitPoints.forEach(ep => {
+        if (!info.bodyRes.nodesConnectedToExit.has(ep.id)) {
+          result.edges.push({ from: ep.id, to: exitTargetId });
+        }
       });
-    }
+    });
 
     result.exitPoints.push({ id: endId });
     return result;
@@ -663,67 +477,50 @@ export class GoAstParser extends AbstractParser {
     result.nodes.push(
       this.createSemanticNode(selectId, "select", NodeType.DECISION, node)
     );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: selectId,
-    });
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: selectId });
     result.entryNodeId = selectId;
-    result.nodes.push(
-      this.createSemanticNode(endId, "End Select", NodeType.MERGE, node)
+    result.nodes.push(this.createSemanticNode(endId, "End Select", NodeType.MERGE, node));
+    this.locationMap.push({ start: node.endIndex - 1, end: node.endIndex, nodeId: endId });
+
+    // FIX: The AST for `select` has `communication_case` nodes as direct children,
+    // not nested inside a `block` node.
+    const clauses = node.namedChildren.filter(
+        (c) => c.type === "communication_case" || c.type === "default_case"
     );
-    this.locationMap.push({
-      start: node.endIndex - 1,
-      end: node.endIndex,
-      nodeId: endId,
-    });
 
-    const commClauses =
-      node
-        .childForFieldName("body")
-        ?.children.filter((c) => c.type === "communication_case") || [];
+    if (clauses.length === 0) {
+        result.edges.push({ from: selectId, to: endId });
+        result.exitPoints.push({ id: endId });
+        return result;
+    }
 
-    for (const clause of commClauses) {
-      const caseId = this.generateNodeId("case");
-      const comm =
-        clause.childForFieldName("communication") ||
-        clause.childForFieldName("expression");
-      const isDefault = clause.firstChild?.type === "default";
+    for (const clause of clauses) {
+      const isDefault = clause.type === "default_case";
+      const comm = isDefault ? null : (clause.childForFieldName("communication") || clause.childForFieldName("expression"));
+      const caseLabel = isDefault ? "default" : `case ${this.summarizeNode(comm!)}`;
+      
+      const caseLoopContext: LoopContext = {
+        breakTargetId: endId,
+        continueTargetId: loopContext?.continueTargetId ?? endId,
+      };
+      
+      // The statements are the named children of the clause, excluding the 'communication' part itself.
+      const statements = clause.namedChildren.filter(c => c.id !== comm?.id);
+      const caseBodyRes = this.processStatementList(statements, exitId, caseLoopContext);
 
-      const caseLabel = isDefault
-        ? "default"
-        : `case ${this.summarizeNode(comm!)}`;
-      result.nodes.push(
-        this.createSemanticNode(caseId, caseLabel, NodeType.DECISION, clause)
-      );
-      this.locationMap.push({
-        start: clause.startIndex,
-        end: clause.endIndex,
-        nodeId: caseId,
-      });
-      result.edges.push({ from: selectId, to: caseId });
+      result.nodes.push(...caseBodyRes.nodes);
+      result.edges.push(...caseBodyRes.edges);
 
-      const body = clause.namedChildren.filter((c) => c !== comm);
-      let currentExitPoints: { id: string }[] = [{ id: caseId }];
-
-      for (const st of body) {
-        const stRes = this.processStatement(st, exitId, {
-          ...loopContext,
-          breakTargetId: endId,
-          continueTargetId: loopContext?.continueTargetId || endId,
-        });
-        result.nodes.push(...stRes.nodes);
-        result.edges.push(...stRes.edges);
-        if (stRes.entryNodeId) {
-          currentExitPoints.forEach((ep) => {
-            result.edges.push({ from: ep.id, to: stRes.entryNodeId! });
-          });
-          currentExitPoints = stRes.exitPoints;
-        }
+      if (caseBodyRes.entryNodeId) {
+        result.edges.push({ from: selectId, to: caseBodyRes.entryNodeId, label: caseLabel });
+      } else {
+        result.edges.push({ from: selectId, to: endId, label: caseLabel });
       }
 
-      currentExitPoints.forEach((ep) => {
-        result.edges.push({ from: ep.id, to: endId });
+      caseBodyRes.exitPoints.forEach((ep) => {
+        if (!caseBodyRes.nodesConnectedToExit.has(ep.id)) {
+          result.edges.push({ from: ep.id, to: endId });
+        }
       });
     }
 
@@ -737,37 +534,25 @@ export class GoAstParser extends AbstractParser {
     loopContext?: LoopContext
   ): ProcessResult {
     const result = this.createProcessResult();
-    const call = node.childForFieldName("call");
+    const call = node.childForFieldName("call") || node.namedChildren[0];
     if (!call) return result;
 
     const goId = this.generateNodeId("go");
     result.nodes.push(
-      this.createSemanticNode(
-        goId,
-        `go ${this.summarizeNode(call)}`,
-        NodeType.ASYNC_OPERATION,
-        node
-      )
+      this.createSemanticNode(goId, `go ${this.summarizeNode(call)}`, NodeType.ASYNC_OPERATION, node)
     );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: goId,
-    });
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: goId });
     result.entryNodeId = goId;
     result.exitPoints.push({ id: goId });
     return result;
   }
 
   private summarizeForHeader(node: Parser.SyntaxNode): string {
-    const clause = node.childForFieldName("clause");
-    if (clause && clause.type === "range_clause")
-      return `for ${this.summarizeNode(clause)}`;
-    const forClause =
-      clause && clause.type === "for_clause" ? clause : undefined;
-    const cond = forClause
-      ? forClause.childForFieldName("condition")
-      : node.childForFieldName("condition");
+    const clauseNode = node.children.find(c => c.type === 'for_clause' || c.type === 'range_clause');
+    if (clauseNode?.type === "range_clause") {
+      return `for ${this.summarizeNode(clauseNode)}`;
+    }
+    const cond = clauseNode?.childForFieldName("condition") || node.childForFieldName("condition");
     return cond ? `for ${this.summarizeNode(cond)}` : "for";
   }
 
@@ -777,14 +562,8 @@ export class GoAstParser extends AbstractParser {
   ): ProcessResult {
     const result = this.createProcessResult();
     const id = this.generateNodeId("break");
-    result.nodes.push(
-      this.createSemanticNode(id, "break", NodeType.BREAK_CONTINUE, node)
-    );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: id,
-    });
+    result.nodes.push(this.createSemanticNode(id, "break", NodeType.BREAK_CONTINUE, node));
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: id });
     result.entryNodeId = id;
     if (loopContext) {
       result.edges.push({ from: id, to: loopContext.breakTargetId });
@@ -799,14 +578,8 @@ export class GoAstParser extends AbstractParser {
   ): ProcessResult {
     const result = this.createProcessResult();
     const id = this.generateNodeId("continue");
-    result.nodes.push(
-      this.createSemanticNode(id, "continue", NodeType.BREAK_CONTINUE, node)
-    );
-    this.locationMap.push({
-      start: node.startIndex,
-      end: node.endIndex,
-      nodeId: id,
-    });
+    result.nodes.push(this.createSemanticNode(id, "continue", NodeType.BREAK_CONTINUE, node));
+    this.locationMap.push({ start: node.startIndex, end: node.endIndex, nodeId: id });
     result.entryNodeId = id;
     if (loopContext) {
       result.edges.push({ from: id, to: loopContext.continueTargetId });
@@ -816,7 +589,7 @@ export class GoAstParser extends AbstractParser {
   }
 
   private summarizeNode(node: Parser.SyntaxNode): string {
-    return node.text.replace(/\n/g, " ").slice(0, 120);
+    return node.text.replace(/\s+/g, " ").trim().slice(0, 120);
   }
 
   private extractFunctionName(
@@ -824,17 +597,11 @@ export class GoAstParser extends AbstractParser {
   ): string | undefined {
     if (!funcNode) return undefined;
     if (funcNode.type === "function_declaration") {
-      const nameNode =
-        funcNode.childForFieldName("name") ||
-        funcNode.namedChildren.find((c) => c.type === "identifier");
+      const nameNode = funcNode.childForFieldName("name") || funcNode.namedChildren.find((c) => c.type === "identifier");
       return nameNode?.text;
     }
     if (funcNode.type === "method_declaration") {
-      const nameNode =
-        funcNode.childForFieldName("name") ||
-        funcNode.namedChildren.find(
-          (c) => c.type === "field_identifier" || c.type === "identifier"
-        );
+      const nameNode = funcNode.childForFieldName("name") || funcNode.namedChildren.find((c) => c.type === "field_identifier" || c.type === "identifier");
       const receiverNode = funcNode.childForFieldName("receiver");
       if (nameNode && receiverNode) {
         const recvType = this.extractReceiverType(receiverNode);
@@ -848,13 +615,9 @@ export class GoAstParser extends AbstractParser {
   private extractReceiverType(
     receiverNode: Parser.SyntaxNode
   ): string | undefined {
-    const typeNode = receiverNode.namedChildren.find(
-      (c) => c.type === "type_identifier" || c.type === "pointer_type"
-    );
+    const typeNode = receiverNode.namedChildren.find((c) => c.type === "type_identifier" || c.type === "pointer_type");
     if (typeNode?.type === "pointer_type") {
-      const innerType = typeNode.namedChildren.find(
-        (c) => c.type === "type_identifier"
-      );
+      const innerType = typeNode.namedChildren.find((c) => c.type === "type_identifier");
       return innerType ? `*${innerType.text}` : undefined;
     }
     return typeNode?.text;
