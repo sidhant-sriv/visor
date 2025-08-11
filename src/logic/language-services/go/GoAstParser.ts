@@ -483,7 +483,6 @@ export class GoAstParser extends AbstractParser {
     this.locationMap.push({ start: node.endIndex - 1, end: node.endIndex, nodeId: endId });
 
     // FIX: The AST for `select` has `communication_case` nodes as direct children,
-    // not nested inside a `block` node.
     const clauses = node.namedChildren.filter(
         (c) => c.type === "communication_case" || c.type === "default_case"
     );
