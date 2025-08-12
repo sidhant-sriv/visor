@@ -18,7 +18,7 @@ export class LLMService {
   public static getDefaultModels(provider: Provider): string[] {
     switch (provider) {
       case "openai":
-        return [ "gpt-4o-mini", "gpt-4o", "o3-mini"];
+        return ["gpt-4o-mini", "gpt-4o", "o3-mini"];
       case "gemini":
         return ["gemini-1.5-flash", "gemini-1.5-pro"];
       case "groq":
@@ -39,7 +39,9 @@ export class LLMService {
     const version = "v2";
     const h = crypto.createHash("sha256");
     h.update(mermaidSource);
-    h.update(`|${provider}|${model}|style=${style || ""}|lang=${language || ""}|${version}`);
+    h.update(
+      `|${provider}|${model}|style=${style || ""}|lang=${language || ""}|${version}`
+    );
     return h.digest("hex");
   }
 
@@ -57,7 +59,9 @@ export class LLMService {
     const version = "lv1"; // label-cache version
     const h = crypto.createHash("sha256");
     h.update(label);
-    h.update(`|${provider}|${model}|style=${style || ""}|lang=${language || ""}|${version}`);
+    h.update(
+      `|${provider}|${model}|style=${style || ""}|lang=${language || ""}|${version}`
+    );
     return h.digest("hex");
   }
 
@@ -104,6 +108,73 @@ export class LLMService {
 }
 
 // Helpers for Mermaid parsing and replacement
+interface MermaidExtras {
+  classDefs: string[];
+  classAssignments: string[];
+  styles: string[];
+  linkStyles: string[];
+  clicks: string[];
+  comments: string[];
+}
+
+function extractCoreAndExtras(source: string): { core: string; extras: MermaidExtras } {
+  const lines = source.split(/\r?\n/);
+  const core: string[] = [];
+  const extras: MermaidExtras = {
+    classDefs: [],
+    classAssignments: [],
+    styles: [],
+    linkStyles: [],
+    clicks: [],
+    comments: [],
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith("%%")) {
+      extras.comments.push(line);
+      continue;
+    }
+    if (trimmed.startsWith("click ")) {
+      extras.clicks.push(line);
+      continue;
+    }
+    if (trimmed.startsWith("classDef ")) {
+      extras.classDefs.push(line);
+      continue;
+    }
+    if (trimmed.startsWith("class ")) {
+      extras.classAssignments.push(line);
+      continue;
+    }
+    if (trimmed.startsWith("style ")) {
+      extras.styles.push(line);
+      continue;
+    }
+    if (trimmed.startsWith("linkStyle ")) {
+      extras.linkStyles.push(line);
+      continue;
+    }
+    core.push(line);
+  }
+
+  // Keep only up to clicks removed; core may still include blank lines – normalize
+  const coreString = core.join("\n").replace(/\n{3,}/g, "\n\n");
+  return { core: coreString, extras };
+}
+
+function reassembleWithExtras(baseMermaid: string, extras: MermaidExtras): string {
+  const parts: string[] = [baseMermaid.trimEnd()];
+  // Re-add preserved extras in stable order
+  if (extras.classDefs.length) parts.push("\n" + extras.classDefs.join("\n"));
+  if (extras.classAssignments.length)
+    parts.push("\n" + extras.classAssignments.join("\n"));
+  if (extras.styles.length) parts.push("\n" + extras.styles.join("\n"));
+  if (extras.linkStyles.length) parts.push("\n" + extras.linkStyles.join("\n"));
+  // Do NOT re-add click handlers here to avoid duplication. Webview merges them from the original.
+  return parts.join("").trimEnd() + "\n";
+}
+
 export interface ExtractedLabels {
   // Each entry describes one node occurrence
   occurrences: Array<{
@@ -118,11 +189,12 @@ export interface ExtractedLabels {
 export function extractNodeLabels(source: string): ExtractedLabels {
   const occurrences: ExtractedLabels["occurrences"] = [];
   const labels: string[] = [];
-  const pattern = /(\n|^)\s*([A-Za-z0-9_\-]+)\s*([\[\(\{><]{1,2})\s*"([\s\S]*?)"\s*([\]\)\}><]{1,2})\s*$(?=)/gm;
+  const pattern =
+    /(\n|^)\s*([A-Za-z0-9_\-]+)\s*([\[\(\{><]{1,2})\s*"([\s\S]*?)"\s*([\]\)\}><]{1,2})\s*$(?=)/gm;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(source)) !== null) {
-    const labelStartInMatch = match.index + match[0].indexOf("\"") + 1; // after first quote
-    const labelEndInMatch = match.index + match[0].lastIndexOf("\""); // position of last quote
+    const labelStartInMatch = match.index + match[0].indexOf('"') + 1; // after first quote
+    const labelEndInMatch = match.index + match[0].lastIndexOf('"'); // position of last quote
     const start = labelStartInMatch;
     const end = labelEndInMatch;
     const label = match[4];
@@ -158,37 +230,42 @@ function htmlUnescape(s: string): string {
   return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
 }
 
-async function callProvider(params: TranslateParams, labels: string[]): Promise<string[] | null> {
+async function callProvider(
+  params: TranslateParams,
+  labels: string[]
+): Promise<string[] | null> {
   const { provider, model, apiKey, style, language, baseUrl } = params;
-  const instruction = [
-    "You are a label rewritter for flowchart nodes.",
-    "- INPUT: JSON with keys 'instruction' and 'labels' (array of strings).",
-    "- TASK: Paraphrase each label into human language, keeping semantic meaning but removing code identifiers and syntax.",
-    "- STRICT RULES:",
-    "  1) Output MUST be a JSON array of strings ONLY (no object wrapper, no extra keys).",
-    "  2) The array length and order MUST MATCH the input 'labels'.",
-    "  3) Each item MUST be a single line (no newlines).",
-    "  4) Do NOT include Markdown, code fences, or backticks.",
-    "  5) Avoid quoting variable names or including code syntax; use natural language.",
-    "  6) Keep each label under 120 characters if possible.",
-    `  7) Style: ${style || "concise"}.` + (language ? ` Output language: ${language}.` : ""),
-    "- EXAMPLE INPUT: {\"instruction\":\"...\",\"labels\":[\"if (x > 0)\",\"return y\"]}",
-    "- EXAMPLE OUTPUT: [\"Check whether x is positive\",\"Return the value\"]",
+
+  // IMPROVED PROMPTING
+  const systemPrompt = "You are a highly constrained JSON-only API. Your sole function is to process an array of strings and return a new JSON array of strings. You will never include conversational text, markdown, or code fences. Your output is always a valid JSON array of strings, with no other content.";
+  
+  const userPrompt = [
+    "Task: Paraphrase each label into natural language.",
+    "Rules:",
+    "1. Keep the semantic meaning.",
+    "2. Remove all code syntax, identifiers, and jargon.",
+    "3. The number of output strings must match the input array.",
+    "4. Do not add quotes to variable names.",
+    "5. Keep each label to one line.",
+    `6. Target Style: ${style || "concise"}.`,
+    `7. Target Language: ${language || "English"}.`,
+    "Here is the array of labels to process:",
+    JSON.stringify(labels)
   ].join("\n");
-  const payload = { instruction, labels };
 
   try {
     switch (provider) {
       case "openai":
-        return await callOpenAI(model, apiKey, payload);
+        return await callOpenAI(model, apiKey, systemPrompt, userPrompt);
       case "gemini":
-        return await callGemini(model, apiKey, payload);
+        return await callGemini(model, apiKey, systemPrompt, userPrompt);
       case "groq":
-        return await callGroq(model, apiKey, payload);
+        return await callGroq(model, apiKey, systemPrompt, userPrompt);
       case "ollama":
-        return await callOllama(model, baseUrl, payload);
+        return await callOllama(model, baseUrl, systemPrompt, userPrompt);
     }
-  } catch {
+  } catch (e) {
+    logError(`LLM call failed for provider ${provider}: ${e}`);
     return null;
   }
 }
@@ -214,10 +291,18 @@ function isOpenAIChatCompletionResponse(x: unknown): x is OpenAIChatCompletionRe
   return msg === undefined || typeof msg === "object";
 }
 
-interface GeminiPart { text?: string }
-interface GeminiContent { parts?: GeminiPart[] }
-interface GeminiCandidate { content?: GeminiContent }
-interface GeminiGenerateContentResponse { candidates?: GeminiCandidate[] }
+interface GeminiPart {
+  text?: string;
+}
+interface GeminiContent {
+  parts?: GeminiPart[];
+}
+interface GeminiCandidate {
+  content?: GeminiContent;
+}
+interface GeminiGenerateContentResponse {
+  candidates?: GeminiCandidate[];
+}
 function isGeminiGenerateContentResponse(x: unknown): x is GeminiGenerateContentResponse {
   if (!x || typeof x !== "object") return false;
   const obj = x as { candidates?: unknown };
@@ -228,12 +313,17 @@ function isGeminiGenerateContentResponse(x: unknown): x is GeminiGenerateContent
 
 function parseLabelsJsonText(text: string): string[] | null {
   try {
-    const parsed = JSON.parse(text);
+    let parsed = JSON.parse(text);
     if (Array.isArray(parsed)) {
       return parsed.map((s) => String(s));
     }
-    if (parsed && typeof parsed === "object" && Array.isArray((parsed as { labels?: unknown }).labels)) {
-      return ((parsed as { labels: unknown[] }).labels).map((s) => String(s));
+    // Some models might incorrectly wrap the array in an object
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as { labels?: unknown }).labels)
+    ) {
+      return (parsed as { labels: unknown[] }).labels.map((s) => String(s));
     }
     return null;
   } catch {
@@ -242,7 +332,12 @@ function parseLabelsJsonText(text: string): string[] | null {
 }
 
 // -------------------- Provider calls --------------------
-async function callOpenAI(model: string, apiKey: string, payload: { instruction: string; labels: string[] }): Promise<string[] | null> {
+async function callOpenAI(
+  model: string,
+  apiKey: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<string[] | null> {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -254,34 +349,39 @@ async function callOpenAI(model: string, apiKey: string, payload: { instruction:
       temperature: 0.2,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "Follow the user's constraints exactly. Output pure JSON array only." },
-        { role: "user", content: payload.instruction },
-        { role: "user", content: JSON.stringify(payload) },
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
       ],
     }),
   });
   if (!res.ok) return null;
   const data: unknown = await res.json();
   if (!isOpenAIChatCompletionResponse(data)) return null;
-  const content: string | undefined = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : undefined;
+  const content: string | undefined =
+    data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content
+      : undefined;
   if (!content) return null;
   return parseLabelsJsonText(content);
 }
 
-async function callGemini(model: string, apiKey: string, payload: { instruction: string; labels: string[] }): Promise<string[] | null> {
+async function callGemini(
+  model: string,
+  apiKey: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<string[] | null> {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+      model
+    )}:generateContent?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [
           {
-            parts: [
-              { text: "Follow constraints exactly. Output JSON array only." },
-              { text: payload.instruction },
-              { text: JSON.stringify(payload) },
-            ],
+            parts: [{ text: systemPrompt }, { text: userPrompt }],
           },
         ],
         generationConfig: { temperature: 0.2 },
@@ -292,24 +392,39 @@ async function callGemini(model: string, apiKey: string, payload: { instruction:
   const data: unknown = await res.json();
   if (!isGeminiGenerateContentResponse(data)) return null;
   const first = data.candidates && data.candidates[0];
-  const text: string | undefined = first && first.content && first.content.parts && first.content.parts[0] ? first.content.parts[0].text : undefined;
+  const text: string | undefined =
+    first && first.content && first.content.parts && first.content.parts[0]
+      ? first.content.parts[0].text
+      : undefined;
   if (!text) return null;
-  return parseLabelsJsonText(text);
+  // Gemini might produce text like `Here's the list: ["a", "b"]`. We need to extract the JSON.
+  const jsonMatch = text.match(/\[[\s\S]*\]/);
+  const jsonString = jsonMatch ? jsonMatch[0] : text;
+  return parseLabelsJsonText(jsonString);
 }
 
-async function callGroq(model: string, apiKey: string, payload: { instruction: string; labels: string[] }): Promise<string[] | null> {
+async function callGroq(
+  model: string,
+  apiKey: string,
+  systemPrompt: string,
+  userPrompt: string
+): Promise<string[] | null> {
   const url = "https://api.groq.com/openai/v1/chat/completions";
   const body = {
     model,
     temperature: 0.2,
     response_format: { type: "json_object" },
     messages: [
-      { role: "system", content: "Follow the user's constraints exactly. Output pure JSON array only." },
-      { role: "user", content: payload.instruction },
-      { role: "user", content: JSON.stringify(payload) },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
     ],
   };
-  logInfo(`Groq label-array request: model=${model} body=${JSON.stringify(body).slice(0, 2000)}`);
+  logInfo(
+    `Groq label-array request: model=${model} body=${JSON.stringify(body).slice(
+      0,
+      2000
+    )}`
+  );
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -321,14 +436,22 @@ async function callGroq(model: string, apiKey: string, payload: { instruction: s
   if (!res.ok) return null;
   const data: unknown = await res.json();
   if (!isOpenAIChatCompletionResponse(data)) return null;
-  const content: string | undefined = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : undefined;
+  const content: string | undefined =
+    data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content
+      : undefined;
   if (!content) return null;
   return parseLabelsJsonText(content);
 }
 
 // -------------------- Ollama (local) --------------------
-interface OllamaChatMessage { role: string; content: string }
-interface OllamaChatResponse { message?: { role?: string; content?: string } }
+interface OllamaChatMessage {
+  role: string;
+  content: string;
+}
+interface OllamaChatResponse {
+  message?: { role?: string; content?: string };
+}
 function isOllamaChatResponse(x: unknown): x is OllamaChatResponse {
   if (!x || typeof x !== "object") return false;
   const obj = x as { message?: unknown };
@@ -341,21 +464,25 @@ function isOllamaChatResponse(x: unknown): x is OllamaChatResponse {
 async function callOllama(
   model: string,
   baseUrl: string | undefined,
-  payload: { instruction: string; labels: string[] }
+  systemPrompt: string,
+  userPrompt: string
 ): Promise<string[] | null> {
-  const urlBase = (baseUrl && baseUrl.trim()) ? baseUrl.trim().replace(/\/$/, "") : "http://localhost:11434";
+  const urlBase = baseUrl && baseUrl.trim() ? baseUrl.trim().replace(/\/$/, "") : "http://localhost:11434";
   const url = `${urlBase}/api/chat`;
   const body = {
     model,
     messages: [
-      { role: "system", content: "Follow the user's constraints exactly. Output pure JSON array only." },
-      { role: "user", content: payload.instruction },
-      { role: "user", content: JSON.stringify(payload) },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
     ] as OllamaChatMessage[],
     options: { temperature: 0.2 },
     stream: false,
   };
-  logInfo(`Ollama label-array request: base=${urlBase} model=${model} body=${JSON.stringify(body).slice(0, 2000)}`);
+  logInfo(
+    `Ollama label-array request: base=${urlBase} model=${model} body=${JSON.stringify(
+      body
+    ).slice(0, 2000)}`
+  );
   let res: Response;
   try {
     res = await fetch(url, {
@@ -364,7 +491,9 @@ async function callOllama(
       body: JSON.stringify(body),
     });
   } catch (err) {
-    logError(`Ollama fetch error: ${err instanceof Error ? err.message : String(err)}`);
+    logError(
+      `Ollama fetch error: ${err instanceof Error ? err.message : String(err)}`
+    );
     return null;
   }
   if (!res.ok) return null;
@@ -372,32 +501,38 @@ async function callOllama(
   if (!isOllamaChatResponse(data)) return null;
   const content: string | undefined = (data as OllamaChatResponse).message?.content;
   if (!content) return null;
-  return parseLabelsJsonText(content);
+  // Ollama might produce text like `Here is the JSON: ["a", "b"]`. We need to extract the JSON.
+  const jsonMatch = content.match(/\[[\s\S]*\]/);
+  const jsonString = jsonMatch ? jsonMatch[0] : content;
+  return parseLabelsJsonText(jsonString);
 }
 
 // -------------------- Groq: full Mermaid rewrite path --------------------
-function buildGroqMermaidPrompt(mermaidSource: string, style?: string, language?: string): string {
-  const lines: string[] = [];
-  const promptTemplate = `
-You are given a Mermaid diagram in code form.
+function buildGroqMermaidPrompt(
+  mermaidSource: string,
+  style?: string,
+  language?: string
+): { systemPrompt: string; userPrompt: string } {
+  const systemPrompt = "You are an expert Mermaid diagram transcriber. Your task is to rewrite the text labels of a Mermaid diagram into natural language while preserving the entire structure. The output must be a single block of valid Mermaid code, ready to be rendered, with no extra text or code fences.";
 
-- The diagram represents program logic with nodes and edges.
-- Keep the exact same structure, node IDs, and connections.
-- Replace only the node labels that contain code with plain-English descriptions of what that code does.
-- Decision nodes should be written as yes/no questions when possible.
-- Preserve all flow and logic exactly as in the original diagram.
-- Keep the output as valid Mermaid syntax so it can be rendered directly.
-- Keep style/class definitions exactly as they appear in the input.
-- Do not add explanations, comments, or any other text outside the Mermaid code.
-- Do not wrap the output in code fences; output Mermaid code only.
-`.trim();
-  lines.push(promptTemplate);
-  if (style) lines.push(`- Style: ${style}.`);
-  if (language) lines.push(`- Output language: ${language}.`);
-  lines.push("");
-  lines.push("INPUT MERMAID:");
-  lines.push(mermaidSource);
-  return lines.join("\n");
+  const userPrompt = `
+**Strict Constraints:**
+1. **Do not** change the diagram's structure or any element's ID.
+2. **Do not** remove or alter any class definitions, styles, or clicks.
+3. **Do not** add a preamble, a postamble, or any explanatory text.
+4. **Do not** use Markdown code fences (\` \` \`).
+5. **Do not** add comments (%%).
+6. Rewrite all labels in a "${style || "concise"}" style and "${
+    language || "English"
+  }" language.
+
+**Input Mermaid Diagram:**
+${mermaidSource}
+
+**Output Mermaid Diagram:**
+  `.trim();
+
+  return { systemPrompt, userPrompt };
 }
 
 function cleanMermaidResponse(text: string): string | null {
@@ -429,17 +564,23 @@ function cleanMermaidResponse(text: string): string | null {
 
 async function callGroqRewriteMermaid(params: TranslateParams): Promise<string | null> {
   const { model, apiKey, mermaidSource, style, language } = params;
-  const prompt = buildGroqMermaidPrompt(mermaidSource, style, language);
+  const { core, extras } = extractCoreAndExtras(mermaidSource);
+  const { systemPrompt, userPrompt } = buildGroqMermaidPrompt(core, style, language);
   const url = "https://api.groq.com/openai/v1/chat/completions";
   const body = {
     model,
     temperature: 0.1,
     messages: [
-      { role: "system", content: "You transform Mermaid diagrams by understanding and rewriting only node labels to plain English. You must preserve structure and return Mermaid code only, with no extra text or fences." },
-      { role: "user", content: prompt },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
     ],
   };
-  logInfo(`Groq full-mermaid request: model=${model} body=${JSON.stringify(body).slice(0, 2000)}`);
+  logInfo(
+    `Groq full-mermaid request: model=${model} body=${JSON.stringify(body).slice(
+      0,
+      2000
+    )}`
+  );
   let res: Response;
   try {
     res = await fetch(url, {
@@ -451,17 +592,24 @@ async function callGroqRewriteMermaid(params: TranslateParams): Promise<string |
       body: JSON.stringify(body),
     });
   } catch (err) {
-    logError(`Groq fetch error: ${err instanceof Error ? err.message : String(err)}`);
+    logError(
+      `Groq fetch error: ${err instanceof Error ? err.message : String(err)}`
+    );
     return null;
   }
   if (!res.ok) return null;
   const data: unknown = await res.json();
   if (!isOpenAIChatCompletionResponse(data)) return null;
-  const content: string | undefined = data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : undefined;
+  const content: string | undefined =
+    data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content
+      : undefined;
   if (!content) return null;
-  const cleaned = cleanMermaidResponse(content);
+  let cleaned = cleanMermaidResponse(content);
   if (!cleaned) {
-    logWarn("Groq response did not contain a valid Mermaid graph; attempting fallback label replacement.");
+    logWarn(
+      "Groq response did not contain a valid Mermaid graph; attempting fallback label replacement."
+    );
     // Fallback: try to extract labels JSON from message and rebuild
     const labels = parseLabelsJsonText(content);
     if (labels && labels.length > 0) {
@@ -470,15 +618,26 @@ async function callGroqRewriteMermaid(params: TranslateParams): Promise<string |
         if (extraction.labels.length === labels.length) {
           return replaceNodeLabels(params.mermaidSource, extraction, labels);
         }
-      } catch {
-        logWarn("Groq response did not contain a valid Mermaid graph; attempting fallback label replacement.");
+      } catch (e) {
+        logWarn(
+          `Fallback label replacement failed: ${
+            e instanceof Error ? e.message : String(e)
+          }`
+        );
       }
     }
+  }
+  if (cleaned) {
+    try {
+      cleaned = reassembleWithExtras(cleaned, extras);
+    } catch {}
   }
   return cleaned;
 }
 
-interface GroqModelsListResponse { data?: Array<{ id?: string }> }
+interface GroqModelsListResponse {
+  data?: Array<{ id?: string }>;
+}
 function isGroqModelsListResponse(x: unknown): x is GroqModelsListResponse {
   if (!x || typeof x !== "object") return false;
   const obj = x as { data?: unknown };
@@ -498,7 +657,8 @@ export async function getGroqModels(apiKey: string): Promise<string[]> {
     }
     const data: unknown = await res.json();
     if (!isGroqModelsListResponse(data)) return [];
-    const ids = data.data?.map((m) => (m && m.id ? String(m.id) : "")).filter((s) => !!s) || [];
+    const ids =
+      data.data?.map((m) => (m && m.id ? String(m.id) : "")).filter((s) => !!s) || [];
     // Optional: filter to chat-capable models
     return ids;
   } catch {
@@ -507,7 +667,9 @@ export async function getGroqModels(apiKey: string): Promise<string[]> {
 }
 
 // -------------------- Ollama models listing --------------------
-interface OllamaTagsResponse { models?: Array<{ name?: string }> }
+interface OllamaTagsResponse {
+  models?: Array<{ name?: string }>;
+}
 function isOllamaTagsResponse(x: unknown): x is OllamaTagsResponse {
   if (!x || typeof x !== "object") return false;
   const obj = x as { models?: unknown };
@@ -516,7 +678,7 @@ function isOllamaTagsResponse(x: unknown): x is OllamaTagsResponse {
 }
 
 export async function getOllamaModels(baseUrl?: string): Promise<string[]> {
-  const urlBase = (baseUrl && baseUrl.trim()) ? baseUrl.trim().replace(/\/$/, "") : "http://localhost:11434";
+  const urlBase = baseUrl && baseUrl.trim() ? baseUrl.trim().replace(/\/$/, "") : "http://localhost:11434";
   const url = `${urlBase}/api/tags`;
   try {
     const res = await fetch(url, { method: "GET" });
@@ -526,7 +688,9 @@ export async function getOllamaModels(baseUrl?: string): Promise<string[]> {
     }
     const data: unknown = await res.json();
     if (!isOllamaTagsResponse(data)) return [];
-    const names = (data.models || []).map((m) => (m && m.name ? String(m.name) : "")).filter((s) => !!s);
+    const names = (data.models || [])
+      .map((m) => (m && m.name ? String(m.name) : ""))
+      .filter((s) => !!s);
     return names;
   } catch {
     return [];
@@ -554,5 +718,3 @@ function sanitizeLabel(label: string): string {
   }
   return s;
 }
-
-
