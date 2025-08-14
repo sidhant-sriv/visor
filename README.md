@@ -50,6 +50,7 @@ You can customize Visor's behavior through the VS Code settings (`Cmd/Ctrl + ,`)
 Visor is built on **Tree-sitter** for robust code parsing and **Mermaid.js** for high-quality diagram rendering. All code analysis and flowchart generation are performed locally on your machine, ensuring your code remains **completely private and secure**.
 
 For details on the optional LLM-based label conversion (providers, caching, privacy, configuration), see the doc: [LLM Label Conversion](docs/llm-conversion.md).
+**Editor Compatibility**: Visor works seamlessly with VS Code, Cursor, and Windsurf editors. The extension automatically detects your environment and applies compatibility optimizations when needed.
 
 ---
 
