@@ -1,4 +1,4 @@
-import { FlowchartIR, FlowchartNode, NodeType } from "../ir/ir";
+import { FlowchartIR, FlowchartNode, FlowchartEdge, NodeType } from "../ir/ir";
 import { StringProcessor } from "./utils/StringProcessor";
 import { SubtleThemeManager, ThemeStyles } from "./utils/ThemeManager";
 import { getComplexityConfig } from "./utils/ComplexityConfig";
@@ -36,9 +36,46 @@ export class EnhancedMermaidGenerator {
     this.themeStyles = SubtleThemeManager.getThemeStyles(themeKey, vsCodeTheme);
   }
 
+  /**
+   * Sanitizes an ID string to be Mermaid-compatible.
+   * It replaces spaces with underscores and removes all non-alphanumeric characters.
+   */
+  private sanitizeId(id: string): string {
+    return id
+      .replace(/\s+/g, '_')
+      .replace(/[^\w]/g, '') // Remove all non-alphanumeric characters
+      .replace(/_+/g, '_');
+  }
+
+  /**
+   * Generates a map of edge IDs to their source and target node IDs.
+   * @param ir The flowchart intermediate representation.
+   * @returns A map where the key is a generated edge ID and the value contains the source and target node IDs.
+   */
+  private generateEdgeMetadata(ir: FlowchartIR): Map<string, {source: string, target: string}> {
+    const edgeMap = new Map<string, {source: string, target: string}>();
+    
+    for (const edge of ir.edges) {
+      const sanitizedFrom = this.sanitizeId(edge.from);
+      const sanitizedTo = this.sanitizeId(edge.to);
+      const edgeId = `${sanitizedFrom}_${sanitizedTo}`;
+      
+      // Store both source and target
+      edgeMap.set(edgeId, {
+        source: sanitizedFrom,
+        target: sanitizedTo
+      });
+    }
+    
+    return edgeMap;
+  }
+
   public generate(ir: FlowchartIR): string {
     this.sb.clear();
     this.sb.appendLine("graph TD");
+    
+    // Add this line to avoid default node styling conflicts
+    this.sb.appendLine("    classDef default fill:none,stroke:none");
 
     if (ir.title) {
       this.sb.appendLine(`%% ${ir.title}`);
@@ -52,12 +89,21 @@ export class EnhancedMermaidGenerator {
       this.sb.appendLine(`%% ${ir.functionComplexity.description}`);
     }
 
+    // Apply sanitization to all IDs first to ensure consistency
+    for (const node of ir.nodes) {
+        node.id = this.sanitizeId(node.id);
+    }
+    for (const edge of ir.edges) {
+        edge.from = this.sanitizeId(edge.from);
+        edge.to = this.sanitizeId(edge.to);
+    }
+
     // Generate nodes efficiently
     for (const node of ir.nodes) {
       const shape = this.getShape(node);
       let label = this.escapeString(node.label);
 
-      // Add complexity annotation to nodes with complexity information
+      // Add complexity annotation to nodes
       if (
         this.complexityConfig.enabled &&
         this.complexityConfig.displayInNodes &&
@@ -97,6 +143,14 @@ export class EnhancedMermaidGenerator {
       this.sb.append(edge.to);
       this.sb.appendLine("");
     }
+    
+    // Generate edge metadata as comments for JavaScript to parse
+    this.sb.appendLine("");
+    this.sb.appendLine("    %% Edge metadata for interaction");
+    const edgeMetadata = this.generateEdgeMetadata(ir);
+    for (const [edgeId, metadata] of edgeMetadata) {
+      this.sb.appendLine(`    %% EDGE_META:${metadata.source}:${metadata.target}`);
+    }
 
     // Generate enhanced styling class definitions
     this.generateClassDefinitions();
@@ -129,8 +183,10 @@ export class EnhancedMermaidGenerator {
 
     // Generate click handlers efficiently
     for (const entry of ir.locationMap) {
+      // Use the already sanitized node ID
+      const sanitizedNodeId = this.sanitizeId(entry.nodeId);
       this.sb.append("    click ");
-      this.sb.append(entry.nodeId);
+      this.sb.append(sanitizedNodeId);
       this.sb.append(" call onNodeClick(");
       this.sb.append(entry.start.toString());
       this.sb.append(", ");
@@ -179,7 +235,7 @@ export class EnhancedMermaidGenerator {
       cssStyle += `,stroke-dasharray:${dashArray}`;
     }
 
-    // Add text color if specified (font-weight is not well supported in Mermaid classDef)
+    // Add text color if specified
     if (themeColor.textColor) {
       cssStyle += `,color:${themeColor.textColor}`;
     }
@@ -228,20 +284,7 @@ export class EnhancedMermaidGenerator {
     }
   }
 
-  private getFontWeightValue(fontWeight: string): string {
-    switch (fontWeight) {
-      case "bold":
-        return "600";
-      case "medium":
-        return "500";
-      case "normal":
-      default:
-        return "400";
-    }
-  }
-
   private getShape(node: FlowchartNode): [string, string] {
-    // Use enhanced shape logic if nodeType is available
     if (node.nodeType) {
       const nodeStyle = SubtleThemeManager.getNodeStyle(node.nodeType);
       return this.getShapeMarkers(nodeStyle.shape);
@@ -279,9 +322,6 @@ export class EnhancedMermaidGenerator {
     return StringProcessor.escapeString(str);
   }
 
-  /**
-   * Get visual complexity indicator for nodes using configuration
-   */
   private getComplexityIndicator(
     rating?: "low" | "medium" | "high" | "very-high"
   ): string {
