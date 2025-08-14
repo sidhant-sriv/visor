@@ -180,7 +180,6 @@ export abstract class BaseFlowchartProvider {
         break;
       }
 
-      // Handle the new copy command
       case "copyMermaid": {
         await vscode.env.clipboard.writeText(message.payload.code);
         vscode.window.showInformationMessage("Mermaid code copied to clipboard!");
@@ -246,9 +245,11 @@ export abstract class BaseFlowchartProvider {
   public highlightNode(nodeId: string | null): void {
     const webview = this.getWebview();
     if (webview) {
+      // Sanitize nodeId before sending to webview to match sanitized IDs in the diagram
+      const sanitizedNodeId = nodeId ? nodeId.replace(/\s+/g, '_').replace(/[^\w-]/g, '_').replace(/_+/g, '_') : null;
       webview.postMessage({
         command: "highlightNode",
-        payload: { nodeId },
+        payload: { nodeId: sanitizedNodeId },
       });
     }
   }
@@ -318,14 +319,12 @@ export abstract class BaseFlowchartProvider {
     this.setWebviewHtml(this.getLoadingHtml("Generating flowchart..."));
 
     try {
-      console.time("analyzeCode");
       const flowchartIR = await analyzeCode(
         document.getText(),
         document.languageId,
         undefined,
         position
       );
-      console.timeEnd("analyzeCode");
 
       this._locationMap = flowchartIR.locationMap;
       this._currentDocument = document;
@@ -358,7 +357,7 @@ export abstract class BaseFlowchartProvider {
         vsCodeTheme
       );
       const mermaidCode = mermaidGenerator.generate(flowchartIR);
-
+      
       // Only pass complexity info if it's enabled and should be displayed in panel
       const complexityConfig = getComplexityConfig();
       const complexityToDisplay =
@@ -382,8 +381,9 @@ export abstract class BaseFlowchartProvider {
         (e) => offset >= e.start && offset <= e.end
       );
       this.highlightNode(entry ? entry.nodeId : null);
+
     } catch (error) {
-      console.error("Failed to update view:", error);
+      console.error("Flowchart generation failed:", error);
       const errorMessage =
         error instanceof Error ? error.message : "An unknown error occurred";
       this.setWebviewHtml(this.getLoadingHtml(`Error: ${errorMessage}`));
@@ -430,17 +430,16 @@ export abstract class BaseFlowchartProvider {
 
   /**
    * Generates the complete HTML content for the webview panel.
-   * This includes the Mermaid.js library, export controls, complexity display, and the generated flowchart syntax.
    */
   protected getWebviewContent(
     flowchartSyntax: string,
     nonce: string,
     functionComplexity?: {
-      cyclomaticComplexity: number;
-      rating: "low" | "medium" | "high" | "very-high";
-      description: string;
+        cyclomaticComplexity: number;
+        rating: "low" | "medium" | "high" | "very-high";
+        description: string;
     }
-  ): string {
+): string {
     const theme =
       vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
         ? "dark"
@@ -459,6 +458,14 @@ export abstract class BaseFlowchartProvider {
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js"></script>
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@${SVG_PAN_ZOOM_VERSION}/dist/svg-pan-zoom.min.js"></script>
         <style>
+            :root {
+                --hover-fill: rgba(255, 165, 0, 0.3);
+                --hover-stroke: #ff6b35;
+                --hover-stroke-width: 3px;
+                --hover-edge-color: #ff6b35;
+                --hover-edge-width: 3px;
+            }
+
             body, html {
                 background-color: var(--vscode-editor-background);
                 color: var(--vscode-editor-foreground);
@@ -481,14 +488,10 @@ export abstract class BaseFlowchartProvider {
                     : ""
                 }
             }
-            .mermaid {
-                width: 100%;
-                height: 100%;
-            }
-             .mermaid svg {
-                width: 100%;
-                height: 100%;
-            }
+            .mermaid { width: 100%; height: 100%; }
+            .mermaid svg { width: 100%; height: 100%; }
+
+            /* Node highlighting styles */
             .highlighted > rect,
             .highlighted > polygon,
             .highlighted > circle,
@@ -496,288 +499,63 @@ export abstract class BaseFlowchartProvider {
                 stroke: var(--vscode-editor-selectionBackground) !important;
                 stroke-width: 4px !important;
             }
-            
-            /* Enhanced node styling - no animations */
-            .mermaid .node {
-                filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.1));
-            }
-            
-            /* Enhanced text readability */
-            .mermaid .node text {
-                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                font-size: 12px;
-                text-anchor: middle;
-                dominant-baseline: central;
-            }
-            
-            /* Subtle highlighting for current node */
-            .mermaid .node.highlighted {
-                filter: drop-shadow(0 0 8px var(--vscode-focusBorder));
-            }
-            
-            /* Edge styling for better flow visibility */
-            .mermaid .edgePath path {
-                stroke-width: 1.5px;
-                stroke: var(--vscode-editorWidget-border);
-                fill: none;
-            }
-            
-            .mermaid .edgeLabel {
-                background-color: transparent;
-                border: none;
-                border-radius: 0;
-                padding: 0;
-                font-size: 11px;
-                color: var(--vscode-editor-foreground);
-                font-weight: normal;
+
+            /* Transitions */
+            .mermaid svg .node > *, .mermaid .edge-path, .mermaid .edge-path path, .mermaid .arrowhead, .mermaid .arrowhead path, .mermaid line, .mermaid g > path {
+                transition: fill 0.15s ease-in-out, stroke 0.15s ease-in-out, filter 0.15s ease-in-out, stroke-width 0.15s ease-in-out;
             }
 
-            /* Panel-specific controls */
-            ${
-              context.isPanel
-                ? `
-            #panel-controls {
-                position: fixed;
-                top: 10px;
-                left: 10px;
-                right: 10px;
-                z-index: 1000;
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                padding: 10px 16px;
-                background: var(--vscode-editor-background);
-                border: 1px solid var(--vscode-panel-border);
-                border-radius: 8px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-                backdrop-filter: blur(8px);
-            }
-
-            #panel-info {
-                display: flex;
-                align-items: center;
-                gap: 16px;
-                font-size: 13px;
-                color: var(--vscode-foreground);
-                font-weight: 500;
-            }
-
-            #panel-title {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                font-size: 14px;
-                font-weight: 600;
-            }
-
-            #panel-actions {
-                display: flex;
-                gap: 12px;
-                align-items: center;
-            }
-
-            .panel-divider {
-                width: 1px;
-                height: 20px;
-                background: var(--vscode-panel-border);
-                opacity: 0.5;
-            }
-
-
-            `
-                : ""
-            }
-
-            #export-controls {
-                position: ${context.isPanel ? "relative" : "absolute"};
-                ${context.isPanel ? "" : "top: 10px; right: 10px;"}
-                z-index: 1000;
-                display: flex;
-                gap: 10px;
-            }
-            #export-controls button {
-                background-color: var(--vscode-button-background);
-                color: var(--vscode-button-foreground);
-                border: 1px solid var(--vscode-button-border, transparent);
-                padding: 5px 10px;
-                cursor: pointer;
-                border-radius: 4px;
-                font-size: 11px;
-            }
-            #export-controls button:hover {
-                background-color: var(--vscode-button-hoverBackground);
+            /* Hovered node, child, or edge */
+            .mermaid svg .node.hover-highlight > *,
+            .mermaid svg .node.child-highlight > * {
+                fill: var(--hover-fill) !important;
+                stroke: var(--hover-stroke) !important;
+                stroke-width: var(--hover-stroke-width) !important;
+                filter: drop-shadow(0 0 8px var(--hover-stroke));
             }
             
-            /* Container for complexity panel and toggle button, positioned bottom-left */
-            #complexity-container {
-                position: fixed;
-                bottom: 10px;
-                left: 10px;
-                z-index: 1001;
-                display: flex;
-                align-items: flex-end;
-                gap: 8px;
+            /* Enhanced edge highlighting that works with different Mermaid edge structures */
+            .mermaid g[class*="edge"].hover-highlight > *,
+            .mermaid g[id^="L_"].hover-highlight > *,
+            .mermaid path[class*="edge"].hover-highlight,
+            .mermaid g.hover-highlight > path,
+            .mermaid g.edgePath.hover-highlight > path.path {
+                stroke: var(--hover-edge-color) !important;
+                stroke-width: var(--hover-edge-width) !important;
+                filter: drop-shadow(0 0 2px var(--hover-edge-color));
             }
 
-            /* Complexity display panel - layout within the container */
-            #complexity-panel {
-                background-color: var(--vscode-editor-background);
-                border: 1px solid var(--vscode-editorWidget-border);
-                border-radius: 6px;
-                padding: 8px 12px;
-                font-size: 12px;
-                color: var(--vscode-editor-foreground);
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-                max-width: 300px;
-                transition: opacity 0.3s ease;
-            }
-            
-            #complexity-panel.hidden {
-                display: none;
-            }
-            
-            /* Complexity toggle button - layout within the container */
-            #complexity-toggle {
-                background-color: var(--vscode-button-background);
-                color: var(--vscode-button-foreground);
-                border: 1px solid var(--vscode-button-border, transparent);
-                padding: 6px 10px;
-                cursor: pointer;
-                border-radius: 4px;
-                font-size: 11px;
-                flex-shrink: 0; /* Prevents the button from shrinking */
-            }
-            
-            #complexity-toggle:hover {
-                background-color: var(--vscode-button-hoverBackground);
-            }
-            
-            .complexity-rating {
-                font-weight: bold;
-                margin-left: 4px;
-            }
-            
-            .complexity-low { color: ${complexityConfig.colors.low}; }
-            .complexity-medium { color: ${complexityConfig.colors.medium}; }
-            .complexity-high { color: ${complexityConfig.colors.high}; }
-            .complexity-very-high { color: ${
-              complexityConfig.colors.veryHigh
-            }; }
-            
-            .complexity-description {
-                margin-top: 4px;
-                font-size: 11px;
-                opacity: 0.8;
-            }
-            
-            /* Hidden element to store original mermaid source */
-            #mermaid-source {
-                display: none;
+            /* Arrow markers for highlighted edges */
+            .mermaid g[class*="edge"].hover-highlight polygon,
+            .mermaid g[id^="L_"].hover-highlight polygon,
+            .mermaid g.hover-highlight polygon,
+            .mermaid g.edgePath.hover-highlight polygon {
+                fill: var(--hover-edge-color) !important;
+                stroke: var(--hover-edge-color) !important;
             }
 
-            /* Panel button for sidebar view */
-            #open-panel-btn {
-                background-color: var(--vscode-button-background);
-                color: var(--vscode-button-foreground);
-                border: 1px solid var(--vscode-button-border, transparent);
-                padding: 5px 10px;
-                cursor: pointer;
-                border-radius: 4px;
-                font-size: 11px;
+            /* Edge labels */
+            .mermaid g[class*="edge"].hover-highlight text,
+            .mermaid g[id^="L_"].hover-highlight text,
+            .mermaid g.hover-highlight text {
+                fill: var(--hover-edge-color) !important;
+                font-weight: bold !important;
             }
-            #open-panel-btn:hover {
-                background-color: var(--vscode-button-hoverBackground);
-            }
+            
+            #mermaid-source { display: none; }
+
+            /* Other styles for controls, complexity etc. */
+            ${ this.getStylesForControls(context, complexityConfig, functionComplexity) }
         </style>
     </head>
     <body>
-        ${
-          context.isPanel
-            ? `
-        <div id="panel-controls">
-            <div id="panel-info">
-                <div id="panel-title">
-                    <span>Flowchart Viewer</span>
-                </div>
-                <div class="panel-divider"></div>
-                ${
-                  functionComplexity
-                    ? `
-                <div>
-                    <span style="opacity: 0.8;">Complexity:</span> 
-                    <strong>${functionComplexity.cyclomaticComplexity}</strong>
-                    <span class="complexity-rating complexity-${
-                      functionComplexity.rating
-                    }" style="font-size: 11px; margin-left: 4px;">
-                        ${functionComplexity.rating.toUpperCase()}
-                    </span>
-                </div>
-                `
-                    : ""
-                }
-            </div>
-            <div id="panel-actions">
-                <div id="export-controls">
-                    <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
-                    <button id="export-svg" title="Export as SVG">💾 SVG</button>
-                    <button id="export-png" title="Export as PNG">🖼️ PNG</button>
-                </div>
-            </div>
-        </div>
-        `
-            : ""
-        }
+        ${ this.getHtmlForControls(context, functionComplexity) }
 
-        ${
-          !context.isPanel
-            ? `
-        <div id="export-controls">
-            ${
-              context.showPanelButton
-                ? '<button id="open-panel-btn">🚀 Open in New Window</button>'
-                : ""
-            }
-            <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
-            <button id="export-svg">Export as SVG</button>
-            <button id="export-png">Export as PNG</button>
-        </div>
-        `
-            : ""
-        }
-
-        ${
-          !context.isPanel && functionComplexity
-            ? `
-        <div id="complexity-container">
-            <button id="complexity-toggle" title="Toggle complexity display">📊</button>
-            <div id="complexity-panel">
-                <div>
-                    <strong>Cyclomatic Complexity:</strong> 
-                    ${functionComplexity.cyclomaticComplexity}
-                    <span class="complexity-rating complexity-${
-                      functionComplexity.rating
-                    }">
-                        (${functionComplexity.rating.toUpperCase()})
-                    </span>
-                </div>
-                <div class="complexity-description">
-                    ${functionComplexity.description}
-                </div>
-            </div>
-        </div>
-        `
-            : ""
-        }
-        
         <div id="container">
-            <div class="mermaid">
-${flowchartSyntax}
-            </div>
+            <div class="mermaid">${flowchartSyntax}</div>
         </div>
-        <!-- Store the original mermaid source for export -->
-        <div id="mermaid-source">${flowchartSyntax
-          .replace(/</g, "&lt;")
-          .replace(/>/g, "&gt;")}</div>
+        <div id="mermaid-source">${flowchartSyntax.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+
         <script nonce="${nonce}">
             const vscode = acquireVsCodeApi();
 
@@ -806,37 +584,174 @@ ${flowchartSyntax}
                         }
                         highlightedNodeId = newId;
                         break;
-                    case 'exportError':
-                        // VSC will show the error message
-                        break;
                 }
             });
+
+            function setupInteractions(svgElement) {
+                if (!svgElement) return;
+
+                const panZoomInstance = svgPanZoom(svgElement, {
+                    zoomEnabled: true,
+                    controlIconsEnabled: true,
+                    fit: true,
+                    center: true,
+                    minZoom: 0.1,
+                    maxZoom: 10,
+                    zoomScaleSensitivity: 0.2
+                });
+
+                // Parse edge metadata from mermaid source comments
+                function parseEdgeMetadata() {
+                    const mermaidSource = document.getElementById('mermaid-source').textContent;
+                    const edgeMetadata = new Map();
+                    
+                    const lines = mermaidSource.split('\\n');
+                    for (const line of lines) {
+                        const match = line.match(/%% EDGE_META:([^:]+):([^:]+)/);
+                        if (match) {
+                            const [, source, target] = match;
+                            if (!edgeMetadata.has(source)) {
+                                edgeMetadata.set(source, []);
+                            }
+                            edgeMetadata.get(source).push(target);
+                        }
+                    }
+                    return edgeMetadata;
+                }
+
+                function extractBaseId(fullId) {
+                    if (!fullId) return '';
+                    // Remove flowchart prefix and suffix numbers
+                    let base = fullId.startsWith('flowchart-') 
+                        ? fullId.replace(/^flowchart-/, '') 
+                        : fullId;
+                    base = base.replace(/-[\\d-]+$/, '');
+                    return base;
+                }
+
+                function findOutgoingEdges(fullNodeId, edgeMetadata) {
+                    const baseId = extractBaseId(fullNodeId);
+                    if (!baseId) return [];
+
+                    const outgoingEdges = [];
+                    const targets = edgeMetadata.get(baseId) || [];
+                    
+                    // Look for edges with IDs that contain the source->target relationship
+                    for (const target of targets) {
+                        const edgePatterns = [
+                            \`L_\${baseId}_\${target}_\`,
+                            \`\${baseId}_\${target}\`,
+                            \`\${baseId}-\${target}\`,
+                            \`edge_\${baseId}_\${target}\`
+                        ];
+                        
+                        for (const pattern of edgePatterns) {
+                            const matchingEdge = document.querySelector(\`[id*="\${pattern}"]\`);
+                            if (matchingEdge) {
+                                outgoingEdges.push(matchingEdge);
+                                break;
+                            }
+                        }
+                    }
+                    return outgoingEdges;
+                }
+
+                function findConnectedNodes(baseId, edgeMetadata) {
+                    const targets = edgeMetadata.get(baseId) || [];
+                    const connectedNodes = [];
+                    
+                    for (const targetBaseId of targets) {
+                        // Try multiple patterns to find target nodes
+                        const patterns = [
+                            \`[id*="\${targetBaseId}"]\`,
+                            \`#flowchart-\${targetBaseId}-\`,
+                            \`[id^="flowchart-\${targetBaseId}"]\`
+                        ];
+                        
+                        for (const pattern of patterns) {
+                            const targetNode = document.querySelector(pattern);
+                            if (targetNode && !connectedNodes.includes(targetNode)) {
+                                connectedNodes.push(targetNode);
+                                break;
+                            }
+                        }
+                    }
+                    return connectedNodes;
+                }
+
+                // Parse edge metadata once
+                const edgeMetadata = parseEdgeMetadata();
+
+                const allNodes = svgElement.querySelectorAll('.node');
+                allNodes.forEach((node) => {
+                    const fullNodeId = node.id;
+                    if (!fullNodeId) return;
+
+                    node.addEventListener('mouseenter', (event) => {
+                        event.stopPropagation();
+                        node.classList.add('hover-highlight');
+
+                        const baseId = extractBaseId(fullNodeId);
+                        
+                        const outgoingEdges = findOutgoingEdges(fullNodeId, edgeMetadata);
+                        outgoingEdges.forEach(edge => {
+                            edge.classList.add('hover-highlight');
+                        });
+
+                        const connectedNodes = findConnectedNodes(baseId, edgeMetadata);
+                        connectedNodes.forEach(connectedNode => {
+                            connectedNode.classList.add('child-highlight');
+                        });
+                    });
+
+                    node.addEventListener('mouseleave', () => {
+                        document.querySelectorAll('.hover-highlight, .child-highlight').forEach(el => {
+                            el.classList.remove('hover-highlight', 'child-highlight');
+                        });
+                    });
+                });
+            }
 
             mermaid.initialize({
                 startOnLoad: true,
                 theme: '${theme}',
                 securityLevel: 'loose',
-                flowchart: {
-                    useMaxWidth: false,
-                    htmlLabels: true,
-                    curve: 'basis'
-                }
+                flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' }
             });
 
             window.addEventListener('load', () => {
-                const svgElement = document.querySelector('.mermaid svg');
-                if (svgElement) {
-                    const panZoomInstance = svgPanZoom(svgElement, {
-                        zoomEnabled: true,
-                        controlIconsEnabled: true,
-                        fit: true,
-                        center: true,
-                        minZoom: 0.1,
-                        maxZoom: 10,
-                        zoomScaleSensitivity: 0.2
+                setTimeout(() => {
+                    const svgElement = document.querySelector('.mermaid svg');
+                    if (svgElement) {
+                        setupInteractions(svgElement);
+                    } else {
+                        console.error('[Visor] SVG element for flowchart not found after initial load!');
+                    }
+                }, 200);
+            });
+
+            function setupButtonHandlers() {
+                const copyBtn = document.getElementById('copy-mermaid');
+                if (copyBtn) {
+                    copyBtn.addEventListener('click', () => {
+                        const source = document.getElementById('mermaid-source').textContent;
+                        vscode.postMessage({ command: 'copyMermaid', payload: { code: source } });
                     });
                 }
-            });
+                const exportSvgBtn = document.getElementById('export-svg');
+                if(exportSvgBtn) exportSvgBtn.addEventListener('click', () => exportFlowchart('svg'));
+                
+                const exportPngBtn = document.getElementById('export-png');
+                if(exportPngBtn) exportPngBtn.addEventListener('click', () => exportFlowchart('png'));
+
+                const openPanelBtn = document.getElementById('open-panel-btn');
+                if (openPanelBtn) {
+                    openPanelBtn.addEventListener('click', () => {
+                        vscode.postMessage({ command: 'openInPanel', payload: {} });
+                    });
+                }
+            }
+            setupButtonHandlers();
 
             /**
              * Handles exporting the flowchart to SVG or PNG.
@@ -845,11 +760,11 @@ ${flowchartSyntax}
             async function exportFlowchart(fileType) {
                 try {
                     const mermaidSourceElement = document.getElementById('mermaid-source');
-                    if (!mermaidSourceElement || !mermaidSourceElement.innerHTML) {
+                    if (!mermaidSourceElement || !mermaidSourceElement.textContent) {
                         throw new Error("Could not find Mermaid source code to export.");
                     }
 
-                    const mermaidSource = mermaidSourceElement.innerHTML
+                    const mermaidSource = mermaidSourceElement.textContent
                         .replace(/&lt;/g, '<')
                         .replace(/&gt;/g, '>')
                         .replace(/&amp;/g, '&')
@@ -882,7 +797,7 @@ ${flowchartSyntax}
 
                     cleanSvgElement.setAttribute('width', finalWidth.toString());
                     cleanSvgElement.setAttribute('height', finalHeight.toString());
-                    cleanSvgElement.setAttribute('viewBox',\`\${finalX} \${finalY} \${finalWidth} \${finalHeight}\`);
+                    cleanSvgElement.setAttribute('viewBox', \`\${finalX} \${finalY} \${finalWidth} \${finalHeight}\`);
 
                     const backgroundColor = getComputedStyle(document.documentElement).getPropertyValue('--vscode-editor-background').trim() || '#ffffff';
                     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -900,7 +815,7 @@ ${flowchartSyntax}
                             command: 'export',
                             payload: { fileType: 'svg', data: finalSvgData }
                         });
-                    } else { // PNG export
+                    } else if (fileType === 'png') {
                         const canvas = document.createElement('canvas');
                         const ctx = canvas.getContext('2d');
                         if (!ctx) {
@@ -934,84 +849,70 @@ ${flowchartSyntax}
                     });
                 }
             }
-
-            const copyBtn = document.getElementById('copy-mermaid');
-            if (copyBtn) {
-                copyBtn.addEventListener('click', () => {
-                    const mermaidSourceElement = document.getElementById('mermaid-source');
-                    const mermaidSource = (mermaidSourceElement?.textContent || '').trim();
-
-                    if (mermaidSource) {
-                        vscode.postMessage({
-                            command: 'copyMermaid',
-                            payload: { code: mermaidSource }
-                        });
-
-                        // Visual feedback
-                        const originalText = copyBtn.textContent;
-                        copyBtn.textContent = '✅ Copied!';
-                        copyBtn.disabled = true;
-                        setTimeout(() => {
-                            copyBtn.textContent = originalText;
-                            copyBtn.disabled = false;
-                        }, 2000);
-                    } else {
-                        vscode.postMessage({
-                            command: 'exportError',
-                            payload: { error: "Could not find Mermaid source code to copy." }
-                        });
-                    }
-                });
-            }
-
-            document.getElementById('export-svg')?.addEventListener('click', () => exportFlowchart('svg'));
-            document.getElementById('export-png')?.addEventListener('click', () => exportFlowchart('png'));
-            
-            // Open in panel button for sidebar
-            const openPanelBtn = document.getElementById('open-panel-btn');
-            if (openPanelBtn) {
-                openPanelBtn.addEventListener('click', () => {
-                    vscode.postMessage({
-                        command: 'openInPanel',
-                        payload: {}
-                    });
-                });
-            }
-            
-            // Complexity toggle functionality
-            const complexityToggle = document.getElementById('complexity-toggle');
-            const complexityPanel = document.getElementById('complexity-panel');
-            if (complexityToggle && complexityPanel) {
-                // Get initial state from localStorage or default to visible
-                const isHidden = localStorage.getItem('complexity-panel-hidden') === 'true';
-                if (isHidden) {
-                    complexityPanel.classList.add('hidden');
-                    complexityToggle.textContent = '📊';
-                    complexityToggle.title = 'Show complexity display';
-                } else {
-                    complexityToggle.textContent = '📊✓';
-                    complexityToggle.title = 'Hide complexity display';
-                }
-                
-                complexityToggle.addEventListener('click', () => {
-                    const isCurrentlyHidden = complexityPanel.classList.contains('hidden');
-                    if (isCurrentlyHidden) {
-                        complexityPanel.classList.remove('hidden');
-                        complexityToggle.textContent = '📊✓';
-                        complexityToggle.title = 'Hide complexity display';
-                        localStorage.setItem('complexity-panel-hidden', 'false');
-                    } else {
-        _isUpdating = false;
-                        complexityPanel.classList.add('hidden');
-                        complexityToggle.textContent = '📊';
-                        complexityToggle.title = 'Show complexity display';
-                        localStorage.setItem('complexity-panel-hidden', 'true');
-                    }
-                });
-            }
         </script>
     </body>
     </html>`;
+}
+
+  /**
+   * Helper to generate CSS for controls to keep getWebviewContent cleaner.
+   */
+  private getStylesForControls(context: any, complexityConfig: any, functionComplexity: any): string {
+      return `
+        #panel-controls {
+            position: fixed; top: 10px; left: 10px; right: 10px; z-index: 1000;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 16px; background: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-panel-border); border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        #export-controls {
+            position: ${context.isPanel ? "relative" : "absolute"};
+            ${context.isPanel ? "" : "top: 10px; right: 10px;"}
+            z-index: 1000; display: flex; gap: 10px;
+        }
+        #export-controls button, #open-panel-btn {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: 1px solid var(--vscode-button-border, transparent);
+            padding: 5px 10px; cursor: pointer; border-radius: 4px; font-size: 11px;
+        }
+        #export-controls button:hover, #open-panel-btn:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+        .complexity-rating { font-weight: bold; margin-left: 4px; }
+        .complexity-low { color: ${complexityConfig.colors.low}; }
+        .complexity-medium { color: ${complexityConfig.colors.medium}; }
+        .complexity-high { color: ${complexityConfig.colors.high}; }
+        .complexity-very-high { color: ${complexityConfig.colors.veryHigh}; }
+      `;
+  }
+
+  /**
+   * Helper to generate HTML for controls.
+   */
+  private getHtmlForControls(context: any, functionComplexity: any): string {
+    const panelControls = `
+        <div id="panel-controls">
+            <div>Flowchart Viewer</div>
+            <div id="export-controls">
+                <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
+                <button id="export-svg" title="Export as SVG">💾 SVG</button>
+                <button id="export-png" title="Export as PNG">🖼️ PNG</button>
+            </div>
+        </div>
+    `;
+
+    const sidebarControls = `
+        <div id="export-controls">
+            ${context.showPanelButton ? '<button id="open-panel-btn">🚀 Open in New Window</button>' : ''}
+            <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
+            <button id="export-svg">Export as SVG</button>
+            <button id="export-png">Export as PNG</button>
+        </div>
+    `;
+    
+    return context.isPanel ? panelControls : sidebarControls;
   }
 
   /**
@@ -1050,7 +951,7 @@ ${flowchartSyntax}
   protected getNonce(): string {
     let text = "";
     const possible =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvewxyz0123456789";
     for (let i = 0; i < 32; i++) {
       text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
@@ -1061,12 +962,9 @@ ${flowchartSyntax}
    * Cleans up disposables when the provider is disposed.
    */
   public dispose(): void {
-    // Clear the timer when the provider is disposed
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
     }
-
-    // Reset state
     this._currentDocument = undefined;
     this._currentPosition = undefined;
     this._isUpdating = false;
