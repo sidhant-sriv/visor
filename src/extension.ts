@@ -2,9 +2,17 @@ import * as vscode from "vscode";
 import { FlowchartViewProvider } from "./view/FlowchartViewProvider";
 import { FlowchartPanelProvider } from "./view/FlowchartPanelProvider";
 import { initLanguageServices } from "./logic/language-services";
+import { EnvironmentDetector } from "./logic/utils/EnvironmentDetector";
 
 export async function activate(context: vscode.ExtensionContext) {
   console.log("Visor extension is now active!");
+
+  // Detect environment and log compatibility mode
+  const env = EnvironmentDetector.detectEnvironment();
+  if (env.requiresCompatibilityMode) {
+    console.log(`Visor: Running in compatibility mode for ${env.editor}`);
+    vscode.window.showInformationMessage(`Visor: Detected ${env.editor} editor - running in compatibility mode`);
+  }
 
   try {
     // Initialize all language services

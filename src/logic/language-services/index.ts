@@ -5,12 +5,16 @@ import { initJavaLanguageService } from "./java";
 import { initCppLanguageService } from "./cpp";
 import { initCLanguageService } from "./c";
 import { initRustLanguageService } from "./rust";
+import { EnvironmentDetector } from "../utils/EnvironmentDetector";
 import { initGoLanguageService } from "./go";
 
 /**
  * Initializes all language services for the extension.
  */
 export async function initLanguageServices(context: vscode.ExtensionContext) {
+  const env = EnvironmentDetector.detectEnvironment();
+  const isCompatibilityMode = env.requiresCompatibilityMode;
+  
   const services = [
     {
       name: "Python",
@@ -91,19 +95,46 @@ export async function initLanguageServices(context: vscode.ExtensionContext) {
     },
   ];
 
+  let successfullyInitialized = 0;
+  const errors: string[] = [];
+
   for (const service of services) {
     try {
       console.log(`Initializing ${service.name} language service...`);
+      
+      if (isCompatibilityMode) {
+        // Add a small delay between services in compatibility mode
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+      
       await service.init();
       console.log(`${service.name} language service initialized successfully`);
+      successfullyInitialized++;
     } catch (error) {
-      console.error(
-        `Failed to initialize ${service.name} language service:`,
-        error
-      );
-      throw new Error(
-        `Failed to initialize ${service.name} language service: ${error}`
-      );
+      const errorMessage = `Failed to initialize ${service.name} language service: ${error}`;
+      console.error(errorMessage);
+      errors.push(errorMessage);
+      
+      if (isCompatibilityMode) {
+        // In compatibility mode, continue with other services instead of failing completely
+        console.warn(`Continuing initialization in compatibility mode despite ${service.name} failure`);
+      } else {
+        // In regular VS Code, throw immediately as before
+        throw new Error(errorMessage);
+      }
+    }
+  }
+
+  if (isCompatibilityMode && errors.length > 0) {
+    const failedServices = services.length - successfullyInitialized;
+    const message = `Visor: ${successfullyInitialized} of ${services.length} language services initialized successfully. ${failedServices} services failed in compatibility mode.`;
+    console.warn(message);
+    
+    if (successfullyInitialized === 0) {
+      throw new Error("No language services could be initialized");
+    } else {
+      // Show a warning but don't fail completely
+      vscode.window.showWarningMessage(`Visor: Some language services failed to initialize in ${env.editor}. Core functionality will work for successfully loaded languages.`);
     }
   }
 }

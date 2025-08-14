@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import { SubtleThemeManager } from "../logic/utils/ThemeManager";
+import { EnvironmentDetector } from "../logic/utils/EnvironmentDetector";
 import {
   BaseFlowchartProvider,
   FlowchartViewContext,
@@ -48,23 +49,37 @@ export class FlowchartViewProvider
     _token: vscode.CancellationToken
   ) {
     this._view = webviewView;
-    webviewView.webview.options = {
+    
+    // Use environment-aware webview options
+    const baseOptions = {
       enableScripts: true,
       localResourceRoots: [this._extensionUri],
     };
+    webviewView.webview.options = EnvironmentDetector.getWebviewOptions(baseOptions);
 
-    // Set up event listeners (will only set up once due to the flag)
-    this.setupEventListeners();
+    // Add initialization delay for compatibility mode
+    const delay = EnvironmentDetector.getInitializationDelay();
+    
+    const initializeView = () => {
+      // Set up event listeners (will only set up once due to the flag)
+      this.setupEventListeners();
 
-    // Handle messages from the webview
-    webviewView.webview.onDidReceiveMessage(
-      (message: WebviewMessage) => this.handleWebviewMessage(message),
-      null,
-      this._disposables
-    );
+      // Handle messages from the webview
+      webviewView.webview.onDidReceiveMessage(
+        (message: WebviewMessage) => this.handleWebviewMessage(message),
+        null,
+        this._disposables
+      );
 
-    // Initial update
-    this.updateView(vscode.window.activeTextEditor);
+      // Initial update
+      this.updateView(vscode.window.activeTextEditor);
+    };
+
+    if (delay > 0) {
+      setTimeout(initializeView, delay);
+    } else {
+      initializeView();
+    }
   }
 
   /**

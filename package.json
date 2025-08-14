@@ -3,7 +3,7 @@
   "displayName": "Visor",
   "version": "1.1.2",
   "publisher": "sidhantsriv",
-  "description": "Makes a flowchart on the side for your code for better visualization.",
+  "description": "Makes a flowchart on the side for your code for better visualization. Compatible with VS Code, Cursor, and Windsurf editors.",
   "repository": {
     "type": "git",
     "url": "https://github.com/sidhant-sriv/visor.git"

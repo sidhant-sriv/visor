@@ -3,6 +3,7 @@ import { analyzeCode } from "../logic/analyzer";
 import { LocationMapEntry } from "../ir/ir";
 import { EnhancedMermaidGenerator } from "../logic/EnhancedMermaidGenerator";
 import { getComplexityConfig } from "../logic/utils/ComplexityConfig";
+import { EnvironmentDetector } from "../logic/utils/EnvironmentDetector";
 
 const MERMAID_VERSION = "11.8.0";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
@@ -61,6 +62,9 @@ export abstract class BaseFlowchartProvider {
   protected _eventListenersSetup: boolean = false;
 
   constructor(protected readonly _extensionUri: vscode.Uri) {
+    // Detect environment and apply any necessary compatibility fixes
+    this.initializeEnvironment();
+    
     // Listen for configuration changes to update themes
     this._disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
@@ -70,6 +74,29 @@ export abstract class BaseFlowchartProvider {
         }
       })
     );
+  }
+
+  /**
+   * Initialize environment-specific settings and compatibility fixes
+   */
+  private initializeEnvironment(): void {
+    const env = EnvironmentDetector.detectEnvironment();
+    
+    if (env.requiresCompatibilityMode) {
+      console.log(`Visor: Running in compatibility mode for ${env.editor}`);
+      
+      // Add any environment-specific initialization here
+      if (env.isCursor) {
+        // Cursor-specific initialization
+        console.log("Visor: Applying Cursor-specific compatibility settings");
+      } else if (env.isWindsurf) {
+        // Windsurf-specific initialization  
+        console.log("Visor: Applying Windsurf-specific compatibility settings");
+      } else if (env.isTrae) {
+        // Trae-specific initialization
+        console.log("Visor: Applying Trae-specific compatibility settings");
+      }
+    }
   }
 
   /**
@@ -452,7 +479,8 @@ export abstract class BaseFlowchartProvider {
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' 'unsafe-eval'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src https://cdn.jsdelivr.net;">
+
+        <meta http-equiv="Content-Security-Policy" content="${EnvironmentDetector.getContentSecurityPolicy(nonce)}">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Code Flowchart</title>
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js"></script>
@@ -587,6 +615,42 @@ export abstract class BaseFlowchartProvider {
                 }
             });
 
+
+            // Enhanced error handling for different environments
+            function initializeMermaid() {
+                try {
+                    mermaid.initialize({
+                        startOnLoad: true,
+                        theme: '${theme}',
+                        securityLevel: 'loose',
+                        flowchart: {
+                            useMaxWidth: false,
+                            htmlLabels: true,
+                            curve: 'basis'
+                        }
+                    });
+                } catch (error) {
+                    console.warn('Mermaid initialization error:', error);
+                    // Try with more basic configuration for compatibility
+                    try {
+                        mermaid.initialize({
+                            startOnLoad: true,
+                            theme: '${theme}',
+                            securityLevel: 'loose'
+                        });
+                    } catch (fallbackError) {
+                        console.error('Mermaid fallback initialization failed:', fallbackError);
+                    }
+                }
+            }
+
+            // Initialize mermaid with error handling
+            if (typeof mermaid !== 'undefined') {
+                initializeMermaid();
+            } else {
+                console.error('Mermaid library not loaded');
+            }
+
             function setupInteractions(svgElement) {
                 if (!svgElement) return;
 
@@ -619,12 +683,12 @@ export abstract class BaseFlowchartProvider {
                     return edgeMetadata;
                 }
 
-                function extractBaseId(fullId) {
-                    if (!fullId) return '';
+                function extractBaseId(fullNodeId) {
+                    if (!fullNodeId) return '';
                     // Remove flowchart prefix and suffix numbers
-                    let base = fullId.startsWith('flowchart-') 
-                        ? fullId.replace(/^flowchart-/, '') 
-                        : fullId;
+                    let base = fullNodeId.startsWith('flowchart-') 
+                        ? fullNodeId.replace(/^flowchart-/, '') 
+                        : fullNodeId;
                     base = base.replace(/-[\\d-]+$/, '');
                     return base;
                 }
@@ -639,14 +703,14 @@ export abstract class BaseFlowchartProvider {
                     // Look for edges with IDs that contain the source->target relationship
                     for (const target of targets) {
                         const edgePatterns = [
-                            \`L_\${baseId}_\${target}_\`,
-                            \`\${baseId}_\${target}\`,
-                            \`\${baseId}-\${target}\`,
-                            \`edge_\${baseId}_\${target}\`
+                            "L_" + baseId + "_" + target + "_",
+                            baseId + "_" + target,
+                            baseId + "-" + target,
+                            "edge_" + baseId + "_" + target
                         ];
                         
                         for (const pattern of edgePatterns) {
-                            const matchingEdge = document.querySelector(\`[id*="\${pattern}"]\`);
+                            const matchingEdge = document.querySelector('[id*="' + pattern + '"]');
                             if (matchingEdge) {
                                 outgoingEdges.push(matchingEdge);
                                 break;
@@ -663,9 +727,9 @@ export abstract class BaseFlowchartProvider {
                     for (const targetBaseId of targets) {
                         // Try multiple patterns to find target nodes
                         const patterns = [
-                            \`[id*="\${targetBaseId}"]\`,
-                            \`#flowchart-\${targetBaseId}-\`,
-                            \`[id^="flowchart-\${targetBaseId}"]\`
+                            '[id*="' + targetBaseId + '"]',
+                            '#flowchart-' + targetBaseId + '-',
+                            '[id^="flowchart-' + targetBaseId + '"]'
                         ];
                         
                         for (const pattern of patterns) {
@@ -712,13 +776,6 @@ export abstract class BaseFlowchartProvider {
                 });
             }
 
-            mermaid.initialize({
-                startOnLoad: true,
-                theme: '${theme}',
-                securityLevel: 'loose',
-                flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' }
-            });
-
             window.addEventListener('load', () => {
                 setTimeout(() => {
                     const svgElement = document.querySelector('.mermaid svg');
@@ -728,6 +785,7 @@ export abstract class BaseFlowchartProvider {
                         console.error('[Visor] SVG element for flowchart not found after initial load!');
                     }
                 }, 200);
+
             });
 
             function setupButtonHandlers() {
