@@ -17,47 +17,26 @@ export class EnvironmentDetector {
 
     const appName = vscode.env.appName?.toLowerCase() || "";
     const appHost = vscode.env.appHost?.toLowerCase() || "";
-    const userAgent = (globalThis as any)?.navigator?.userAgent?.toLowerCase() || "";
-    
-    let editor: "vscode" | "cursor" | "windsurf" | "trae" | "unknown" = "unknown";
-    
-    // Detect Cursor
-    if (
-      appName.includes("cursor") || 
-      appHost.includes("cursor") ||
-      userAgent.includes("cursor") ||
-      process.env.VSCODE_CWD?.includes("Cursor") ||
-      process.env.VSCODE_PORTABLE?.includes("Cursor")
-    ) {
-      editor = "cursor";
-    }
-    // Detect Windsurf
-    else if (
-      appName.includes("windsurf") || 
-      appHost.includes("windsurf") ||
-      userAgent.includes("windsurf") ||
-      process.env.VSCODE_CWD?.includes("Windsurf") ||
-      process.env.VSCODE_PORTABLE?.includes("Windsurf")
-    ) {
-      editor = "windsurf";
-    }
-    // Detect Trae
-    else if (
-      appName.includes("trae") || 
-      appHost.includes("trae") ||
-      userAgent.includes("trae") ||
-      process.env.VSCODE_CWD?.includes("Trae") ||
-      process.env.VSCODE_PORTABLE?.includes("Trae")
-    ) {
-      editor = "trae";
-    }
-    // Detect VS Code
-    else if (
-      appName.includes("visual studio code") || 
-      appName.includes("vscode") ||
-      appHost.includes("vscode")
-    ) {
-      editor = "vscode";
+    const userAgent =
+      (globalThis as any)?.navigator?.userAgent?.toLowerCase() || "";
+    const cwd = process.env.VSCODE_CWD?.toLowerCase() || "";
+    const portable = process.env.VSCODE_PORTABLE?.toLowerCase() || "";
+
+    type EditorType = "vscode" | "cursor" | "windsurf" | "trae" | "unknown";
+    const editorConfigs: { id: EditorType; keywords: string[] }[] = [
+      { id: "cursor", keywords: ["cursor"] },
+      { id: "windsurf", keywords: ["windsurf"] },
+      { id: "trae", keywords: ["trae"] },
+      { id: "vscode", keywords: ["visual studio code", "vscode"] },
+    ];
+
+    let editor: EditorType = "unknown";
+    const sources = [appName, appHost, userAgent, cwd, portable];
+    for (const cfg of editorConfigs) {
+      if (sources.some((src) => cfg.keywords.some((k) => src.includes(k)))) {
+        editor = cfg.id;
+        break;
+      }
     }
 
     this._detectionResult = {
@@ -68,7 +47,8 @@ export class EnvironmentDetector {
       isCursor: editor === "cursor",
       isWindsurf: editor === "windsurf",
       isTrae: editor === "trae",
-      requiresCompatibilityMode: editor === "cursor" || editor === "windsurf" || editor === "trae"
+      requiresCompatibilityMode:
+        editor === "cursor" || editor === "windsurf" || editor === "trae",
     };
 
     console.log("Environment detected:", this._detectionResult);
@@ -78,22 +58,24 @@ export class EnvironmentDetector {
   /**
    * Get specific webview options based on the detected environment
    */
-  public static getWebviewOptions(baseOptions: vscode.WebviewOptions): vscode.WebviewOptions {
+  public static getWebviewOptions(
+    baseOptions: vscode.WebviewOptions
+  ): vscode.WebviewOptions {
     const env = this.detectEnvironment();
-    
+
     const options = { ...baseOptions };
-    
+
     if (env.requiresCompatibilityMode) {
       // For Cursor/Windsurf, be more conservative with webview options
       options.enableCommandUris = true; // Explicitly enable command URIs
       options.enableForms = false; // Disable forms to avoid issues
-      
+
       // Ensure local resource roots are properly set
       if (!options.localResourceRoots) {
         options.localResourceRoots = [];
       }
     }
-    
+
     return options;
   }
 
@@ -102,31 +84,33 @@ export class EnvironmentDetector {
    */
   public static getContentSecurityPolicy(nonce: string): string {
     const env = this.detectEnvironment();
-    
+
     // Base CSP that should work in all environments
     let csp = `default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; font-src https://cdn.jsdelivr.net;`;
-    
+
     if (env.requiresCompatibilityMode) {
       // For Cursor/Windsurf, add more permissive policies for compatibility
       csp = `default-src 'none'; script-src 'nonce-${nonce}' https://cdn.jsdelivr.net 'unsafe-eval'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https: blob:; font-src https://cdn.jsdelivr.net data:; connect-src https: wss: ws:;`;
     }
-    
+
     return csp;
   }
 
   /**
    * Get webview panel options adjusted for the environment
    */
-  public static getWebviewPanelOptions(baseOptions: vscode.WebviewPanelOptions & vscode.WebviewOptions): vscode.WebviewPanelOptions & vscode.WebviewOptions {
+  public static getWebviewPanelOptions(
+    baseOptions: vscode.WebviewPanelOptions & vscode.WebviewOptions
+  ): vscode.WebviewPanelOptions & vscode.WebviewOptions {
     const env = this.detectEnvironment();
     const options = { ...baseOptions };
-    
+
     if (env.requiresCompatibilityMode) {
       // For Cursor/Windsurf, adjust panel behavior
       options.retainContextWhenHidden = true; // Always retain context for stability
       options.enableFindWidget = true; // Ensure find widget is enabled
     }
-    
+
     return this.getWebviewOptions(options);
   }
 
@@ -142,7 +126,7 @@ export class EnvironmentDetector {
    */
   public static getInitializationDelay(): number {
     const env = this.detectEnvironment();
-    
+
     // Cursor and Windsurf might need slightly longer initialization times
     return env.requiresCompatibilityMode ? 100 : 0;
   }
