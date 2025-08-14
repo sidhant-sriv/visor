@@ -5,7 +5,7 @@ export class StringProcessor {
   private static readonly MAX_CACHE_SIZE = 1000;
 
   // Precompiled regex for better performance
-  private static readonly escapeRegex = /"|\\|\n|<|>/g;
+  private static readonly escapeRegex = /"|\\|\n|<|>|`/g;
   private static readonly colonRegex = /:$/;
   private static readonly escapeMap: Record<string, string> = {
     '"': "#quot;",
@@ -13,6 +13,7 @@ export class StringProcessor {
     "\n": " ",
     "<": "#60;",
     ">": "#62;",
+    "`": "#96;",
   };
 
   static escapeString(str: string): string {
