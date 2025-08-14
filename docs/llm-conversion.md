@@ -6,22 +6,26 @@ This document explains how Visor’s LLM-based label conversion works end-to-end
 
 - Converts low-level, code-like node labels in the generated Mermaid diagram into concise, human-readable language using an LLM.
 - Preserves the diagram’s control-flow structure, node IDs, and interactivity.
+- Preserves interactive edge highlighting by embedding and restoring metadata.
 
 ### When it runs
 
 1) Visor analyzes your current file/function to produce a Mermaid diagram (local, offline).
-2) If LLM mode is enabled, Visor attempts to rewrite node labels via the configured provider.
-3) The result is cached using a strong content-based key, so repeated requests are fast and do not re-hit the LLM.
+2) You can toggle LLM mode on or off directly in the flowchart view.
+3) If LLM mode is enabled, Visor attempts to rewrite node labels via the configured provider.
+4) The result is cached using a strong content-based key, so repeated requests are fast and do not re-hit the LLM.
 
 ---
 
 ## User workflow
 
-- Enable LLM label rewriting:
-  - Command palette → “Visor: Enable LLM Labels” (`visor.llm.enableLabels`)
-  - Choose a provider (OpenAI, Gemini, Groq, or local Ollama)
-  - Provide API key if needed (stored securely in VS Code Secrets)
-  - Pick a model (or enter a custom one)
+- Enable LLM features:
+  - In the flowchart view, click the "Enable LLM" button.
+  - *or* Command palette → “Visor: Enable LLM Labels” (`visor.llm.enableLabels`)
+  - The first time, you will choose a provider (OpenAI, Gemini, Groq, or local Ollama), provide an API key if needed (stored securely in VS Code Secrets), and pick a model.
+
+- Toggle LLM labels:
+  - In the flowchart view, click the "LLM" toggle button (🧠) to switch between original and rewritten labels.
 
 - Change model later:
   - Command palette → “Visor: Change LLM Model” (`visor.llm.changeModel`)
@@ -68,11 +72,11 @@ Example user settings snippet:
 
 2) LLM conversion (optional)
    - `BaseFlowchartProvider` requests an LLM rewrite when enabled, via `LLMManager.translateIfNeeded`.
-   - Click handlers from the original Mermaid are merged into the translated Mermaid to preserve interactivity.
+   - To preserve interactivity, `click` handlers and `%% EDGE_META` comments are extracted from the original Mermaid, and then merged back into the translated Mermaid.
 
 3) Caching
    - `LLMManager` uses a two-tier cache (in-memory + persistent in VS Code `globalState`) keyed by a content+config hash.
-   - An inflight map coalesces concurrent identical requests so only one provider call is made.
+   - For non-Groq providers, an additional per-label cache allows for incremental updates, further reducing redundant API calls.
 
 ---
 
@@ -89,7 +93,16 @@ There are two paths depending on the provider:
   - For `provider === "groq"`, Visor asks for a full Mermaid rewrite that preserves structure and styling while replacing label text.
   - The response is cleaned (code fences removed, basic validity checked). If it’s invalid, Visor falls back to the label-only replacement strategy when possible.
 
-In all cases, the output Mermaid is posted back to the webview. Original click lines are reattached to maintain node interactivity.
+In all cases, the output Mermaid is posted back to the webview. Metadata comments and original click lines are reattached to maintain node and edge interactivity.
+
+---
+
+## Interactivity (Edge Highlighting)
+
+- To enable hover-based highlighting of a node's outgoing edges and children, Visor embeds special comments in the Mermaid source:
+  `%% EDGE_META:<source_node_id>:<target_node_id>`
+- This metadata is parsed by the webview's JavaScript to build a graph of connections.
+- During LLM translation, these comments are extracted and then re-injected into the rewritten Mermaid to ensure highlighting continues to work.
 
 ---
 
@@ -106,16 +119,17 @@ Each provider has a helper that issues the request, handles errors, and normaliz
 
 ## Caching details
 
-- Two-tier cache:
+- Two-tier cache for full Mermaid rewrites:
   - In-memory: `Map<string, string>` within the session.
   - Persistent: `context.globalState["visor.llm.cache"]` survives window reloads.
 
-- Inflight de-duplication: `Map<string, Promise<string>>` ensures that concurrent identical requests await the same promise.
+- Incremental cache for individual labels (non-Groq providers):
+  - A separate persistent cache stores translations for individual labels.
+  - When a diagram changes slightly, only new or modified labels are sent to the provider.
 
 - Cache key (versioned):
-  - `sha256(mermaidSource + provider + model + style + language + version)` with an internal `version = "v2"`.
+  - `sha256(mermaidSource + provider + model + style + language + version)` with an internal `version`.
   - Any change in code, provider, model, style, or language yields a new key and triggers a fresh conversion.
-  - No TTL; entries persist until content/config changes or you run “Reset LLM Cache”.
 
 ---
 
@@ -157,6 +171,6 @@ Each provider has a helper that issues the request, handles errors, and normaliz
   - Use `ollama` and leave cloud providers disabled. Ollama runs locally.
 
 - How do I clear stale results?
-  - Run “Visor: Reset LLM Cache”. This clears both memory and persistent caches.
+  - Run “Visor: Reset LLM Cache”. This clears all related memory and persistent caches.
 
 

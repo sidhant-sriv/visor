@@ -268,6 +268,15 @@ export abstract class BaseFlowchartProvider {
     return lines;
   }
 
+  private extractMetadata(src: string): string[] {
+    return src.split(/\r?\n/).filter(line => line.trim().startsWith("%%"));
+  }
+
+  private mergeMetadata(metadata: string[], translatedSrc: string): string {
+    if (metadata.length === 0) return translatedSrc;
+    return `${translatedSrc}\n${metadata.join("\n")}\n`;
+  }
+
   private mergeClickHandlers(originalSrc: string, translatedSrc: string): string {
     try {
       const origClicks = this.extractClickHandlers(originalSrc);
@@ -290,10 +299,12 @@ export abstract class BaseFlowchartProvider {
     if (!this._mermaidCodeOriginal) return;
     try {
       console.log("Visor LLM: translateIfNeeded start");
+      const metadata = this.extractMetadata(this._mermaidCodeOriginal);
       let translated = await LLMManager.translateIfNeeded(ctx, this._mermaidCodeOriginal);
       console.log("Visor LLM: translateIfNeeded done");
       if (translated) {
-        // Preserve click interactivity
+        // Preserve click interactivity and metadata
+        translated = this.mergeMetadata(metadata, translated);
         translated = this.mergeClickHandlers(this._mermaidCodeOriginal, translated);
         this._mermaidCodeLLM = translated;
         webview.postMessage({ command: "applyMermaid", payload: { mermaid: translated, llmApplied: true } });
@@ -681,6 +692,7 @@ export abstract class BaseFlowchartProvider {
         <script nonce="${nonce}">
             const vscode = acquireVsCodeApi();
             const INITIAL_LLM = ${JSON.stringify(llm)};
+            let isLLMEnabled = false;
 
             function onNodeClick(start, end) {
                 vscode.postMessage({
@@ -730,29 +742,23 @@ export abstract class BaseFlowchartProvider {
                             // Reinitialize pan-zoom for the new SVG
                             setTimeout(() => {
                                 const svgElement = document.querySelector('.mermaid svg');
-                                if (svgElement && typeof svgPanZoom === 'function') {
-                                    svgPanZoom(svgElement, {
-                                        zoomEnabled: true,
-                                        controlIconsEnabled: true,
-                                        fit: true,
-                                        center: true,
-                                        minZoom: 0.1,
-                                        maxZoom: 10,
-                                        zoomScaleSensitivity: 0.2
-                                    });
+                                if (svgElement) {
+                                    setupInteractions(svgElement);
                                 }
                             }, 0);
                             // Mark LLM enabled only after a successful apply if requested
                             try {
                                 if (message.payload && message.payload.llmApplied) {
+                                    isLLMEnabled = true;
                                     localStorage.setItem('visor-llm-enabled', 'true');
                                     const llmToggle = document.getElementById('llm-toggle');
                                     if (llmToggle) {
-                                        llmToggle.textContent = 'LLM';
+                                        llmToggle.textContent = '🧠✓ LLM';
                                         llmToggle.title = 'Disable LLM labels';
                                     }
                                 } else {
                                     // If this was a disable request, ensure state reflects disabled
+                                    isLLMEnabled = false;
                                     localStorage.setItem('visor-llm-enabled', 'false');
                                     const llmToggle = document.getElementById('llm-toggle');
                                     if (llmToggle) {
@@ -1077,24 +1083,20 @@ export abstract class BaseFlowchartProvider {
                     };
                     return;
                 }
-                const state = localStorage.getItem('visor-llm-enabled') === 'true';
-                llmToggle.textContent = state ? '🧠✓ LLM' : '🧠 LLM';
-                llmToggle.title = state ? 'Disable LLM labels' : 'Enable LLM labels';
+                isLLMEnabled = localStorage.getItem('visor-llm-enabled') === 'true';
+                llmToggle.textContent = isLLMEnabled ? '🧠✓ LLM' : '🧠 LLM';
+                llmToggle.title = isLLMEnabled ? 'Disable LLM labels' : 'Enable LLM labels';
+
                 llmToggle.onclick = () => {
-                    const current = localStorage.getItem('visor-llm-enabled') === 'true';
-                    if (current) {
+                    if (isLLMEnabled) {
                         vscode.postMessage({ command: 'disableLLMLabels', payload: {} });
-                        localStorage.setItem('visor-llm-enabled', 'false');
-                        llmToggle.textContent = '🧠 LLM';
-                        llmToggle.title = 'Enable LLM labels';
                     } else {
-                        // Optimistically show progress, but do not flip the enabled state yet.
+                        // Optimistically show progress
                         llmToggle.setAttribute('disabled', 'true');
                         llmToggle.textContent = '🧠…';
                         vscode.postMessage({ command: 'requestLLMLabels', payload: {} });
                         // Re-enable after a short delay; final state will be set upon successful applyMermaid
                         setTimeout(() => llmToggle.removeAttribute('disabled'), 2000);
-                        // Do NOT set localStorage here. It will be set in applyMermaid handler below.
                     }
                 };
             }

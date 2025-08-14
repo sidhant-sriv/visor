@@ -336,78 +336,92 @@ async function callOpenAI(
   model: string,
   apiKey: string,
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
 ): Promise<string[] | null> {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-    }),
-  });
-  if (!res.ok) return null;
-  const data: unknown = await res.json();
-  if (!isOpenAIChatCompletionResponse(data)) return null;
-  const content: string | undefined =
-    data.choices && data.choices[0] && data.choices[0].message
-      ? data.choices[0].message.content
-      : undefined;
-  if (!content) return null;
-  return parseLabelsJsonText(content);
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+      }),
+    });
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    if (!isOpenAIChatCompletionResponse(data)) return null;
+    const content: string | undefined =
+      data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content
+        : undefined;
+    if (!content) return null;
+    return parseLabelsJsonText(content);
+  } catch (err) {
+    logError(
+      `OpenAI fetch error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
 }
 
 async function callGemini(
   model: string,
   apiKey: string,
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
 ): Promise<string[] | null> {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-      model
-    )}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: systemPrompt }, { text: userPrompt }],
-          },
-        ],
-        generationConfig: { temperature: 0.2 },
-      }),
-    }
-  );
-  if (!res.ok) return null;
-  const data: unknown = await res.json();
-  if (!isGeminiGenerateContentResponse(data)) return null;
-  const first = data.candidates && data.candidates[0];
-  const text: string | undefined =
-    first && first.content && first.content.parts && first.content.parts[0]
-      ? first.content.parts[0].text
-      : undefined;
-  if (!text) return null;
-  // Gemini might produce text like `Here's the list: ["a", "b"]`. We need to extract the JSON.
-  const jsonMatch = text.match(/\[[\s\S]*\]/);
-  const jsonString = jsonMatch ? jsonMatch[0] : text;
-  return parseLabelsJsonText(jsonString);
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
+        model,
+      )}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [
+            {
+              parts: [{ text: systemPrompt }, { text: userPrompt }],
+            },
+          ],
+          generationConfig: { temperature: 0.2 },
+        }),
+      },
+    );
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    if (!isGeminiGenerateContentResponse(data)) return null;
+    const first = data.candidates && data.candidates[0];
+    const text: string | undefined =
+      first && first.content && first.content.parts && first.content.parts[0]
+        ? first.content.parts[0].text
+        : undefined;
+    if (!text) return null;
+    // Gemini might produce text like `Here's the list: ["a", "b"]`. We need to extract the JSON.
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    const jsonString = jsonMatch ? jsonMatch[0] : text;
+    return parseLabelsJsonText(jsonString);
+  } catch (err) {
+    logError(
+      `Gemini fetch error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
 }
 
 async function callGroq(
   model: string,
   apiKey: string,
   systemPrompt: string,
-  userPrompt: string
+  userPrompt: string,
 ): Promise<string[] | null> {
   const url = "https://api.groq.com/openai/v1/chat/completions";
   const body = {
@@ -422,26 +436,33 @@ async function callGroq(
   logInfo(
     `Groq label-array request: model=${model} body=${JSON.stringify(body).slice(
       0,
-      2000
-    )}`
+      2000,
+    )}`,
   );
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) return null;
-  const data: unknown = await res.json();
-  if (!isOpenAIChatCompletionResponse(data)) return null;
-  const content: string | undefined =
-    data.choices && data.choices[0] && data.choices[0].message
-      ? data.choices[0].message.content
-      : undefined;
-  if (!content) return null;
-  return parseLabelsJsonText(content);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return null;
+    const data: unknown = await res.json();
+    if (!isOpenAIChatCompletionResponse(data)) return null;
+    const content: string | undefined =
+      data.choices && data.choices[0] && data.choices[0].message
+        ? data.choices[0].message.content
+        : undefined;
+    if (!content) return null;
+    return parseLabelsJsonText(content);
+  } catch (err) {
+    logError(
+      `Groq fetch error: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
 }
 
 // -------------------- Ollama (local) --------------------
