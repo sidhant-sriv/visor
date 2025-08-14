@@ -3,6 +3,8 @@ import { analyzeCode } from "../logic/analyzer";
 import { LocationMapEntry } from "../ir/ir";
 import { EnhancedMermaidGenerator } from "../logic/EnhancedMermaidGenerator";
 import { getComplexityConfig } from "../logic/utils/ComplexityConfig";
+import { LLMManager } from "../logic/llm/LLMManager";
+import { getExtensionContext } from "../logic/llm/LLMContext";
 import { EnvironmentDetector } from "../logic/utils/EnvironmentDetector";
 
 const MERMAID_VERSION = "11.8.0";
@@ -35,12 +37,30 @@ export type CopyMermaidMessage = {
   payload: { code: string };
 };
 
+export type RequestLLMLabelsMessage = {
+  command: "requestLLMLabels";
+  payload: {};
+};
+
+export type DisableLLMLabelsMessage = {
+  command: "disableLLMLabels";
+  payload: {};
+};
+
+export type SetupLLMMessage = {
+  command: "setupLLM";
+  payload: {};
+};
+
 export type WebviewMessage =
   | HighlightCodeMessage
   | ExportMessage
   | ExportErrorMessage
   | OpenInPanelMessage
-  | CopyMermaidMessage;
+  | CopyMermaidMessage
+  | RequestLLMLabelsMessage
+  | DisableLLMLabelsMessage
+  | SetupLLMMessage;
 
 export interface FlowchartViewContext {
   isPanel: boolean;
@@ -60,6 +80,9 @@ export abstract class BaseFlowchartProvider {
   protected _currentPosition?: number;
   protected _isUpdating: boolean = false;
   protected _eventListenersSetup: boolean = false;
+  protected _mermaidCodeOriginal?: string;
+  protected _mermaidCodeLLM?: string;
+  private _cachedClickHandlers?: { source: string; lines: string[] };
 
   constructor(protected readonly _extensionUri: vscode.Uri) {
     // Detect environment and apply any necessary compatibility fixes
@@ -212,6 +235,116 @@ export abstract class BaseFlowchartProvider {
         vscode.window.showInformationMessage("Mermaid code copied to clipboard!");
         break;
       }
+
+      case "requestLLMLabels": {
+        console.log("Visor LLM: requestLLMLabels received");
+        await this.handleLLMTranslate();
+        break;
+      }
+
+      case "disableLLMLabels": {
+        console.log("Visor LLM: disableLLMLabels received");
+        const webview = this.getWebview();
+        if (webview && this._mermaidCodeOriginal) {
+          webview.postMessage({ command: "applyMermaid", payload: { mermaid: this._mermaidCodeOriginal, llmApplied: false } });
+        }
+        break;
+      }
+
+      case "setupLLM": {
+        console.log("Visor LLM: setupLLM received");
+        await vscode.commands.executeCommand("visor.llm.enableLabels");
+        const ctx = getExtensionContext();
+        const availability = ctx ? await LLMManager.getAvailability(ctx) : { enabled: false, provider: "openai", model: "" };
+        const webview = this.getWebview();
+        if (webview) {
+          webview.postMessage({ command: "llmAvailability", payload: availability });
+        }
+        break;
+      }
+    }
+  }
+
+  /**
+   * Merge click handlers from original Mermaid into a translated Mermaid string
+   * to preserve node interactivity after LLM rewrites.
+   */
+  private static isClickLine(line: string): boolean {
+    let index = 0;
+    // Skip leading spaces and tabs without allocating new strings
+    while (index < line.length) {
+      const code = line.charCodeAt(index);
+      if (code !== 32 && code !== 9) break; // 32 = space, 9 = tab
+      index += 1;
+    }
+    return line.startsWith("click ", index);
+  }
+
+  private extractClickHandlers(src: string): string[] {
+    if (this._cachedClickHandlers && this._cachedClickHandlers.source === src) {
+      return this._cachedClickHandlers.lines;
+    }
+    const lines: string[] = [];
+    const srcLines = src.split(/\r?\n/);
+    for (const line of srcLines) {
+      if (BaseFlowchartProvider.isClickLine(line)) {
+        lines.push(line);
+      }
+    }
+    this._cachedClickHandlers = { source: src, lines };
+    return lines;
+  }
+
+  private extractMetadata(src: string): string[] {
+    return src.split(/\r?\n/).filter(line => line.trim().startsWith("%%"));
+  }
+
+  private mergeMetadata(metadata: string[], translatedSrc: string): string {
+    if (metadata.length === 0) return translatedSrc;
+    return `${translatedSrc}\n${metadata.join("\n")}\n`;
+  }
+
+  private mergeClickHandlers(originalSrc: string, translatedSrc: string): string {
+    try {
+      const origClicks = this.extractClickHandlers(originalSrc);
+      if (origClicks.length === 0) return translatedSrc;
+      const withoutClicks = translatedSrc
+        .split(/\r?\n/)
+        .filter((l) => !BaseFlowchartProvider.isClickLine(l))
+        .join("\n");
+      // Append original click lines at end
+      return `${withoutClicks}\n${origClicks.join("\n")}\n`;
+    } catch {
+      return translatedSrc;
+    }
+  }
+
+  private async handleLLMTranslate(): Promise<void> {
+    const ctx = getExtensionContext();
+    const webview = this.getWebview();
+    if (!ctx || !webview) return;
+    if (!this._mermaidCodeOriginal) return;
+    try {
+      console.log("Visor LLM: translateIfNeeded start");
+      const metadata = this.extractMetadata(this._mermaidCodeOriginal);
+      let translated = await LLMManager.translateIfNeeded(ctx, this._mermaidCodeOriginal);
+      console.log("Visor LLM: translateIfNeeded done");
+      if (translated) {
+        // Preserve click interactivity and metadata
+        translated = this.mergeMetadata(metadata, translated);
+        translated = this.mergeClickHandlers(this._mermaidCodeOriginal, translated);
+        this._mermaidCodeLLM = translated;
+        webview.postMessage({ command: "applyMermaid", payload: { mermaid: translated, llmApplied: true } });
+      } else {
+        vscode.window.showWarningMessage("LLM labels could not be applied. Using original labels.");
+        // Notify webview to reset LLM UI state
+        try {
+          webview.postMessage({ command: "applyMermaid", payload: { mermaid: this._mermaidCodeOriginal, llmApplied: false } });
+        } catch {}
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage(`LLM translation failed: ${message}`);
     }
   }
 
@@ -384,7 +517,8 @@ export abstract class BaseFlowchartProvider {
         vsCodeTheme
       );
       const mermaidCode = mermaidGenerator.generate(flowchartIR);
-      
+      this._mermaidCodeOriginal = mermaidCode;
+      this._mermaidCodeLLM = undefined;
       // Only pass complexity info if it's enabled and should be displayed in panel
       const complexityConfig = getComplexityConfig();
       const complexityToDisplay =
@@ -394,13 +528,9 @@ export abstract class BaseFlowchartProvider {
           ? flowchartIR.functionComplexity
           : undefined;
 
-      this.setWebviewHtml(
-        this.getWebviewContent(
-          mermaidCode,
-          this.getNonce(),
-          complexityToDisplay
-        )
-      );
+      const ctx = getExtensionContext();
+      const availability = ctx ? await LLMManager.getAvailability(ctx) : { enabled: false, provider: "openai", model: "" };
+      this.setWebviewHtml(this.getWebviewContent(mermaidCode, this.getNonce(), complexityToDisplay, availability));
 
       // After updating the view, immediately highlight the node for the current cursor
       const offset = editor.document.offsetAt(editor.selection.active);
@@ -462,11 +592,12 @@ export abstract class BaseFlowchartProvider {
     flowchartSyntax: string,
     nonce: string,
     functionComplexity?: {
-        cyclomaticComplexity: number;
-        rating: "low" | "medium" | "high" | "very-high";
-        description: string;
-    }
-): string {
+      cyclomaticComplexity: number;
+      rating: "low" | "medium" | "high" | "very-high";
+      description: string;
+    },
+    llmAvailability?: { enabled: boolean; provider: string; model: string }
+  ): string {
     const theme =
       vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
         ? "dark"
@@ -475,6 +606,7 @@ export abstract class BaseFlowchartProvider {
     const context = this.getViewContext();
     const complexityConfig = getComplexityConfig();
 
+    const llm = llmAvailability || { enabled: false, provider: "openai", model: "" };
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
@@ -533,6 +665,8 @@ export abstract class BaseFlowchartProvider {
                 transition: fill 0.15s ease-in-out, stroke 0.15s ease-in-out, filter 0.15s ease-in-out, stroke-width 0.15s ease-in-out;
             }
 
+
+            
             /* Hovered node, child, or edge */
             .mermaid svg .node.hover-highlight > *,
             .mermaid svg .node.child-highlight > * {
@@ -578,7 +712,6 @@ export abstract class BaseFlowchartProvider {
     </head>
     <body>
         ${ this.getHtmlForControls(context, functionComplexity) }
-
         <div id="container">
             <div class="mermaid">${flowchartSyntax}</div>
         </div>
@@ -586,6 +719,8 @@ export abstract class BaseFlowchartProvider {
 
         <script nonce="${nonce}">
             const vscode = acquireVsCodeApi();
+            const INITIAL_LLM = ${JSON.stringify(llm)};
+            let isLLMEnabled = false;
 
             function onNodeClick(start, end) {
                 vscode.postMessage({
@@ -612,6 +747,65 @@ export abstract class BaseFlowchartProvider {
                         }
                         highlightedNodeId = newId;
                         break;
+
+                    case 'applyMermaid': {
+                        const mermaidDiv = document.querySelector('.mermaid');
+                        const sourceDiv = document.getElementById('mermaid-source');
+                        if (mermaidDiv && sourceDiv) {
+                            const newSource = message.payload.mermaid;
+                            // Reset processed state to allow re-render
+                            mermaidDiv.removeAttribute('data-processed');
+                            // Ensure it starts with a valid graph header
+                            const idx = newSource.toLowerCase().indexOf('graph ');
+                            const finalSrc = idx >= 0 ? newSource.slice(idx) : newSource;
+                            mermaidDiv.textContent = finalSrc;
+                            sourceDiv.textContent = newSource.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                            // Re-run mermaid rendering (Mermaid v11 API)
+                            if (typeof mermaid.run === 'function') {
+                                mermaid.run({ querySelector: '.mermaid' });
+                            } else if (typeof mermaid.init === 'function') {
+                                // Fallback for older API
+                                mermaid.init(undefined, '.mermaid');
+                            }
+                            // Reinitialize pan-zoom for the new SVG
+                            setTimeout(() => {
+                                const svgElement = document.querySelector('.mermaid svg');
+                                if (svgElement) {
+                                    setupInteractions(svgElement);
+                                }
+                            }, 0);
+                            // Mark LLM enabled only after a successful apply if requested
+                            try {
+                                if (message.payload && message.payload.llmApplied) {
+                                    isLLMEnabled = true;
+                                    localStorage.setItem('visor-llm-enabled', 'true');
+                                    const llmToggle = document.getElementById('llm-toggle');
+                                    if (llmToggle) {
+                                        llmToggle.textContent = '🧠✓ LLM';
+                                        llmToggle.title = 'Disable LLM labels';
+                                    }
+                                } else {
+                                    // If this was a disable request, ensure state reflects disabled
+                                    isLLMEnabled = false;
+                                    localStorage.setItem('visor-llm-enabled', 'false');
+                                    const llmToggle = document.getElementById('llm-toggle');
+                                    if (llmToggle) {
+                                        llmToggle.textContent = '🧠 LLM';
+                                        llmToggle.title = 'Enable LLM labels';
+                                    }
+                                }
+                            } catch {}
+                        }
+                        break;
+                    }
+                    case 'llmAvailability': {
+                        setLLMButton(message.payload);
+                        break;
+                    }
+                    case 'exportError':
+                        // VSC will show the error message
+                        break;
+
                 }
             });
 
@@ -934,6 +1128,37 @@ export abstract class BaseFlowchartProvider {
                     });
                 }
             }
+
+            // LLM toggle functionality
+            const llmToggle = document.getElementById('llm-toggle');
+            function setLLMButton(availability) {
+                if (!llmToggle) return;
+                if (!availability || !availability.enabled) {
+                    llmToggle.textContent = 'Enable LLM';
+                    llmToggle.title = 'Enable LLM labels (configure provider and API key)';
+                    llmToggle.onclick = () => {
+                        vscode.postMessage({ command: 'setupLLM', payload: {} });
+                    };
+                    return;
+                }
+                isLLMEnabled = localStorage.getItem('visor-llm-enabled') === 'true';
+                llmToggle.textContent = isLLMEnabled ? '🧠✓ LLM' : '🧠 LLM';
+                llmToggle.title = isLLMEnabled ? 'Disable LLM labels' : 'Enable LLM labels';
+
+                llmToggle.onclick = () => {
+                    if (isLLMEnabled) {
+                        vscode.postMessage({ command: 'disableLLMLabels', payload: {} });
+                    } else {
+                        // Optimistically show progress
+                        llmToggle.setAttribute('disabled', 'true');
+                        llmToggle.textContent = '🧠…';
+                        vscode.postMessage({ command: 'requestLLMLabels', payload: {} });
+                        // Re-enable after a short delay; final state will be set upon successful applyMermaid
+                        setTimeout(() => llmToggle.removeAttribute('disabled'), 2000);
+                    }
+                };
+            }
+            setLLMButton(INITIAL_LLM);
         </script>
     </body>
     </html>`;
@@ -965,6 +1190,15 @@ export abstract class BaseFlowchartProvider {
         #export-controls button:hover, #open-panel-btn:hover {
             background-color: var(--vscode-button-hoverBackground);
         }
+        
+        /* LLM toggle */
+        #llm-toggle {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: 1px solid var(--vscode-button-border, transparent);
+            padding: 6px 10px; cursor: pointer; border-radius: 4px; font-size: 11px;
+        }
+        #llm-toggle[disabled] { opacity: 0.6; cursor: default; }
 
         /* Container for complexity panel and toggle button, positioned bottom-left */
         #complexity-container {
@@ -1020,6 +1254,7 @@ export abstract class BaseFlowchartProvider {
                 <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
                 <button id="export-svg" title="Export as SVG">💾 SVG</button>
                 <button id="export-png" title="Export as PNG">🖼️ PNG</button>
+                <button id="llm-toggle" title="Toggle human-friendly labels"></button>
             </div>
         </div>
     `;
@@ -1030,6 +1265,7 @@ export abstract class BaseFlowchartProvider {
             <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
             <button id="export-svg">Export as SVG</button>
             <button id="export-png">Export as PNG</button>
+            <button id="llm-toggle" title="Toggle human-friendly labels"></button>
         </div>
         ${
           functionComplexity ? `
