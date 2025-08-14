@@ -6,6 +6,7 @@ import { initCppLanguageService } from "./cpp";
 import { initCLanguageService } from "./c";
 import { initRustLanguageService } from "./rust";
 import { EnvironmentDetector } from "../utils/EnvironmentDetector";
+import { initGoLanguageService } from "./go";
 
 /**
  * Initializes all language services for the extension.
@@ -79,6 +80,17 @@ export async function initLanguageServices(context: vscode.ExtensionContext) {
           "tree-sitter-rust.wasm"
         ).fsPath;
         await initRustLanguageService(rustWasmPath);
+      },
+    },
+    {
+      name: "Go",
+      init: async () => {
+        const goWasmPath = vscode.Uri.joinPath(
+          context.extensionUri,
+          "dist",
+          "tree-sitter-go.wasm"
+        ).fsPath;
+        await initGoLanguageService(goWasmPath);
       },
     },
   ];
