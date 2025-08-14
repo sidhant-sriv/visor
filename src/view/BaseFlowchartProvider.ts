@@ -750,6 +750,33 @@ export abstract class BaseFlowchartProvider {
                         vscode.postMessage({ command: 'openInPanel', payload: {} });
                     });
                 }
+
+                // Complexity toggle functionality
+                const complexityToggle = document.getElementById('complexity-toggle');
+                const complexityPanel = document.getElementById('complexity-panel');
+                if (complexityToggle && complexityPanel) {
+                    // Use a simple variable since localStorage is not supported in artifacts
+                    let isHidden = false;
+                    
+                    function updateToggleState() {
+                        if (isHidden) {
+                            complexityPanel.classList.add('hidden');
+                            complexityToggle.textContent = '📊';
+                            complexityToggle.title = 'Show complexity display';
+                        } else {
+                            complexityPanel.classList.remove('hidden');
+                            complexityToggle.textContent = '📊✓';
+                            complexityToggle.title = 'Hide complexity display';
+                        }
+                    }
+                    
+                    updateToggleState(); // Set initial state
+                    
+                    complexityToggle.addEventListener('click', () => {
+                        isHidden = !isHidden;
+                        updateToggleState();
+                    });
+                }
             }
             setupButtonHandlers();
 
@@ -880,11 +907,47 @@ export abstract class BaseFlowchartProvider {
         #export-controls button:hover, #open-panel-btn:hover {
             background-color: var(--vscode-button-hoverBackground);
         }
+
+        /* Container for complexity panel and toggle button, positioned bottom-left */
+        #complexity-container {
+            position: fixed; bottom: 10px; left: 10px; z-index: 1001;
+            display: flex; align-items: flex-end; gap: 8px;
+        }
+
+        /* Complexity display panel - layout within the container */
+        #complexity-panel {
+            background-color: var(--vscode-editor-background);
+            border: 1px solid var(--vscode-editorWidget-border);
+            border-radius: 6px; padding: 8px 12px; font-size: 12px;
+            color: var(--vscode-editor-foreground);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1); max-width: 300px;
+            transition: opacity 0.3s ease;
+        }
+        
+        #complexity-panel.hidden { display: none; }
+        
+        /* Complexity toggle button - layout within the container */
+        #complexity-toggle {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: 1px solid var(--vscode-button-border, transparent);
+            padding: 6px 10px; cursor: pointer; border-radius: 4px; font-size: 11px;
+            flex-shrink: 0; /* Prevents the button from shrinking */
+        }
+        
+        #complexity-toggle:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+        
         .complexity-rating { font-weight: bold; margin-left: 4px; }
         .complexity-low { color: ${complexityConfig.colors.low}; }
         .complexity-medium { color: ${complexityConfig.colors.medium}; }
         .complexity-high { color: ${complexityConfig.colors.high}; }
         .complexity-very-high { color: ${complexityConfig.colors.veryHigh}; }
+        
+        .complexity-description {
+            margin-top: 4px; font-size: 11px; opacity: 0.8;
+        }
       `;
   }
 
@@ -910,6 +973,25 @@ export abstract class BaseFlowchartProvider {
             <button id="export-svg">Export as SVG</button>
             <button id="export-png">Export as PNG</button>
         </div>
+        ${
+          functionComplexity ? `
+        <div id="complexity-container">
+            <button id="complexity-toggle" title="Toggle complexity display">📊</button>
+            <div id="complexity-panel">
+                <div>
+                    <strong>Cyclomatic Complexity:</strong> 
+                    ${functionComplexity.cyclomaticComplexity}
+                    <span class="complexity-rating complexity-${functionComplexity.rating}">
+                        (${functionComplexity.rating.toUpperCase()})
+                    </span>
+                </div>
+                <div class="complexity-description">
+                    ${functionComplexity.description}
+                </div>
+            </div>
+        </div>
+        ` : ""
+        }
     `;
     
     return context.isPanel ? panelControls : sidebarControls;
@@ -951,7 +1033,7 @@ export abstract class BaseFlowchartProvider {
   protected getNonce(): string {
     let text = "";
     const possible =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvewxyz0123456789";
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     for (let i = 0; i < 32; i++) {
       text += possible.charAt(Math.floor(Math.random() * possible.length));
     }
