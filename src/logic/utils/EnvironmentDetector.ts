@@ -19,7 +19,7 @@ export class EnvironmentDetector {
     const appHost = vscode.env.appHost?.toLowerCase() || "";
     const userAgent = (globalThis as any)?.navigator?.userAgent?.toLowerCase() || "";
     
-    let editor: "vscode" | "cursor" | "windsurf" | "unknown" = "unknown";
+    let editor: "vscode" | "cursor" | "windsurf" | "trae" | "unknown" = "unknown";
     
     // Detect Cursor
     if (
@@ -41,6 +41,16 @@ export class EnvironmentDetector {
     ) {
       editor = "windsurf";
     }
+    // Detect Trae
+    else if (
+      appName.includes("trae") || 
+      appHost.includes("trae") ||
+      userAgent.includes("trae") ||
+      process.env.VSCODE_CWD?.includes("Trae") ||
+      process.env.VSCODE_PORTABLE?.includes("Trae")
+    ) {
+      editor = "trae";
+    }
     // Detect VS Code
     else if (
       appName.includes("visual studio code") || 
@@ -57,7 +67,8 @@ export class EnvironmentDetector {
       isVSCode: editor === "vscode",
       isCursor: editor === "cursor",
       isWindsurf: editor === "windsurf",
-      requiresCompatibilityMode: editor === "cursor" || editor === "windsurf"
+      isTrae: editor === "trae",
+      requiresCompatibilityMode: editor === "cursor" || editor === "windsurf" || editor === "trae"
     };
 
     console.log("Environment detected:", this._detectionResult);
@@ -138,11 +149,12 @@ export class EnvironmentDetector {
 }
 
 export interface EditorEnvironment {
-  editor: "vscode" | "cursor" | "windsurf" | "unknown";
+  editor: "vscode" | "cursor" | "windsurf" | "trae" | "unknown";
   appName: string;
   appHost: string;
   isVSCode: boolean;
   isCursor: boolean;
   isWindsurf: boolean;
+  isTrae: boolean;
   requiresCompatibilityMode: boolean;
 }

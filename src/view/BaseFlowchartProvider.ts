@@ -92,6 +92,9 @@ export abstract class BaseFlowchartProvider {
       } else if (env.isWindsurf) {
         // Windsurf-specific initialization  
         console.log("Visor: Applying Windsurf-specific compatibility settings");
+      } else if (env.isTrae) {
+        // Trae-specific initialization
+        console.log("Visor: Applying Trae-specific compatibility settings");
       }
     }
   }
@@ -478,7 +481,6 @@ export abstract class BaseFlowchartProvider {
         <meta charset="UTF-8">
 
         <meta http-equiv="Content-Security-Policy" content="${EnvironmentDetector.getContentSecurityPolicy(nonce)}">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}' 'unsafe-eval'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data:; font-src https://cdn.jsdelivr.net;">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Code Flowchart</title>
         <script nonce="${nonce}" src="https://cdn.jsdelivr.net/npm/mermaid@${MERMAID_VERSION}/dist/mermaid.min.js"></script>
@@ -649,29 +651,6 @@ export abstract class BaseFlowchartProvider {
                 console.error('Mermaid library not loaded');
             }
 
-            window.addEventListener('load', () => {
-                const svgElement = document.querySelector('.mermaid svg');
-                if (svgElement && typeof svgPanZoom !== 'undefined') {
-                    try {
-                        const panZoomInstance = svgPanZoom(svgElement, {
-                            zoomEnabled: true,
-                            controlIconsEnabled: true,
-                            fit: true,
-                            center: true,
-                            minZoom: 0.1,
-                            maxZoom: 10,
-                            zoomScaleSensitivity: 0.2
-                        });
-                    } catch (error) {
-                        console.warn('SVG pan zoom initialization failed:', error);
-                        // Continue without pan/zoom functionality
-                    }
-                } else if (!svgElement) {
-                    console.warn('No SVG element found for pan/zoom');
-                } else {
-                    console.warn('svgPanZoom library not loaded');
-                }
-
             function setupInteractions(svgElement) {
                 if (!svgElement) return;
 
@@ -704,12 +683,12 @@ export abstract class BaseFlowchartProvider {
                     return edgeMetadata;
                 }
 
-                function extractBaseId(fullId) {
-                    if (!fullId) return '';
+                function extractBaseId(fullNodeId) {
+                    if (!fullNodeId) return '';
                     // Remove flowchart prefix and suffix numbers
-                    let base = fullId.startsWith('flowchart-') 
-                        ? fullId.replace(/^flowchart-/, '') 
-                        : fullId;
+                    let base = fullNodeId.startsWith('flowchart-') 
+                        ? fullNodeId.replace(/^flowchart-/, '') 
+                        : fullNodeId;
                     base = base.replace(/-[\\d-]+$/, '');
                     return base;
                 }
@@ -724,14 +703,14 @@ export abstract class BaseFlowchartProvider {
                     // Look for edges with IDs that contain the source->target relationship
                     for (const target of targets) {
                         const edgePatterns = [
-                            \`L_\${baseId}_\${target}_\`,
-                            \`\${baseId}_\${target}\`,
-                            \`\${baseId}-\${target}\`,
-                            \`edge_\${baseId}_\${target}\`
+                            "L_" + baseId + "_" + target + "_",
+                            baseId + "_" + target,
+                            baseId + "-" + target,
+                            "edge_" + baseId + "_" + target
                         ];
                         
                         for (const pattern of edgePatterns) {
-                            const matchingEdge = document.querySelector(\`[id*="\${pattern}"]\`);
+                            const matchingEdge = document.querySelector('[id*="' + pattern + '"]');
                             if (matchingEdge) {
                                 outgoingEdges.push(matchingEdge);
                                 break;
@@ -748,9 +727,9 @@ export abstract class BaseFlowchartProvider {
                     for (const targetBaseId of targets) {
                         // Try multiple patterns to find target nodes
                         const patterns = [
-                            \`[id*="\${targetBaseId}"]\`,
-                            \`#flowchart-\${targetBaseId}-\`,
-                            \`[id^="flowchart-\${targetBaseId}"]\`
+                            '[id*="' + targetBaseId + '"]',
+                            '#flowchart-' + targetBaseId + '-',
+                            '[id^="flowchart-' + targetBaseId + '"]'
                         ];
                         
                         for (const pattern of patterns) {
@@ -796,13 +775,6 @@ export abstract class BaseFlowchartProvider {
                     });
                 });
             }
-
-            mermaid.initialize({
-                startOnLoad: true,
-                theme: '${theme}',
-                securityLevel: 'loose',
-                flowchart: { useMaxWidth: false, htmlLabels: true, curve: 'basis' }
-            });
 
             window.addEventListener('load', () => {
                 setTimeout(() => {
