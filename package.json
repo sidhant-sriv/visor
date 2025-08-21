@@ -62,6 +62,21 @@
         "command": "visor.maximizeFlowchartPanel",
         "title": "Maximize Flowchart Panel",
         "icon": "$(screen-full)"
+      },
+      {
+        "command": "visor.llm.enableLabels",
+        "title": "Visor: Enable LLM Labels",
+        "icon": "$(extensions-install)"
+      },
+      {
+        "command": "visor.llm.changeModel",
+        "title": "Visor: Change LLM Model",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "visor.llm.resetCache",
+        "title": "Visor: Reset LLM Cache",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
@@ -190,6 +205,32 @@
           "type": "boolean",
           "default": true,
           "description": "Enable find/search functionality in panel view"
+        },
+        "visor.llm.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable LLM-based human-friendly node labels toggle in the flowchart webview"
+        },
+        "visor.llm.provider": {
+          "type": "string",
+          "enum": ["openai", "gemini", "groq", "ollama"],
+          "default": "openai",
+          "description": "LLM provider used for translating node labels"
+        },
+        "visor.llm.model": {
+          "type": "string",
+          "default": "openai/gpt-oss-20b",
+          "description": "Model identifier for the selected LLM provider"
+        },
+        "visor.llm.style": {
+          "type": "string",
+          "default": "concise",
+          "description": "Style preference for rewritten labels (e.g., concise, explanatory)"
+        },
+        "visor.llm.language": {
+          "type": "string",
+          "default": "",
+          "description": "Preferred output language for labels (empty for English)"
         }
       }
     }
