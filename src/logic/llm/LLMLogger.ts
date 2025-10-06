@@ -16,15 +16,12 @@ function getChannel(): vscode.OutputChannel {
 }
 
 export function logInfo(message: string): void {
-  getChannel().appendLine(`[INFO] ${message}`);
 }
 
 export function logWarn(message: string): void {
-  getChannel().appendLine(`[WARN] ${message}`);
 }
 
 export function logError(message: string): void {
-  getChannel().appendLine(`[ERROR] ${message}`);
 }
 
 
