@@ -2,6 +2,7 @@ import { FlowchartIR, FlowchartNode, FlowchartEdge, NodeType } from "../ir/ir";
 import { StringProcessor } from "./utils/StringProcessor";
 import { SubtleThemeManager, ThemeStyles } from "./utils/ThemeManager";
 import { getComplexityConfig } from "./utils/ComplexityConfig";
+import { AnimationPathGenerator } from "./utils/AnimationPathGenerator";
 
 // Optimized string building
 class StringBuilder {
@@ -87,6 +88,26 @@ export class EnhancedMermaidGenerator {
         `%% Cyclomatic Complexity: ${ir.functionComplexity.cyclomaticComplexity} (${ir.functionComplexity.rating})`
       );
       this.sb.appendLine(`%% ${ir.functionComplexity.description}`);
+    }
+
+    // Generate animation paths if not already present
+    if (!ir.animationPaths) {
+      try {
+        ir.animationPaths = AnimationPathGenerator.generatePaths(ir);
+      } catch (error) {
+        console.warn('Failed to generate animation paths:', error);
+        ir.animationPaths = [];
+      }
+    }
+
+    // Add animation path metadata as comments
+    if (ir.animationPaths && ir.animationPaths.length > 0) {
+      this.sb.appendLine("");
+      this.sb.appendLine("    %% Animation paths metadata");
+      for (const path of ir.animationPaths) {
+        this.sb.appendLine(`    %% ANIM_PATH:${path.id}:${path.nodes.join(',')}`);
+        this.sb.appendLine(`    %% ANIM_DESC:${path.id}:${path.description}`);
+      }
     }
 
     // Apply sanitization to all IDs first to ensure consistency
