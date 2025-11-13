@@ -163,6 +163,11 @@
           "default": true,
           "description": "Show complexity information in the dedicated panel"
         },
+        "visor.complexity.displayInline": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show cyclomatic complexity as an inline decoration above the function definition."
+        },
         "visor.complexity.thresholds.low": {
           "type": "number",
           "default": 5,

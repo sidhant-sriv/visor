@@ -1,8 +1,11 @@
 import * as vscode from "vscode";
 import { analyzeCode } from "../logic/analyzer";
-import { LocationMapEntry } from "../ir/ir";
+import { FlowchartIR, LocationMapEntry } from "../ir/ir"; // <-- Import FlowchartIR
 import { EnhancedMermaidGenerator } from "../logic/EnhancedMermaidGenerator";
-import { getComplexityConfig } from "../logic/utils/ComplexityConfig";
+import {
+  ComplexityConfiguration, // <-- Import ComplexityConfiguration
+  getComplexityConfig,
+} from "../logic/utils/ComplexityConfig";
 import { LLMManager } from "../logic/llm/LLMManager";
 import { getExtensionContext } from "../logic/llm/LLMContext";
 import { EnvironmentDetector } from "../logic/utils/EnvironmentDetector";
@@ -10,7 +13,7 @@ import { EnvironmentDetector } from "../logic/utils/EnvironmentDetector";
 const MERMAID_VERSION = "11.8.0";
 const SVG_PAN_ZOOM_VERSION = "3.6.1";
 
-// Define specific types for messages from the webview to avoid `any`
+// ... (Your existing message types: HighlightCodeMessage, etc.)
 export type HighlightCodeMessage = {
   command: "highlightCode";
   payload: { start: number; end: number };
@@ -62,6 +65,7 @@ export type WebviewMessage =
   | DisableLLMLabelsMessage
   | SetupLLMMessage;
 
+
 export interface FlowchartViewContext {
   isPanel: boolean;
   showPanelButton: boolean;
@@ -84,10 +88,22 @@ export abstract class BaseFlowchartProvider {
   protected _mermaidCodeLLM?: string;
   private _cachedClickHandlers?: { source: string; lines: string[] };
 
+  // --- ADDED FOR INLINE METRICS ---
+  private complexityConfig: ComplexityConfiguration;
+  private complexityDecorationType: vscode.TextEditorDecorationType;
+  private activeEditorForDecoration: vscode.TextEditor | undefined;
+  // --- END ADDED ---
+
   constructor(protected readonly _extensionUri: vscode.Uri) {
     // Detect environment and apply any necessary compatibility fixes
     this.initializeEnvironment();
-    
+
+    // --- ADDED/UPDATED FOR INLINE METRICS ---
+    this.complexityConfig = getComplexityConfig();
+    this.complexityDecorationType = this.createDecorationType();
+    this.activeEditorForDecoration = vscode.window.activeTextEditor;
+    // --- END ADDED/UPDATED ---
+
     // Listen for configuration changes to update themes
     this._disposables.push(
       vscode.workspace.onDidChangeConfiguration((e) => {
@@ -95,10 +111,24 @@ export abstract class BaseFlowchartProvider {
           // Refresh the current view when theme changes
           this.updateView(vscode.window.activeTextEditor);
         }
+
+        // --- ADDED FOR INLINE METRICS ---
+        if (e.affectsConfiguration("visor.complexity")) {
+          this.complexityConfig = getComplexityConfig();
+          // Re-create decoration to apply new styles
+          if (this.complexityDecorationType) {
+            this.complexityDecorationType.dispose();
+          }
+          this.complexityDecorationType = this.createDecorationType();
+          // Re-trigger an update to show/hide decoration
+          this.forceUpdateView(vscode.window.activeTextEditor);
+        }
+        // --- END ADDED ---
       })
     );
   }
 
+  // ... (initializeEnvironment method is unchanged)
   /**
    * Initialize environment-specific settings and compatibility fixes
    */
@@ -129,6 +159,117 @@ export abstract class BaseFlowchartProvider {
   protected abstract setWebviewHtml(html: string): void;
   protected abstract getViewContext(): FlowchartViewContext;
 
+  // --- START: ADDED HELPER METHODS FOR INLINE METRICS ---
+  
+  /**
+   * Creates the decoration type for inline complexity metrics.
+   */
+  private createDecorationType(): vscode.TextEditorDecorationType {
+    return vscode.window.createTextEditorDecorationType({
+      after: {
+        margin: "0 0 0 1.5em", // Add some space from the code
+        color: new vscode.ThemeColor("editorCodeLens.foreground"),
+        fontStyle: "italic",
+      },
+      isWholeLine: true,
+    });
+  }
+
+  /**
+   * Clears any active complexity decorations from the editor.
+   */
+  private clearComplexityDecoration(editor?: vscode.TextEditor) {
+    const editorToClear = editor || this.activeEditorForDecoration;
+    if (editorToClear && this.complexityDecorationType) {
+      // Check if editor is disposed
+      try {
+        editorToClear.setDecorations(this.complexityDecorationType, []);
+      } catch (e) {
+        console.warn("Visor: Failed to clear decorations, editor might be disposed.");
+      }
+    }
+  }
+
+  /**
+   * Applies a new complexity decoration based on the FlowchartIR.
+   */
+  private updateComplexityDecoration(
+    editor: vscode.TextEditor,
+    ir: FlowchartIR
+  ) {
+    // 1. Clear any old decorations
+    this.clearComplexityDecoration(editor);
+    this.activeEditorForDecoration = editor; // Track for clearing later
+
+    // 2. Check if feature is enabled and data exists
+    if (
+      !this.complexityConfig.enabled ||
+      !this.complexityConfig.displayInline ||
+      !ir.functionComplexity ||
+      !ir.functionRange
+    ) {
+      return;
+    }
+
+    const { cyclomaticComplexity, rating, description } = ir.functionComplexity;
+    const { start } = ir.functionRange;
+
+    // 3. Get the correct indicator icon
+    let indicator = "";
+    switch (rating) {
+      case "low":
+        indicator = this.complexityConfig.indicators.low;
+        break;
+      case "medium":
+        indicator = this.complexityConfig.indicators.medium;
+        break;
+      case "high":
+        indicator = this.complexityConfig.indicators.high;
+        break;
+      case "very-high":
+        indicator = this.complexityConfig.indicators.veryHigh;
+        break;
+    }
+
+    // 4. Create the decoration text and range
+    const contentText = ` ${indicator} Cyclomatic Complexity: ${cyclomaticComplexity} (${rating})`;
+
+    try {
+      // Get the line where the function starts
+      const startPosition = editor.document.positionAt(start);
+      const line = editor.document.lineAt(startPosition.line);
+
+      // Place the decoration at the end of that line
+      const decorationRange = new vscode.Range(
+        startPosition.line,
+        line.range.end.character,
+        startPosition.line,
+        line.range.end.character
+      );
+
+      const decoration: vscode.DecorationOptions = {
+        range: decorationRange,
+        hoverMessage: description, // Add hover message
+        renderOptions: {
+          after: {
+            contentText: contentText,
+            // Use the configured colors
+            // *** THIS IS THE FIX: Map 'very-high' to 'veryHigh' ***
+            color: this.complexityConfig.colors[rating === "very-high" ? "veryHigh" : rating],
+          },
+        },
+      };
+
+      // 5. Apply the decoration
+      editor.setDecorations(this.complexityDecorationType, [decoration]);
+    } catch (e) {
+      console.error("Visor: Error applying decoration", e);
+      // This can happen if the document changes while applying
+    }
+  }
+
+  // --- END: ADDED HELPER METHODS ---
+
   /**
    * Set up event listeners for editor changes and selection changes
    */
@@ -141,6 +282,10 @@ export abstract class BaseFlowchartProvider {
     // Listen for changes to the active editor
     vscode.window.onDidChangeActiveTextEditor(
       async (editor) => {
+        // --- ADDED ---
+        this.clearComplexityDecoration(this.activeEditorForDecoration);
+        this.activeEditorForDecoration = editor;
+        // --- END ADDED ---
         await this.updateView(editor);
       },
       null,
@@ -190,12 +335,23 @@ export abstract class BaseFlowchartProvider {
       this._disposables
     );
 
+    // --- ADDED ---
+    // Clear decoration when a document is closed
+    vscode.workspace.onDidCloseTextDocument(
+      (document) => {
+        if (this.activeEditorForDecoration?.document === document) {
+          this.activeEditorForDecoration = undefined;
+        }
+      },
+      null,
+      this._disposables
+    );
+    // --- END ADDED ---
+
     this._eventListenersSetup = true;
   }
 
-  /**
-   * Handle messages from the webview
-   */
+  // ... (handleWebviewMessage and its helpers are unchanged)
   protected async handleWebviewMessage(message: WebviewMessage): Promise<void> {
     switch (message.command) {
       case "highlightCode": {
@@ -399,6 +555,7 @@ export abstract class BaseFlowchartProvider {
     }
   }
 
+
   /**
    * Highlight a specific node in the flowchart
    */
@@ -448,6 +605,7 @@ export abstract class BaseFlowchartProvider {
     }
 
     if (!editor) {
+      this.clearComplexityDecoration(); // <-- ADDED
       this.setWebviewHtml(
         this.getLoadingHtml("Please open a file to see the flowchart.")
       );
@@ -499,6 +657,11 @@ export abstract class BaseFlowchartProvider {
         this._currentFunctionRange = undefined;
       }
 
+      // --- ADDED ---
+      // Apply the inline complexity decoration
+      this.updateComplexityDecoration(editor, flowchartIR);
+      // --- END ADDED ---
+
       // Generate Mermaid diagram from FlowchartIR with enhanced styling
       const vsCodeTheme =
         vscode.window.activeColorTheme.kind === vscode.ColorThemeKind.Dark
@@ -520,10 +683,10 @@ export abstract class BaseFlowchartProvider {
       this._mermaidCodeOriginal = mermaidCode;
       this._mermaidCodeLLM = undefined;
       // Only pass complexity info if it's enabled and should be displayed in panel
-      const complexityConfig = getComplexityConfig();
+      const complexityConfig = getComplexityConfig(); // Already have this in this.complexityConfig
       const complexityToDisplay =
-        complexityConfig.enabled &&
-        complexityConfig.displayInPanel &&
+        this.complexityConfig.enabled &&
+        this.complexityConfig.displayInPanel &&
         flowchartIR.functionComplexity
           ? flowchartIR.functionComplexity
           : undefined;
@@ -540,6 +703,7 @@ export abstract class BaseFlowchartProvider {
       this.highlightNode(entry ? entry.nodeId : null);
 
     } catch (error) {
+      this.clearComplexityDecoration(editor); // <-- ADDED
       console.error("Flowchart generation failed:", error);
       const errorMessage =
         error instanceof Error ? error.message : "An unknown error occurred";
@@ -585,6 +749,8 @@ export abstract class BaseFlowchartProvider {
     return false;
   }
 
+  // ... (getWebviewContent and its helpers getStylesForControls, getHtmlForControls, getLoadingHtml, getNonce are unchanged)
+  
   /**
    * Generates the complete HTML content for the webview panel.
    */
@@ -604,7 +770,8 @@ export abstract class BaseFlowchartProvider {
         : "default";
 
     const context = this.getViewContext();
-    const complexityConfig = getComplexityConfig();
+    // Use the class property instead of calling getComplexityConfig() again
+    const complexityConfig = this.complexityConfig; 
 
     const llm = llmAvailability || { enabled: false, provider: "openai", model: "" };
     return `<!DOCTYPE html>
@@ -1334,10 +1501,18 @@ export abstract class BaseFlowchartProvider {
     return text;
   }
 
+
   /**
    * Cleans up disposables when the provider is disposed.
    */
   public dispose(): void {
+    // --- ADDED ---
+    this.clearComplexityDecoration();
+    if (this.complexityDecorationType) {
+      this.complexityDecorationType.dispose();
+    }
+    // --- END ADDED ---
+
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
     }

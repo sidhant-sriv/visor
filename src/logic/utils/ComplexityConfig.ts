@@ -7,6 +7,7 @@ export interface ComplexityConfiguration {
   enabled: boolean;
   displayInNodes: boolean;
   displayInPanel: boolean;
+  displayInline: boolean; // <-- ADDED
   indicators: {
     low: string;
     medium: string;
@@ -33,8 +34,9 @@ export const DEFAULT_COMPLEXITY_CONFIG: ComplexityConfiguration = {
   enabled: true,
   displayInNodes: true,
   displayInPanel: true,
+  displayInline: true, // <-- ADDED
   indicators: {
-    low: "",
+    low: "🟢", // <-- UPDATED
     medium: "⚠️",
     high: "🔴",
     veryHigh: "🚨",
@@ -69,7 +71,12 @@ export function getComplexityConfig(): ComplexityConfiguration {
       "displayInPanel",
       DEFAULT_COMPLEXITY_CONFIG.displayInPanel
     ),
-    indicators: DEFAULT_COMPLEXITY_CONFIG.indicators, // Keep defaults for now
+    displayInline: config.get<boolean>( // <-- ADDED
+      "displayInline",
+      DEFAULT_COMPLEXITY_CONFIG.displayInline
+    ),
+    // You could expand this to read from config, but for now defaults are fine
+    indicators: DEFAULT_COMPLEXITY_CONFIG.indicators,
     thresholds: {
       low: config.get<number>(
         "thresholds.low",
@@ -84,7 +91,8 @@ export function getComplexityConfig(): ComplexityConfiguration {
         DEFAULT_COMPLEXITY_CONFIG.thresholds.high
       ),
     },
-    colors: DEFAULT_COMPLEXITY_CONFIG.colors, // Keep defaults for now
+    // You could expand this to read from config
+    colors: DEFAULT_COMPLEXITY_CONFIG.colors,
   };
 }
 
