@@ -34,12 +34,12 @@ export const DEFAULT_COMPLEXITY_CONFIG: ComplexityConfiguration = {
   enabled: true,
   displayInNodes: true,
   displayInPanel: true,
-  displayInline: true, // <-- ADDED
+  displayInline: true, 
   indicators: {
-    low: "🟢", // <-- UPDATED
-    medium: "⚠️",
-    high: "🔴",
-    veryHigh: "🚨",
+    low: "", // <-- UPDATED
+    medium: "",
+    high: "",
+    veryHigh: "",
   },
   thresholds: {
     low: 5, // 1-5: Simple, low risk
