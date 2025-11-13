@@ -88,21 +88,17 @@ export abstract class BaseFlowchartProvider {
   protected _mermaidCodeLLM?: string;
   private _cachedClickHandlers?: { source: string; lines: string[] };
 
-  // --- ADDED FOR INLINE METRICS ---
   private complexityConfig: ComplexityConfiguration;
   private complexityDecorationType: vscode.TextEditorDecorationType;
   private activeEditorForDecoration: vscode.TextEditor | undefined;
-  // --- END ADDED ---
 
   constructor(protected readonly _extensionUri: vscode.Uri) {
     // Detect environment and apply any necessary compatibility fixes
     this.initializeEnvironment();
 
-    // --- ADDED/UPDATED FOR INLINE METRICS ---
     this.complexityConfig = getComplexityConfig();
     this.complexityDecorationType = this.createDecorationType();
     this.activeEditorForDecoration = vscode.window.activeTextEditor;
-    // --- END ADDED/UPDATED ---
 
     // Listen for configuration changes to update themes
     this._disposables.push(
@@ -112,7 +108,6 @@ export abstract class BaseFlowchartProvider {
           this.updateView(vscode.window.activeTextEditor);
         }
 
-        // --- ADDED FOR INLINE METRICS ---
         if (e.affectsConfiguration("visor.complexity")) {
           this.complexityConfig = getComplexityConfig();
           // Re-create decoration to apply new styles
@@ -123,7 +118,6 @@ export abstract class BaseFlowchartProvider {
           // Re-trigger an update to show/hide decoration
           this.forceUpdateView(vscode.window.activeTextEditor);
         }
-        // --- END ADDED ---
       })
     );
   }
@@ -159,7 +153,6 @@ export abstract class BaseFlowchartProvider {
   protected abstract setWebviewHtml(html: string): void;
   protected abstract getViewContext(): FlowchartViewContext;
 
-  // --- START: ADDED HELPER METHODS FOR INLINE METRICS ---
   
   /**
    * Creates the decoration type for inline complexity metrics.
@@ -212,7 +205,11 @@ export abstract class BaseFlowchartProvider {
     }
 
     const { cyclomaticComplexity, rating, description } = ir.functionComplexity;
-    const { start } = ir.functionRange;
+    
+    // *** MODIFICATION START ***
+    // We need both start and end from the function range
+    const { start, end } = ir.functionRange;
+    // *** MODIFICATION END ***
 
     // 3. Get the correct indicator icon
     let indicator = "";
@@ -232,11 +229,18 @@ export abstract class BaseFlowchartProvider {
     }
 
     // 4. Create the decoration text and range
-    const contentText = ` ${indicator} Cyclomatic Complexity: ${cyclomaticComplexity} (${rating})`;
-
     try {
-      // Get the line where the function starts
+      // *** MODIFICATION START ***
+      // Calculate LOC
       const startPosition = editor.document.positionAt(start);
+      const endPosition = editor.document.positionAt(end);
+      const linesOfCode = endPosition.line - startPosition.line + 1;
+
+      // Add LOC to the content text
+      const contentText = ` ${indicator} Cyclomatic Complexity: ${cyclomaticComplexity} (${rating}) | Lines: ${linesOfCode}`;
+      // *** MODIFICATION END ***
+
+      // Get the line where the function starts
       const line = editor.document.lineAt(startPosition.line);
 
       // Place the decoration at the end of that line
@@ -252,7 +256,7 @@ export abstract class BaseFlowchartProvider {
         hoverMessage: description, // Add hover message
         renderOptions: {
           after: {
-            contentText: contentText,
+            contentText: contentText, // Use the new text
             // Use the configured colors
             // *** THIS IS THE FIX: Map 'very-high' to 'veryHigh' ***
             color: this.complexityConfig.colors[rating === "very-high" ? "veryHigh" : rating],
@@ -268,7 +272,6 @@ export abstract class BaseFlowchartProvider {
     }
   }
 
-  // --- END: ADDED HELPER METHODS ---
 
   /**
    * Set up event listeners for editor changes and selection changes
@@ -282,10 +285,8 @@ export abstract class BaseFlowchartProvider {
     // Listen for changes to the active editor
     vscode.window.onDidChangeActiveTextEditor(
       async (editor) => {
-        // --- ADDED ---
         this.clearComplexityDecoration(this.activeEditorForDecoration);
         this.activeEditorForDecoration = editor;
-        // --- END ADDED ---
         await this.updateView(editor);
       },
       null,
@@ -335,7 +336,6 @@ export abstract class BaseFlowchartProvider {
       this._disposables
     );
 
-    // --- ADDED ---
     // Clear decoration when a document is closed
     vscode.workspace.onDidCloseTextDocument(
       (document) => {
@@ -346,7 +346,6 @@ export abstract class BaseFlowchartProvider {
       null,
       this._disposables
     );
-    // --- END ADDED ---
 
     this._eventListenersSetup = true;
   }
@@ -605,7 +604,7 @@ export abstract class BaseFlowchartProvider {
     }
 
     if (!editor) {
-      this.clearComplexityDecoration(); // <-- ADDED
+      this.clearComplexityDecoration(); 
       this.setWebviewHtml(
         this.getLoadingHtml("Please open a file to see the flowchart.")
       );
@@ -657,10 +656,8 @@ export abstract class BaseFlowchartProvider {
         this._currentFunctionRange = undefined;
       }
 
-      // --- ADDED ---
       // Apply the inline complexity decoration
       this.updateComplexityDecoration(editor, flowchartIR);
-      // --- END ADDED ---
 
       // Generate Mermaid diagram from FlowchartIR with enhanced styling
       const vsCodeTheme =
@@ -703,7 +700,7 @@ export abstract class BaseFlowchartProvider {
       this.highlightNode(entry ? entry.nodeId : null);
 
     } catch (error) {
-      this.clearComplexityDecoration(editor); // <-- ADDED
+      this.clearComplexityDecoration(editor); 
       console.error("Flowchart generation failed:", error);
       const errorMessage =
         error instanceof Error ? error.message : "An unknown error occurred";
@@ -1506,12 +1503,10 @@ export abstract class BaseFlowchartProvider {
    * Cleans up disposables when the provider is disposed.
    */
   public dispose(): void {
-    // --- ADDED ---
     this.clearComplexityDecoration();
     if (this.complexityDecorationType) {
       this.complexityDecorationType.dispose();
     }
-    // --- END ADDED ---
 
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
