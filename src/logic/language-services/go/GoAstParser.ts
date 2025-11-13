@@ -91,7 +91,16 @@ export class GoAstParser extends AbstractParser {
     this.locationMap.push({ start: targetNode.startIndex, end: targetNode.endIndex, nodeId: exitId });
 
     if (!body) {
-        const ir: FlowchartIR = { nodes, edges: [{ from: entryId, to: exitId }], entryNodeId: entryId, exitNodeId: exitId, locationMap: this.locationMap, title };
+        const ir: FlowchartIR = {
+            nodes,
+            edges: [{ from: entryId, to: exitId }],
+            entryNodeId: entryId,
+            exitNodeId: exitId,
+            locationMap: this.locationMap,
+            title,
+            // --- FIX: ADDED functionRange ---
+            functionRange: { start: targetNode.startIndex, end: targetNode.endIndex },
+        };
         this.addFunctionComplexity(ir, targetNode);
         return ir;
     }
@@ -109,7 +118,16 @@ export class GoAstParser extends AbstractParser {
     const validEdges = edges.filter((e) => idSet.has(e.from) && idSet.has(e.to));
     const filteredLocationMap = this.locationMap.filter((lm) => idSet.has(lm.nodeId));
     
-    const ir: FlowchartIR = { nodes, edges: validEdges, entryNodeId: entryId, exitNodeId: exitId, locationMap: filteredLocationMap, title };
+    const ir: FlowchartIR = {
+        nodes,
+        edges: validEdges,
+        entryNodeId: entryId,
+        exitNodeId: exitId,
+        locationMap: filteredLocationMap,
+        title,
+        // --- FIX: ADDED functionRange ---
+        functionRange: { start: targetNode.startIndex, end: targetNode.endIndex },
+    };
     this.addFunctionComplexity(ir, targetNode);
     return ir;
   }
