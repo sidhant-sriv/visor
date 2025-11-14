@@ -71,6 +71,13 @@ export interface LocationMapEntry {
   nodeId: string;
 }
 
+export interface AnimationPath {
+  id: string;
+  nodes: string[];
+  edges: string[];
+  description: string;
+}
+
 export interface FlowchartIR {
   nodes: FlowchartNode[];
   edges: FlowchartEdge[];
@@ -84,4 +91,5 @@ export interface FlowchartIR {
     rating: "low" | "medium" | "high" | "very-high";
     description: string;
   };
+  animationPaths?: AnimationPath[];
 }
