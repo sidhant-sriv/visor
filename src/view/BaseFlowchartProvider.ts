@@ -55,6 +55,21 @@ export type SetupLLMMessage = {
   payload: {};
 };
 
+export type StartAnimationMessage = {
+  command: "startAnimation";
+  payload: {};
+};
+
+export type StopAnimationMessage = {
+  command: "stopAnimation";
+  payload: {};
+};
+
+export type SwitchPathMessage = {
+  command: "switchPath";
+  payload: { pathIndex: number };
+};
+
 export type WebviewMessage =
   | HighlightCodeMessage
   | ExportMessage
@@ -63,7 +78,10 @@ export type WebviewMessage =
   | CopyMermaidMessage
   | RequestLLMLabelsMessage
   | DisableLLMLabelsMessage
-  | SetupLLMMessage;
+  | SetupLLMMessage
+  | StartAnimationMessage
+  | StopAnimationMessage
+  | SwitchPathMessage;
 
 
 export interface FlowchartViewContext {
@@ -417,6 +435,33 @@ export abstract class BaseFlowchartProvider {
         }
         break;
       }
+
+      case "startAnimation": {
+        console.log("Visor Animation: startAnimation received");
+        const webview = this.getWebview();
+        if (webview) {
+          webview.postMessage({ command: "startAnimation", payload: {} });
+        }
+        break;
+      }
+
+      case "stopAnimation": {
+        console.log("Visor Animation: stopAnimation received");
+        const webview = this.getWebview();
+        if (webview) {
+          webview.postMessage({ command: "stopAnimation", payload: {} });
+        }
+        break;
+      }
+
+      case "switchPath": {
+        console.log("Visor Animation: switchPath received", message.payload.pathIndex);
+        const webview = this.getWebview();
+        if (webview) {
+          webview.postMessage({ command: "switchPath", payload: { pathIndex: message.payload.pathIndex } });
+        }
+        break;
+      }
     }
   }
 
@@ -633,6 +678,13 @@ export abstract class BaseFlowchartProvider {
     }
 
     this._isUpdating = true;
+    
+    // Stop any running animation when updating view
+    const animationWebview = this.getWebview();
+    if (animationWebview) {
+      animationWebview.postMessage({ command: "stopAnimation", payload: {} });
+    }
+    
     this.setWebviewHtml(this.getLoadingHtml("Generating flowchart..."));
 
     try {
@@ -867,6 +919,41 @@ export abstract class BaseFlowchartProvider {
                 fill: var(--hover-edge-color) !important;
                 font-weight: bold !important;
             }
+
+            /* Animation styles */
+            .animated-current > rect,
+            .animated-current > polygon,
+            .animated-current > circle,
+            .animated-current > path {
+                stroke: #00ff00 !important;
+                stroke-width: 5px !important;
+                filter: drop-shadow(0 0 10px #00ff00);
+                animation: pulse-glow 1s ease-in-out infinite alternate;
+            }
+
+            .animated-visited > rect,
+            .animated-visited > polygon,
+            .animated-visited > circle,
+            .animated-visited > path {
+                fill: rgba(0, 255, 0, 0.2) !important;
+                stroke: #00aa00 !important;
+                stroke-width: 2px !important;
+            }
+
+            .animated-edge {
+                stroke: #00ff00 !important;
+                stroke-width: 4px !important;
+                filter: drop-shadow(0 0 4px #00ff00);
+            }
+
+            @keyframes pulse-glow {
+                from {
+                    filter: drop-shadow(0 0 10px #00ff00);
+                }
+                to {
+                    filter: drop-shadow(0 0 20px #00ff00);
+                }
+            }
             
             #mermaid-source { display: none; }
 
@@ -885,6 +972,17 @@ export abstract class BaseFlowchartProvider {
             const vscode = acquireVsCodeApi();
             const INITIAL_LLM = ${JSON.stringify(llm)};
             let isLLMEnabled = false;
+
+            // Animation state management
+            let animationState = {
+                isAnimating: false,
+                currentPathIndex: 0,
+                currentStepIndex: 0,
+                animationTimer: null,
+                paths: [],
+                visitedNodes: new Set(),
+                visitedEdges: new Set()
+            };
 
             function onNodeClick(start, end) {
                 vscode.postMessage({
@@ -964,6 +1062,18 @@ export abstract class BaseFlowchartProvider {
                     }
                     case 'llmAvailability': {
                         setLLMButton(message.payload);
+                        break;
+                    }
+                    case 'startAnimation': {
+                        startAnimation();
+                        break;
+                    }
+                    case 'stopAnimation': {
+                        stopAnimation();
+                        break;
+                    }
+                    case 'switchPath': {
+                        switchAnimationPath(message.payload.pathIndex);
                         break;
                     }
                     case 'exportError':
@@ -1139,12 +1249,244 @@ export abstract class BaseFlowchartProvider {
                     const svgElement = document.querySelector('.mermaid svg');
                     if (svgElement) {
                         setupInteractions(svgElement);
+                        // Initialize animation paths after SVG is ready
+                        animationState.paths = parseAnimationPaths();
+                        updateAnimationUI(false);
                     } else {
                         console.error('[Visor] SVG element for flowchart not found after initial load!');
                     }
                 }, 200);
 
             });
+
+            // Cleanup animation when page unloads
+            window.addEventListener('beforeunload', () => {
+                stopAnimation();
+            });
+
+            // Animation functions
+            function parseAnimationPaths() {
+                const mermaidSource = document.getElementById('mermaid-source').textContent;
+                const paths = [];
+                const pathDescriptions = new Map();
+                
+                const lines = mermaidSource.split('\\n');
+                for (const line of lines) {
+                    const pathMatch = line.match(/%% ANIM_PATH:([^:]+):(.+)/);
+                    if (pathMatch) {
+                        const [, pathId, nodeIds] = pathMatch;
+                        paths.push({
+                            id: pathId,
+                            nodes: nodeIds.split(',').filter(id => id.trim())
+                        });
+                    }
+                    
+                    const descMatch = line.match(/%% ANIM_DESC:([^:]+):(.+)/);
+                    if (descMatch) {
+                        const [, pathId, description] = descMatch;
+                        pathDescriptions.set(pathId, description);
+                    }
+                }
+                
+                // Add descriptions to paths
+                return paths.map(path => ({
+                    ...path,
+                    description: pathDescriptions.get(path.id) || \`Path \${path.id}\`
+                }));
+            }
+
+            function startAnimation() {
+                if (animationState.isAnimating) {
+                    stopAnimation();
+                    return;
+                }
+                
+                // Parse paths from mermaid source
+                animationState.paths = parseAnimationPaths();
+                
+                if (animationState.paths.length === 0) {
+                    console.warn('No animation paths found');
+                    return;
+                }
+                
+                // Reset state
+                animationState.currentStepIndex = 0;
+                animationState.visitedNodes.clear();
+                animationState.visitedEdges.clear();
+                
+                // Clear any existing animation classes
+                clearAnimationClasses();
+                
+                // Update UI
+                updateAnimationUI(true);
+                
+                // Start animation loop
+                animationState.isAnimating = true;
+                animationState.animationTimer = setInterval(animateStep, 800);
+                
+                console.log('Animation started with', animationState.paths.length, 'paths');
+            }
+
+            function stopAnimation() {
+                if (!animationState.isAnimating) {
+                    return;
+                }
+                
+                animationState.isAnimating = false;
+                
+                if (animationState.animationTimer) {
+                    clearInterval(animationState.animationTimer);
+                    animationState.animationTimer = null;
+                }
+                
+                // Clear animation classes
+                clearAnimationClasses();
+                
+                // Update UI
+                updateAnimationUI(false);
+                
+                console.log('Animation stopped');
+            }
+
+            function switchAnimationPath(pathIndex) {
+                if (pathIndex < 0 || pathIndex >= animationState.paths.length) {
+                    console.warn('Invalid path index:', pathIndex);
+                    return;
+                }
+                
+                animationState.currentPathIndex = pathIndex;
+                animationState.currentStepIndex = 0;
+                animationState.visitedNodes.clear();
+                animationState.visitedEdges.clear();
+                
+                // Clear animation classes
+                clearAnimationClasses();
+                
+                // Update path selector button
+                updatePathSelector();
+                
+                console.log('Switched to path', pathIndex);
+            }
+
+            function animateStep() {
+                if (!animationState.isAnimating || animationState.paths.length === 0) {
+                    return;
+                }
+                
+                const currentPath = animationState.paths[animationState.currentPathIndex];
+                const currentNodeId = currentPath.nodes[animationState.currentStepIndex];
+                
+                if (!currentNodeId) {
+                    // End of current path, restart
+                    animationState.currentStepIndex = 0;
+                    animationState.visitedNodes.clear();
+                    animationState.visitedEdges.clear();
+                    clearAnimationClasses();
+                    return;
+                }
+                
+                // Highlight current node
+                highlightCurrentNode(currentNodeId);
+                
+                // Mark as visited
+                animationState.visitedNodes.add(currentNodeId);
+                
+                // Highlight edge if not the first node
+                if (animationState.currentStepIndex > 0) {
+                    const prevNodeId = currentPath.nodes[animationState.currentStepIndex - 1];
+                    highlightEdge(prevNodeId, currentNodeId);
+                }
+                
+                // Move to next step
+                animationState.currentStepIndex++;
+            }
+
+            function highlightCurrentNode(nodeId) {
+                // Remove previous current highlight
+                document.querySelectorAll('.animated-current').forEach(el => {
+                    el.classList.remove('animated-current');
+                });
+                
+                // Add current highlight
+                const nodeElement = document.getElementById(nodeId);
+                if (nodeElement) {
+                    nodeElement.classList.add('animated-current');
+                }
+                
+                // Add visited highlight to all previously visited nodes
+                animationState.visitedNodes.forEach(visitedNodeId => {
+                    if (visitedNodeId !== nodeId) {
+                        const visitedElement = document.getElementById(visitedNodeId);
+                        if (visitedElement) {
+                            visitedElement.classList.add('animated-visited');
+                        }
+                    }
+                });
+            }
+
+            function highlightEdge(fromNodeId, toNodeId) {
+                const edgeId = \`\${fromNodeId}_\${toNodeId}\`;
+                animationState.visitedEdges.add(edgeId);
+                
+                // Try to find the edge element
+                const edgePatterns = [
+                    \`[id*="L_\${fromNodeId}_\${toNodeId}_"]\`,
+                    \`[id*="\${fromNodeId}_\${toNodeId}"]\`,
+                    \`[id*="edge_\${fromNodeId}_\${toNodeId}"]\`
+                ];
+                
+                for (const pattern of edgePatterns) {
+                    const edgeElement = document.querySelector(pattern);
+                    if (edgeElement) {
+                        edgeElement.classList.add('animated-edge');
+                        break;
+                    }
+                }
+            }
+
+            function clearAnimationClasses() {
+                document.querySelectorAll('.animated-current, .animated-visited, .animated-edge').forEach(el => {
+                    el.classList.remove('animated-current', 'animated-visited', 'animated-edge');
+                });
+            }
+
+            function updateAnimationUI(isAnimating) {
+                const animateToggle = document.getElementById('animate-toggle');
+                if (animateToggle) {
+                    if (isAnimating) {
+                        animateToggle.textContent = '⏹️ Stop';
+                        animateToggle.classList.add('animating');
+                        animateToggle.title = 'Stop animation';
+                    } else {
+                        animateToggle.textContent = '🎬 Animate';
+                        animateToggle.classList.remove('animating');
+                        animateToggle.title = 'Start animation';
+                    }
+                }
+                
+                // Show/hide path selector if multiple paths exist
+                const pathSelector = document.getElementById('path-selector');
+                if (pathSelector) {
+                    if (animationState.paths.length > 1) {
+                        pathSelector.style.display = 'inline-block';
+                        updatePathSelector();
+                    } else {
+                        pathSelector.style.display = 'none';
+                    }
+                }
+            }
+
+            function updatePathSelector() {
+                const pathSelector = document.getElementById('path-selector');
+                if (pathSelector && animationState.paths.length > 0) {
+                    const currentPath = animationState.paths[animationState.currentPathIndex];
+                    const shortDesc = currentPath.description.length > 15 
+                        ? currentPath.description.substring(0, 15) + '...'
+                        : currentPath.description;
+                    pathSelector.textContent = \`Path \${animationState.currentPathIndex + 1}\`;
+                    pathSelector.title = currentPath.description;
+                }
+            }
 
             function setupButtonHandlers() {
                 const copyBtn = document.getElementById('copy-mermaid');
@@ -1164,6 +1506,26 @@ export abstract class BaseFlowchartProvider {
                 if (openPanelBtn) {
                     openPanelBtn.addEventListener('click', () => {
                         vscode.postMessage({ command: 'openInPanel', payload: {} });
+                    });
+                }
+
+                // Animation button handlers
+                const animateToggle = document.getElementById('animate-toggle');
+                if (animateToggle) {
+                    animateToggle.addEventListener('click', () => {
+                        if (animationState.isAnimating) {
+                            vscode.postMessage({ command: 'stopAnimation', payload: {} });
+                        } else {
+                            vscode.postMessage({ command: 'startAnimation', payload: {} });
+                        }
+                    });
+                }
+
+                const pathSelector = document.getElementById('path-selector');
+                if (pathSelector) {
+                    pathSelector.addEventListener('click', () => {
+                        const nextPathIndex = (animationState.currentPathIndex + 1) % animationState.paths.length;
+                        vscode.postMessage({ command: 'switchPath', payload: { pathIndex: nextPathIndex } });
                     });
                 }
 
@@ -1364,6 +1726,32 @@ export abstract class BaseFlowchartProvider {
         }
         #llm-toggle[disabled] { opacity: 0.6; cursor: default; }
 
+        /* Animation controls */
+        #animate-toggle {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: 1px solid var(--vscode-button-border, transparent);
+            padding: 6px 10px; cursor: pointer; border-radius: 4px; font-size: 11px;
+        }
+        #animate-toggle:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+        #animate-toggle.animating {
+            background-color: #00ff00;
+            color: #000000;
+        }
+
+        #path-selector {
+            background-color: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            border: 1px solid var(--vscode-button-border, transparent);
+            padding: 6px 10px; cursor: pointer; border-radius: 4px; font-size: 11px;
+            margin-left: 5px;
+        }
+        #path-selector:hover {
+            background-color: var(--vscode-button-hoverBackground);
+        }
+
         /* Container for complexity panel and toggle button, positioned bottom-left */
         #complexity-container {
             position: fixed; bottom: 10px; left: 10px; z-index: 1001;
@@ -1418,6 +1806,8 @@ export abstract class BaseFlowchartProvider {
                 <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
                 <button id="export-svg" title="Export as SVG">💾 SVG</button>
                 <button id="export-png" title="Export as PNG">🖼️ PNG</button>
+                <button id="animate-toggle" title="Toggle animation">🎬 Animate</button>
+                <button id="path-selector" title="Switch execution path" style="display: none;">Path 1</button>
                 <button id="llm-toggle" title="Toggle human-friendly labels"></button>
             </div>
         </div>
@@ -1429,6 +1819,8 @@ export abstract class BaseFlowchartProvider {
             <button id="copy-mermaid" title="Copy Mermaid Code">Copy Code</button>
             <button id="export-svg">Export as SVG</button>
             <button id="export-png">Export as PNG</button>
+            <button id="animate-toggle" title="Toggle animation">🎬 Animate</button>
+            <button id="path-selector" title="Switch execution path" style="display: none;">Path 1</button>
             <button id="llm-toggle" title="Toggle human-friendly labels"></button>
         </div>
         ${
@@ -1517,6 +1909,12 @@ export abstract class BaseFlowchartProvider {
     this._locationMap = [];
     this._currentFunctionRange = undefined;
     this._eventListenersSetup = false;
+
+    // Clean up animation state
+    const disposeWebview = this.getWebview();
+    if (disposeWebview) {
+      disposeWebview.postMessage({ command: "stopAnimation", payload: {} });
+    }
 
     while (this._disposables.length) {
       const x = this._disposables.pop();
